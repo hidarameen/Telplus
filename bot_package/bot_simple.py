@@ -3097,7 +3097,7 @@ class SimpleTelegramBot:
             # Group buttons by row
             rows = {}
             for button in buttons_data:
-                row_num = button['row_num']
+                row_num = button['row_position']
                 if row_num not in rows:
                     rows[row_num] = []
                 rows[row_num].append(button)
@@ -3106,12 +3106,9 @@ class SimpleTelegramBot:
             inline_buttons = []
             for row_num in sorted(rows.keys()):
                 row_buttons = []
-                for button in sorted(rows[row_num], key=lambda x: x['col_num']):
-                    if button['button_type'] == 'url':
-                        row_buttons.append(Button.url(button['button_text'], button['button_url']))
-                    elif button['button_type'] == 'callback':
-                        row_buttons.append(Button.inline(button['button_text'], button['button_data']))
-                    # Add other button types as needed
+                for button in sorted(rows[row_num], key=lambda x: x['col_position']):
+                    # All buttons from database are URL buttons
+                    row_buttons.append(Button.url(button['button_text'], button['button_url']))
                 
                 if row_buttons:
                     inline_buttons.append(row_buttons)
