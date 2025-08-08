@@ -205,7 +205,15 @@ class SimpleTelegramBot:
                 await self.handle_task_message(event, state_data)
                 return
             elif state in ['adding_source', 'adding_target']:
-                await self.handle_add_source_target(event, state_data)
+                try:
+                    await self.handle_add_source_target(event, state_data)
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة إضافة مصدر/هدف للمستخدم {user_id}: {e}")
+                    await event.respond(
+                        "❌ حدث خطأ أثناء إضافة المصدر/الهدف\n\n"
+                        "حاول مرة أخرى أو اضغط /start للعودة للقائمة الرئيسية"
+                    )
+                    self.db.clear_conversation_state(user_id)
                 return
 
         # Check if this chat is a target chat for any active forwarding task
@@ -421,10 +429,18 @@ class SimpleTelegramBot:
         """Start adding source to task"""
         user_id = event.sender_id
 
-        # Set conversation state
+        # Set conversation state with proper error handling
         import json
-        data = {'task_id': task_id, 'action': 'add_source'}
-        self.db.set_conversation_state(user_id, 'adding_source', json.dumps(data))
+        try:
+            data = {'task_id': int(task_id), 'action': 'add_source'}
+            data_str = json.dumps(data)
+            self.db.set_conversation_state(user_id, 'adding_source', data_str)
+            
+            logger.info(f"✅ تم حفظ حالة إضافة مصدر للمستخدم {user_id}: {data_str}")
+        except Exception as e:
+            logger.error(f"❌ خطأ في حفظ حالة إضافة مصدر: {e}")
+            await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            return
 
         buttons = [
             [Button.inline("❌ إلغاء", f"manage_sources_{task_id}")]
@@ -445,10 +461,18 @@ class SimpleTelegramBot:
         """Start adding target to task"""
         user_id = event.sender_id
 
-        # Set conversation state
+        # Set conversation state with proper error handling
         import json
-        data = {'task_id': task_id, 'action': 'add_target'}
-        self.db.set_conversation_state(user_id, 'adding_target', json.dumps(data))
+        try:
+            data = {'task_id': int(task_id), 'action': 'add_target'}
+            data_str = json.dumps(data)
+            self.db.set_conversation_state(user_id, 'adding_target', data_str)
+            
+            logger.info(f"✅ تم حفظ حالة إضافة هدف للمستخدم {user_id}: {data_str}")
+        except Exception as e:
+            logger.error(f"❌ خطأ في حفظ حالة إضافة هدف: {e}")
+            await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            return
 
         buttons = [
             [Button.inline("❌ إلغاء", f"manage_targets_{task_id}")]
@@ -873,15 +897,31 @@ class SimpleTelegramBot:
         try:
             import json
             data = json.loads(data_str) if data_str else {}
-        except:
+        except Exception as e:
+            logger.error(f"خطأ في تحليل البيانات: {e}")
             data = {}
 
         task_id = data.get('task_id')
         action = data.get('action')
         chat_input = event.raw_text.strip()
 
+        # Debug logging
+        logger.info(f"🔍 تفاصيل البيانات المستلمة:")
+        logger.info(f"   State: {state}")
+        logger.info(f"   Data string: {data_str}")
+        logger.info(f"   Parsed data: {data}")
+        logger.info(f"   Task ID: {task_id}")
+        logger.info(f"   Action: {action}")
+        logger.info(f"   Chat input: {chat_input}")
+
         if not task_id or not action:
-            await event.respond("❌ خطأ في البيانات، حاول مرة أخرى")
+            await event.respond(
+                "❌ خطأ في البيانات، حاول مرة أخرى\n\n"
+                f"🔍 تفاصيل المشكلة:\n"
+                f"• معرف المهمة: {task_id}\n"
+                f"• الإجراء: {action}\n"
+                f"• الحالة: {state}"
+            )
             self.db.clear_conversation_state(user_id)
             return
 
