@@ -338,10 +338,16 @@ class UserbotService:
                 saved_sessions = cursor.fetchall()
             
             if not saved_sessions:
-                logger.info("📝 لا توجد جلسات محفوظة")
+                logger.warning("📝 لا توجد جلسات محفوظة")
+                logger.warning("⚠️ يجب تسجيل الدخول عبر البوت أولاً لبدء UserBot")
+                logger.warning("💡 استخدم /start في البوت @7959170262 لتسجيل الدخول")
                 return
             
             logger.info(f"📱 تم العثور على {len(saved_sessions)} جلسة محفوظة")
+            
+            # Log detailed session info
+            for user_id, session_string, phone_number in saved_sessions:
+                logger.info(f"👤 المستخدم {user_id} - هاتف: {phone_number}")
             
             # Start userbot for each saved session
             success_count = 0
