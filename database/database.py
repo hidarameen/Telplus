@@ -775,6 +775,22 @@ class Database:
             result = cursor.fetchone()
             return result['id'] if result else None
 
+    def is_word_filter_enabled(self, task_id: int, filter_type: str):
+        """Check if word filter is enabled for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT is_enabled FROM task_word_filters
+                WHERE task_id = ? AND filter_type = ?
+            ''', (task_id, filter_type))
+            
+            result = cursor.fetchone()
+            return bool(result['is_enabled']) if result else False
+
+    def set_word_filter_enabled(self, task_id: int, filter_type: str, is_enabled: bool):
+        """Enable/disable word filter for a task (alias for set_word_filter_status)"""
+        return self.set_word_filter_status(task_id, filter_type, is_enabled)
+
     def get_word_by_id(self, word_id: int):
         """Get word by ID"""
         with self.get_connection() as conn:

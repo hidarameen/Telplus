@@ -199,20 +199,33 @@ class SimpleTelegramBot:
             elif data.startswith("word_filters_"): # Handler for word filters
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.show_word_filters(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_word_filters(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر الكلمات: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_word_filter_"): # Handler for toggling word filter
                 parts = data.split("_")
+                logger.info(f"🔍 Toggle word filter callback: data='{data}', parts={parts}")
                 if len(parts) >= 4:
-                    task_id = int(parts[2])
-                    filter_type = parts[3] # 'whitelist' or 'blacklist'
-                    await self.toggle_word_filter(event, task_id, filter_type)
+                    try:
+                        task_id = int(parts[2])
+                        filter_type = parts[3] # 'whitelist' or 'blacklist'
+                        await self.toggle_word_filter(event, task_id, filter_type)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_words_"): # Handler for managing words in a filter
                 parts = data.split("_")
                 if len(parts) >= 4:
-                    task_id = int(parts[2])
-                    filter_type = parts[3] # 'whitelist' or 'blacklist'
-                    await self.manage_words(event, task_id, filter_type)
+                    try:
+                        task_id = int(parts[2])
+                        filter_type = parts[3] # 'whitelist' or 'blacklist'
+                        await self.manage_words(event, task_id, filter_type)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة الكلمات: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("add_word_"): # Handler for adding a word to a filter
                 parts = data.split("_")
                 if len(parts) >= 5:

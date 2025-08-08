@@ -2,6 +2,9 @@
 
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
+## Recent Changes
+- **August 8, 2025**: Fixed word filter button functionality by adding missing database methods `is_word_filter_enabled` and `set_word_filter_enabled`, and improved error handling for callback parsing
+
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
