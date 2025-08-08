@@ -123,7 +123,11 @@ class Database:
             task_ids = []
             
             for i, source_chat_id in enumerate(source_chat_ids):
-                source_chat_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else None
+                source_chat_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else source_chat_id
+                
+                # Ensure source_chat_name is not None
+                if source_chat_name is None or source_chat_name == '':
+                    source_chat_name = source_chat_id
                 
                 cursor.execute('''
                     INSERT INTO tasks 

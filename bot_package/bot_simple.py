@@ -107,9 +107,13 @@ class SimpleTelegramBot:
             elif data == "back_main":
                 await self.show_main_menu(event)
             elif data == "settings":
-                await self.show_settings(event)
+                await self.show_settings_menu(event)
             elif data == "about":
                 await self.show_about(event)
+            elif data == "cancel_auth":
+                await self.cancel_auth(event)
+            else:
+                await self.handle_task_action(event, data)
         except Exception as e:
             logger.error(f"خطأ في معالجة الاستعلام: {e}")
             await event.answer("❌ حدث خطأ، حاول مرة أخرى")
@@ -347,9 +351,9 @@ class SimpleTelegramBot:
             elif state_info['state'] == 'waiting_phone':
                 await self.handle_phone_input(event, message_text)
             elif state_info['state'] == 'waiting_code':
-                await self.handle_code_input(event, message_text)
+                await self.handle_code_input(event, message_text, state_info['data'])
             elif state_info['state'] == 'waiting_password':
-                await self.handle_password_input(event, message_text)
+                await self.handle_password_input(event, message_text, state_info['data'])
         except Exception as e:
             logger.error(f"خطأ في معالجة رسالة المحادثة: {e}")
             await event.respond("❌ حدث خطأ، حاول مرة أخرى")
@@ -364,8 +368,23 @@ class SimpleTelegramBot:
         if task_name.lower() in ['تخطي', 'skip']:
             task_name = 'مهمة توجيه'
 
-        # Store task name
-        task_data = {'task_name': task_name}
+        # Get existing task data (task name) from previous step
+        state_data = self.db.get_conversation_state(user_id)
+        task_name_stored = 'مهمة توجيه'  # default value
+
+        if state_data and state_data[1]:
+            try:
+                existing_data = json.loads(state_data[1])
+                task_name_stored = existing_data.get('task_name', 'مهمة توجيه')
+            except:
+                pass
+
+        # Store source chat data along with task name
+        task_data = {
+            'task_name': task_name,
+            'source_chat_ids': [],
+            'source_chat_names': []
+        }
         self.db.set_conversation_state(user_id, 'waiting_source_chat', json.dumps(task_data))
 
         buttons = [
@@ -405,10 +424,31 @@ class SimpleTelegramBot:
             )
             return
 
-        # Store source chat data in database
+        # Get existing task data (task name) from previous step
+        state_data = self.db.get_conversation_state(user_id)
+        task_name = 'مهمة توجيه'  # default value
+
+        if state_data and state_data[1]:
+            try:
+                existing_data = json.loads(state_data[1])
+                task_name = existing_data.get('task_name', 'مهمة توجيه')
+            except:
+                pass
+
+        # Ensure source_chat_names has proper values (replace None with proper names)
+        fixed_source_chat_names = []
+        for i, name in enumerate(source_chat_names):
+            if name is None or name == '':
+                # Use the chat_id as name if name is None
+                fixed_source_chat_names.append(source_chat_ids[i])
+            else:
+                fixed_source_chat_names.append(name)
+
+        # Store source chat data along with task name
         task_data = {
+            'task_name': task_name,
             'source_chat_ids': source_chat_ids,
-            'source_chat_names': source_chat_names
+            'source_chat_names': fixed_source_chat_names
         }
         self.db.set_conversation_state(user_id, 'waiting_target_chat', json.dumps(task_data))
 
@@ -417,7 +457,7 @@ class SimpleTelegramBot:
         ]
 
         await event.respond(
-            f"✅ تم تحديد المصادر: {', '.join(source_chat_names or source_chat_ids)}\n\n"
+            f"✅ تم تحديد المصادر: {', '.join(fixed_source_chat_names)}\n\n"
             f"📤 **الخطوة 3: تحديد الوجهة**\n\n"
             f"أرسل معرف أو رابط المجموعة/القناة المراد توجيه الرسائل إليها:\n\n"
             f"أمثلة:\n"
@@ -463,9 +503,18 @@ class SimpleTelegramBot:
         if data:
             try:
                 source_data = json.loads(data)
-                source_chat_ids = source_data['source_chat_ids']
-                source_chat_names = source_data.get('source_chat_names', [None] * len(source_chat_ids))
+                source_chat_ids = source_data.get('source_chat_ids', [])
+                source_chat_names = source_data.get('source_chat_names', [])
                 task_name = source_data.get('task_name', 'مهمة توجيه')
+
+                # Ensure source_chat_names has the same length as source_chat_ids and no None values
+                if len(source_chat_names) < len(source_chat_ids):
+                    source_chat_names.extend([None] * (len(source_chat_ids) - len(source_chat_names)))
+
+                # Replace None values with chat IDs
+                for i, name in enumerate(source_chat_names):
+                    if name is None or name == '':
+                        source_chat_names[i] = source_chat_ids[i]
             except:
                 await event.respond("❌ حدث خطأ في البيانات، يرجى البدء من جديد")
                 return
@@ -526,7 +575,7 @@ class SimpleTelegramBot:
             chat_input_item = chat_input_item.strip()
             if not chat_input_item:
                 continue
-                
+
             if chat_input_item.startswith('@'):
                 # Username format
                 username = chat_input_item[1:] if len(chat_input_item) > 1 else None
@@ -542,17 +591,17 @@ class SimpleTelegramBot:
             elif chat_input_item.startswith('-') and len(chat_input_item) > 1 and chat_input_item[1:].isdigit():
                 # Chat ID format (negative)
                 chat_ids.append(chat_input_item)
-                chat_names.append(None)
+                chat_names.append(None) # Source name is None for chat IDs initially
             else:
                 # Try to parse as numeric ID
                 try:
                     chat_id = int(chat_input_item)
                     chat_ids.append(str(chat_id))
-                    chat_names.append(None)
+                    chat_names.append(None) # Source name is None for chat IDs initially
                 except ValueError:
                     # Invalid format, skip this item
                     continue
-        
+
         # Return None if no valid inputs were found
         if not chat_ids:
             return None, None
@@ -569,7 +618,7 @@ class SimpleTelegramBot:
         }
 
         buttons = [
-            [Button.inline("❌ إلغاء", b"back_main")]
+            [Button.inline("❌ إلغاء", b"cancel_auth")]
         ]
 
         await event.edit(
