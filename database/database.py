@@ -39,6 +39,13 @@ class Database:
                 )
             ''')
 
+            # Add task_name column if it doesn't exist (for existing databases)
+            try:
+                cursor.execute('ALTER TABLE tasks ADD COLUMN task_name TEXT DEFAULT "مهمة توجيه"')
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+
             # User sessions table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS user_sessions (

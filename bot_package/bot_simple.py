@@ -116,15 +116,31 @@ class SimpleTelegramBot:
 
     async def handle_message(self, event):
         """Handle text messages"""
+        # Skip if it's a command
+        if event.text.startswith('/'):
+            return
+
         user_id = event.sender_id
 
-        # Check if user is in conversation state
-        if user_id in self.conversation_states:
-            await self.handle_conversation_message(event)
-        elif event.raw_text.startswith('/'):
-            # Handle commands
-            if event.raw_text == '/start':
-                await self.handle_start(event)
+        # Check if user is in authentication or task creation process
+        state_data = self.db.get_conversation_state(user_id)
+
+        if state_data:
+            state, data = state_data
+
+            # Handle authentication states
+            if state in ['waiting_phone', 'waiting_code', 'waiting_password']:
+                await self.handle_auth_message(event, state_data)
+                return
+
+            # Handle task creation states
+            elif state in ['waiting_task_name', 'waiting_source_chat', 'waiting_target_chat']:
+                await self.handle_task_message(event, state_data)
+                return
+
+        # Default response
+        await event.respond("👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
+
 
     async def show_main_menu(self, event):
         """Show main menu"""
@@ -167,11 +183,13 @@ class SimpleTelegramBot:
         """Start creating new task"""
         user_id = event.sender_id
 
+        # Check if user is authenticated
+        if not self.db.is_user_authenticated(user_id):
+            await event.edit("❌ يجب تسجيل الدخول أولاً لإنشاء المهام")
+            return
+
         # Set conversation state
-        self.conversation_states[user_id] = {
-            'state': 'waiting_source_chat',
-            'data': {}
-        }
+        self.db.set_conversation_state(user_id, 'waiting_task_name')
 
         buttons = [
             [Button.inline("❌ إلغاء", b"manage_tasks")]
@@ -179,19 +197,22 @@ class SimpleTelegramBot:
 
         await event.edit(
             "➕ إنشاء مهمة توجيه جديدة\n\n"
-            "📥 **الخطوة 1: تحديد المصدر**\n\n"
-            "أرسل معرف أو رابط المجموعة/القناة المصدر:\n\n"
-            "أمثلة:\n"
-            "• @channelname\n"
-            "• https://t.me/channelname\n"
-            "• -1001234567890\n\n"
-            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات قراءة الرسائل",
+            "🏷️ **الخطوة 1: تحديد اسم المهمة**\n\n"
+            "أدخل اسماً لهذه المهمة (أو اضغط تخطي لاستخدام اسم افتراضي):\n\n"
+            "• اسم المهمة: (مثال: مهمة متابعة الأخبار)",
             buttons=buttons
         )
+
 
     async def list_tasks(self, event):
         """List user tasks"""
         user_id = event.sender_id
+
+        # Check if user is authenticated
+        if not self.db.is_user_authenticated(user_id):
+            await event.edit("❌ يجب تسجيل الدخول أولاً لعرض المهام")
+            return
+
         tasks = self.db.get_user_tasks(user_id)
 
         if not tasks:
@@ -335,27 +356,59 @@ class SimpleTelegramBot:
             if user_id in self.conversation_states:
                 del self.conversation_states[user_id]
 
+    async def handle_task_name(self, event, task_name):
+        """Handle task name input"""
+        user_id = event.sender_id
+
+        # Use default name if user wants to skip
+        if task_name.lower() in ['تخطي', 'skip']:
+            task_name = 'مهمة توجيه'
+
+        # Store task name
+        task_data = {'task_name': task_name}
+        self.db.set_conversation_state(user_id, 'waiting_source_chat', json.dumps(task_data))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", b"manage_tasks")]
+        ]
+
+        await event.respond(
+            f"✅ اسم المهمة: {task_name}\n\n"
+            f"📥 **الخطوة 2: تحديد المصادر**\n\n"
+            f"أرسل معرفات أو روابط المجموعات/القنوات المصدر:\n\n"
+            f"🔹 **للمصدر الواحد:**\n"
+            f"• @channelname\n"
+            f"• https://t.me/channelname\n"
+            f"• -1001234567890\n\n"
+            f"🔹 **لعدة مصادر (مفصولة بفاصلة):**\n"
+            f"• @channel1, @channel2, @channel3\n"
+            f"• -1001234567890, -1001234567891\n\n"
+            f"⚠️ تأكد من أن البوت مضاف لجميع المجموعات/القنوات وله صلاحيات قراءة الرسائل",
+            buttons=buttons
+        )
+
     async def handle_source_chat(self, event, chat_input):
         """Handle source chat input using database conversation state"""
         user_id = event.sender_id
 
         # Parse chat input
-        source_chat_id, source_chat_name = self.parse_chat_input(chat_input)
+        source_chat_ids, source_chat_names = self.parse_chat_input(chat_input)
 
-        if not source_chat_id:
+        if not source_chat_ids:
             await event.respond(
-                "❌ تنسيق معرف المجموعة/القناة غير صحيح\n\n"
+                "❌ تنسيق معرفات المجموعات/القنوات غير صحيح\n\n"
                 "استخدم أحد الأشكال التالية:\n"
                 "• @channelname\n"
                 "• https://t.me/channelname\n"
-                "• -1001234567890"
+                "• -1001234567890\n\n"
+                "لعدة مصادر، افصل بينها بفاصلة: @channel1, @channel2"
             )
             return
 
         # Store source chat data in database
         task_data = {
-            'source_chat_id': source_chat_id,
-            'source_chat_name': source_chat_name
+            'source_chat_ids': source_chat_ids,
+            'source_chat_names': source_chat_names
         }
         self.db.set_conversation_state(user_id, 'waiting_target_chat', json.dumps(task_data))
 
@@ -364,8 +417,8 @@ class SimpleTelegramBot:
         ]
 
         await event.respond(
-            f"✅ تم تحديد المصدر: {source_chat_name or source_chat_id}\n\n"
-            f"📤 **الخطوة 2: تحديد الوجهة**\n\n"
+            f"✅ تم تحديد المصادر: {', '.join(source_chat_names or source_chat_ids)}\n\n"
+            f"📤 **الخطوة 3: تحديد الوجهة**\n\n"
             f"أرسل معرف أو رابط المجموعة/القناة المراد توجيه الرسائل إليها:\n\n"
             f"أمثلة:\n"
             f"• @targetchannel\n"
@@ -402,8 +455,9 @@ class SimpleTelegramBot:
         if data:
             try:
                 source_data = json.loads(data)
-                source_chat_id = source_data['source_chat_id']
-                source_chat_name = source_data['source_chat_name']
+                source_chat_ids = source_data['source_chat_ids']
+                source_chat_names = source_data.get('source_chat_names', [None] * len(source_chat_ids))
+                task_name = source_data.get('task_name', 'مهمة توجيه')
             except:
                 await event.respond("❌ حدث خطأ في البيانات، يرجى البدء من جديد")
                 return
@@ -414,8 +468,9 @@ class SimpleTelegramBot:
         # Create task in database
         task_id = self.db.create_task(
             user_id,
-            source_chat_id,
-            source_chat_name,
+            task_name,
+            source_chat_ids,
+            source_chat_names,
             target_chat_id,
             target_chat_name
         )
@@ -439,35 +494,56 @@ class SimpleTelegramBot:
         await event.respond(
             f"🎉 تم إنشاء المهمة بنجاح!\n\n"
             f"🆔 رقم المهمة: #{task_id}\n"
-            f"📥 من: {source_chat_name or source_chat_id}\n"
-            f"📤 إلى: {target_chat_name or target_chat_id}\n"
+            f"🏷️ اسم المهمة: {task_name}\n"
+            f"📥 المصادر: {', '.join(source_chat_names or source_chat_ids)}\n"
+            f"📤 الوجهة: {target_chat_name or target_chat_id}\n"
             f"🟢 الحالة: نشطة\n\n"
             f"✅ سيتم توجيه جميع الرسائل الجديدة تلقائياً",
             buttons=buttons
         )
 
     def parse_chat_input(self, chat_input):
-        """Parse chat input and return chat_id and name"""
+        """Parse chat input and return chat_ids and names"""
         chat_input = chat_input.strip()
+        chat_ids = []
+        chat_names = []
 
-        if chat_input.startswith('@'):
-            # Username format
-            username = chat_input[1:]
-            return chat_input, username
-        elif chat_input.startswith('https://t.me/'):
-            # URL format
-            username = chat_input.split('/')[-1]
-            return f"@{username}", username
-        elif chat_input.startswith('-') and chat_input[1:].isdigit():
-            # Chat ID format
-            return chat_input, None
+        # Split by comma if multiple inputs
+        if ',' in chat_input:
+            inputs = [inp.strip() for inp in chat_input.split(',')]
         else:
-            # Try to parse as numeric ID
-            try:
-                chat_id = int(chat_input)
-                return str(chat_id), None
-            except ValueError:
-                return None, None
+            inputs = [chat_input]
+
+        for chat_input_item in inputs:
+            if chat_input_item.startswith('@'):
+                # Username format
+                username = chat_input_item[1:]
+                chat_ids.append(chat_input_item)
+                chat_names.append(username)
+            elif chat_input_item.startswith('https://t.me/'):
+                # URL format
+                username = chat_input_item.split('/')[-1]
+                chat_ids.append(f"@{username}")
+                chat_names.append(username)
+            elif chat_input_item.startswith('-') and chat_input_item[1:].isdigit():
+                # Chat ID format
+                chat_ids.append(chat_input_item)
+                chat_names.append(None)
+            else:
+                # Try to parse as numeric ID
+                try:
+                    chat_id = int(chat_input_item)
+                    chat_ids.append(str(chat_id))
+                    chat_names.append(None)
+                except ValueError:
+                    # Invalid format, skip this item
+                    pass
+        
+        # Return None if no valid inputs were found
+        if not chat_ids:
+            return None, None
+
+        return chat_ids, chat_names
 
     async def start_auth(self, event):
         """Start authentication process"""
@@ -487,224 +563,6 @@ class SimpleTelegramBot:
             "أرسل رقم هاتفك مع رمز البلد:\n"
             "مثال: +966501234567\n\n"
             "⚠️ تأكد من صحة الرقم",
-            buttons=buttons
-        )
-
-    async def handle_phone_input(self, event, phone):
-        """Handle phone number input"""
-        user_id = event.sender_id
-
-        try:
-            # Start userbot authentication
-            from userbot_service.userbot import userbot_instance
-            result = await userbot_instance.start_auth(user_id, phone)
-
-            if result['success']:
-                self.conversation_states[user_id]['state'] = 'waiting_code'
-                self.conversation_states[user_id]['data']['phone'] = phone
-
-                await event.respond(
-                    f"📨 تم إرسال رمز التحقق إلى {phone}\n\n"
-                    f"أرسل الرمز المكون من 5 أرقام:"
-                )
-            else:
-                await event.respond(f"❌ خطأ: {result['error']}")
-                del self.conversation_states[user_id]
-
-        except Exception as e:
-            logger.error(f"خطأ في تسجيل الدخول: {e}")
-            await event.respond("❌ حدث خطأ في تسجيل الدخول")
-            if user_id in self.conversation_states:
-                del self.conversation_states[user_id]
-
-    async def handle_code_input(self, event, code):
-        """Handle verification code input"""
-        user_id = event.sender_id
-        phone = self.conversation_states[user_id]['data']['phone']
-
-        try:
-            from userbot_service.userbot import userbot_instance
-            result = await userbot_instance.verify_code(user_id, code)
-
-            if result['success']:
-                if result['need_password']:
-                    self.conversation_states[user_id]['state'] = 'waiting_password'
-                    await event.respond(
-                        "🔐 يلزم كلمة مرور التحقق بخطوتين\n\n"
-                        "أرسل كلمة المرور:"
-                    )
-                else:
-                    # Authentication complete
-                    del self.conversation_states[user_id]
-
-                    buttons = [
-                        [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
-                        [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
-                    ]
-
-                    await event.respond(
-                        f"✅ تم تسجيل الدخول بنجاح!\n\n"
-                        f"📱 الرقم: {phone}\n"
-                        f"🤖 يمكنك الآن إنشاء مهام التوجيه التلقائي",
-                        buttons=buttons
-                    )
-            else:
-                await event.respond(f"❌ خطأ: {result['error']}")
-                if user_id in self.conversation_states:
-                    del self.conversation_states[user_id]
-
-        except Exception as e:
-            logger.error(f"خطأ في التحقق من الرمز: {e}")
-            await event.respond("❌ حدث خطأ في التحقق من الرمز")
-            if user_id in self.conversation_states:
-                del self.conversation_states[user_id]
-
-    async def handle_password_input(self, event, password):
-        """Handle 2FA password input"""
-        user_id = event.sender_id
-        phone = self.conversation_states[user_id]['data']['phone']
-
-        try:
-            from userbot_service.userbot import userbot_instance
-            result = await userbot_instance.verify_password(user_id, password)
-
-            if result['success']:
-                # Authentication complete
-                del self.conversation_states[user_id]
-
-                buttons = [
-                    [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
-                    [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
-                ]
-
-                await event.respond(
-                    f"✅ تم تسجيل الدخول بنجاح!\n\n"
-                    f"📱 الرقم: {phone}\n"
-                    f"🤖 يمكنك الآن إنشاء مهام التوجيه التلقائي",
-                    buttons=buttons
-                )
-            else:
-                await event.respond(f"❌ خطأ: {result['error']}")
-                if user_id in self.conversation_states:
-                    del self.conversation_states[user_id]
-
-        except Exception as e:
-            logger.error(f"خطأ في التحقق من كلمة المرور: {e}")
-            await event.respond("❌ حدث خطأ في التحقق من كلمة المرور")
-            if user_id in self.conversation_states:
-                del self.conversation_states[user_id]
-
-    async def show_settings(self, event):
-        """Show settings menu"""
-        buttons = [
-            [Button.inline("🔄 إعادة تسجيل الدخول", b"auth_phone")],
-            [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
-        ]
-
-        await event.edit(
-            "⚙️ الإعدادات\n\nاختر إعداد:",
-            buttons=buttons
-        )
-
-    async def show_about(self, event):
-        """Show about information"""
-        buttons = [
-            [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
-        ]
-
-        await event.edit(
-            "ℹ️ حول البوت\n\n"
-            "🤖 بوت التوجيه التلقائي\n"
-            "📋 يساعدك في توجيه الرسائل تلقائياً بين المجموعات والقنوات\n\n"
-            "🔧 الميزات:\n"
-            "• توجيه تلقائي للرسائل\n"
-            "• إدارة مهام التوجيه\n"
-            "• مراقبة الحالة\n"
-            "• واجهة عربية سهلة الاستخدام",
-            buttons=buttons
-        )
-
-    async def handle_callback(self, event):
-        """Handle button callbacks"""
-        user_id = event.sender_id
-        data = event.data.decode()
-
-        if data == "auth_phone":
-            await self.start_phone_auth(event)
-        elif data == "manage_tasks":
-            if self.db.is_user_authenticated(user_id):
-                await self.show_tasks_menu(event)
-            else:
-                await event.edit("❌ يجب تسجيل الدخول أولاً")
-        elif data == "create_task":
-            if self.db.is_user_authenticated(user_id):
-                await self.start_create_task(event)
-            else:
-                await event.edit("❌ يجب تسجيل الدخول أولاً")
-        elif data == "list_tasks":
-            if self.db.is_user_authenticated(user_id):
-                await self.list_tasks(event)
-            else:
-                await event.edit("❌ يجب تسجيل الدخول أولاً")
-        elif data.startswith("task_"):
-            if self.db.is_user_authenticated(user_id):
-                await self.handle_task_action(event, data)
-            else:
-                await event.edit("❌ يجب تسجيل الدخول أولاً")
-        elif data == "settings":
-            await self.show_settings_menu(event)
-        elif data == "about":
-            await self.show_about(event)
-        elif data == "back_main":
-            await self.show_main_menu(event)
-        elif data == "cancel_auth":
-            await self.cancel_auth(event)
-
-    async def handle_message(self, event):
-        """Handle text messages"""
-        # Skip if it's a command
-        if event.text.startswith('/'):
-            return
-
-        user_id = event.sender_id
-
-        # Check if user is in authentication or task creation process
-        state_data = self.db.get_conversation_state(user_id)
-
-        if state_data:
-            state, data = state_data
-
-            # Handle authentication states
-            if state in ['waiting_phone', 'waiting_code', 'waiting_password']:
-                await self.handle_auth_message(event, state_data)
-                return
-
-            # Handle task creation states
-            elif state in ['waiting_source_chat', 'waiting_target_chat']:
-                await self.handle_task_message(event, state_data)
-                return
-
-        # Default response
-        await event.respond("👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
-
-    async def start_phone_auth(self, event):
-        """Start phone authentication"""
-        user_id = event.sender_id
-
-        # Set conversation state
-        self.db.set_conversation_state(user_id, 'waiting_phone')
-
-        buttons = [
-            [Button.inline("❌ إلغاء", b"cancel_auth")]
-        ]
-
-        await event.edit(
-            "📱 تسجيل الدخول إلى تليجرام\n\n"
-            "🔐 لتتمكن من استخدام ميزة التوجيه التلقائي، نحتاج لتسجيل دخولك إلى حساب تليجرام الخاص بك.\n\n"
-            "📞 أرسل رقم هاتفك بالتنسيق الدولي:\n"
-            "مثال: +966501234567\n"
-            "أو: +201234567890\n\n"
-            "⚠️ تأكد من إدخال الرقم بشكل صحيح مع رمز البلد",
             buttons=buttons
         )
 
@@ -939,42 +797,74 @@ class SimpleTelegramBot:
                 "🔢 أرسل الرمز الصحيح أو اطلب رمز جديد"
             )
 
-    async def show_main_menu(self, event):
-        """Show main menu"""
-        buttons = [
-            [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
-            [Button.inline("⚙️ الإعدادات", b"settings")],
-            [Button.inline("ℹ️ حول البوت", b"about")]
-        ]
-
-        await event.edit(
-            "🏠 القائمة الرئيسية\n\nاختر ما تريد فعله:",
-            buttons=buttons
-        )
-
-    async def show_tasks_menu(self, event):
-        """Show tasks menu"""
+    async def handle_password_input(self, event, password: str, data: str):
+        """Handle 2FA password input"""
         user_id = event.sender_id
-        tasks = self.db.get_user_tasks(user_id)
 
-        buttons = [
-            [Button.inline("➕ إنشاء مهمة جديدة", b"create_task")],
-            [Button.inline("📋 عرض المهام", b"list_tasks")],
-            [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
-        ]
+        try:
+            auth_data = json.loads(data)
+            phone = auth_data['phone']
+            session_string = auth_data['session_client'] # This is the session string from previous step
 
-        tasks_count = len(tasks)
-        active_count = len([t for t in tasks if t['is_active']])
+            # Create client and sign in with password
+            temp_client = TelegramClient(StringSession(session_string), int(API_ID), API_HASH)
+            await temp_client.connect()
 
-        await event.edit(
-            f"📝 إدارة مهام التوجيه\n\n"
-            f"📊 الإحصائيات:\n"
-            f"• إجمالي المهام: {tasks_count}\n"
-            f"• المهام النشطة: {active_count}\n"
-            f"• المهام المتوقفة: {tasks_count - active_count}\n\n"
-            f"اختر إجراء:",
-            buttons=buttons
-        )
+            result = await temp_client.sign_in(password=password)
+
+            # Get session string properly
+            session_string = StringSession.save(temp_client.session)
+
+            # Save session to database
+            self.db.save_user_session(user_id, phone, session_string)
+            self.db.clear_conversation_state(user_id)
+
+            # Start userbot with this session
+            await userbot_instance.start_with_session(user_id, session_string)
+
+            # Send session to Saved Messages
+            try:
+                user_client = TelegramClient(StringSession(session_string), int(API_ID), API_HASH)
+                await user_client.connect()
+
+                session_message = (
+                    f"🔐 جلسة تسجيل الدخول - بوت التوجيه التلقائي\n\n"
+                    f"📱 الرقم: {phone}\n"
+                    f"👤 الاسم: {result.first_name}\n"
+                    f"🤖 البوت: @7959170262\n"
+                    f"📅 التاريخ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                    f"🔑 سلسلة الجلسة:\n"
+                    f"`{session_string}`\n\n"
+                    f"⚠️ احتفظ بهذه الرسالة آمنة ولا تشاركها مع أحد!"
+                )
+                await user_client.send_message('me', session_message)
+                await user_client.disconnect()
+                session_saved_text = "✅ تم حفظ الجلسة في رسائلك المحفوظة"
+            except Exception as save_error:
+                logger.error(f"خطأ في إرسال الجلسة للرسائل المحفوظة: {save_error}")
+                session_saved_text = "⚠️ تم حفظ الجلسة محلياً فقط"
+
+            buttons = [
+                [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
+                [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
+            ]
+
+            await event.respond(
+                f"🎉 تم تسجيل الدخول بنجاح!\n\n"
+                f"👋 مرحباً {result.first_name}!\n"
+                f"✅ تم ربط حسابك بنجاح\n"
+                f"{session_saved_text}\n\n"
+                f"🚀 يمكنك الآن إنشاء مهام التوجيه التلقائي",
+                buttons=buttons
+            )
+            await temp_client.disconnect()
+
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من كلمة المرور: {e}")
+            await event.respond(
+                "❌ كلمة المرور غير صحيحة أو هناك مشكلة في التحقق الثنائي.\n\n"
+                "تأكد من إدخال كلمة المرور الصحيحة وحاول مرة أخرى."
+            )
 
     async def cancel_auth(self, event):
         """Cancel authentication"""
@@ -990,80 +880,6 @@ class SimpleTelegramBot:
             "يمكنك المحاولة مرة أخرى في أي وقت",
             buttons=buttons
         )
-
-    async def start_create_task(self, event):
-        """Start creating new task"""
-        user_id = event.sender_id
-
-        # Check if user is authenticated
-        if not self.db.is_user_authenticated(user_id):
-            await event.edit("❌ يجب تسجيل الدخول أولاً لإنشاء المهام")
-            return
-
-        # Set conversation state
-        self.db.set_conversation_state(user_id, 'waiting_source_chat')
-
-        buttons = [
-            [Button.inline("❌ إلغاء", b"manage_tasks")]
-        ]
-
-        await event.edit(
-            "➕ إنشاء مهمة توجيه جديدة\n\n"
-            "📥 **الخطوة 1: تحديد المصدر**\n\n"
-            "أرسل معرف أو رابط المجموعة/القناة المصدر:\n\n"
-            "أمثلة:\n"
-            "• @channelname\n"
-            "• https://t.me/channelname\n"
-            "• -1001234567890\n\n"
-            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات قراءة الرسائل",
-            buttons=buttons
-        )
-
-    async def list_tasks(self, event):
-        """List user tasks"""
-        user_id = event.sender_id
-
-        # Check if user is authenticated
-        if not self.db.is_user_authenticated(user_id):
-            await event.edit("❌ يجب تسجيل الدخول أولاً لعرض المهام")
-            return
-
-        tasks = self.db.get_user_tasks(user_id)
-
-        if not tasks:
-            buttons = [
-                [Button.inline("➕ إنشاء مهمة جديدة", b"create_task")],
-                [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
-            ]
-
-            await event.edit(
-                "📋 قائمة المهام\n\n"
-                "❌ لا توجد مهام حالياً\n\n"
-                "أنشئ مهمتك الأولى للبدء!",
-                buttons=buttons
-            )
-            return
-
-        # Build tasks list
-        message = "📋 قائمة المهام:\n\n"
-        buttons = []
-
-        for i, task in enumerate(tasks[:10], 1):  # Show max 10 tasks
-            status = "🟢 نشطة" if task['is_active'] else "🔴 متوقفة"
-            task_name = task.get('task_name', 'مهمة بدون اسم')
-            message += f"{i}. {status} - {task_name}\n"
-            message += f"   📥 من: {task['source_chat_name'] or task['source_chat_id']}\n"
-            message += f"   📤 إلى: {task['target_chat_name'] or task['target_chat_id']}\n\n"
-
-            # Add task button
-            buttons.append([
-                Button.inline(f"⚙️ {task_name[:15]}{'...' if len(task_name) > 15 else ''}", f"task_manage_{task['id']}")
-            ])
-
-        buttons.append([Button.inline("➕ إنشاء مهمة جديدة", b"create_task")])
-        buttons.append([Button.inline("🏠 القائمة الرئيسية", b"back_main")])
-
-        await event.edit(message, buttons=buttons)
 
     async def handle_task_action(self, event, data):
         """Handle task actions"""
@@ -1091,7 +907,9 @@ class SimpleTelegramBot:
         message_text = event.text.strip()
 
         try:
-            if state == 'waiting_source_chat':
+            if state == 'waiting_task_name':
+                await self.handle_task_name(event, message_text)
+            elif state == 'waiting_source_chat':
                 await self.handle_source_chat(event, message_text)
             elif state == 'waiting_target_chat':
                 await self.handle_target_chat(event, message_text)
@@ -1131,10 +949,6 @@ class SimpleTelegramBot:
             "💻 تطوير: نظام بوت تليجرام",
             buttons=buttons
         )
-
-    async def handle_password_input(self, event, password: str, data: str):
-        """Handle 2FA password input - placeholder"""
-        await event.respond("⚠️ التحقق الثنائي قيد التطوير...")
 
     async def run(self):
         """Run the bot"""
