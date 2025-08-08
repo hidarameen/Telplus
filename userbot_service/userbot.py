@@ -81,10 +81,16 @@ class UserbotService:
                 logger.info(f"🔔 رسالة جديدة من المستخدم {user_id} - {chat_info}")
                 logger.info(f"📝 محتوى الرسالة: {event.text[:100] if event.text else 'رسالة بدون نص'}")
                 
+                # Get source chat ID and username first
+                source_chat_id = event.chat_id
+                source_username = getattr(event.chat, 'username', None)
+                
                 # Special monitoring for the specific chat mentioned by user
+                # Enhanced logging for the specific task
                 if source_chat_id == -1002289754739:
-                    logger.warning(f"🎯 رسالة من المحادثة المطلوبة! Chat ID: {source_chat_id}")
-                    logger.warning(f"🎯 هذه هي المحادثة التي يجب مراقبتها للتوجيه")
+                    logger.warning(f"🎯 *** رسالة من المحادثة المطلوبة (Hidar)! Chat ID: {source_chat_id} ***")
+                    logger.warning(f"🎯 *** بدء معالجة الرسالة للتوجيه ***")
+                    logger.warning(f"🎯 *** عدد المهام المتاحة: {len(tasks)} ***")
                 
                 if not tasks:
                     logger.warning(f"⚠️ لا توجد مهام للمستخدم {user_id}")
@@ -96,21 +102,18 @@ class UserbotService:
                 for i, task in enumerate(tasks, 1):
                     task_name = task.get('task_name', f"مهمة {task['id']}")
                     logger.info(f"📋 مهمة {i}: '{task_name}' - مصدر='{task['source_chat_id']}' → هدف='{task['target_chat_id']}'")
-                    if task['source_chat_id'] == '-1002289754739':
+                    if str(task['source_chat_id']) == '-1002289754739':
                         logger.warning(f"🎯 تم العثور على المهمة المطلوبة: {task_name}")
                 
-                # Get source chat ID and username
-                source_chat_id = event.chat_id
-                source_username = getattr(event.chat, 'username', None)
                 
                 # Find matching tasks for this source chat
                 matching_tasks = []
                 logger.info(f"🔍 البحث عن مهام مطابقة للمحادثة {source_chat_id} (username: {source_username})")
                 
                 for task in tasks:
-                    task_source = task['source_chat_id'].strip()
+                    task_source = str(task['source_chat_id']).strip()
                     task_name = task.get('task_name', f"مهمة {task['id']}")
-                    task_target = task.get('target_chat_id', 'غير محدد')
+                    task_target = str(task.get('target_chat_id', 'غير محدد'))
                     
                     logger.info(f"🔍 فحص المهمة '{task_name}': مصدر='{task_source}' ضد '{source_chat_id}', هدف='{task_target}'")
                     
@@ -154,7 +157,7 @@ class UserbotService:
                 # Forward message to all target chats
                 for task in matching_tasks:
                     try:
-                        target_chat_id = task['target_chat_id'].strip()
+                        target_chat_id = str(task['target_chat_id']).strip()
                         task_name = task.get('task_name', f"مهمة {task['id']}")
                         
                         logger.info(f"🔄 بدء توجيه رسالة من {source_chat_id} إلى {target_chat_id} (المهمة: {task_name})")
@@ -235,7 +238,7 @@ class UserbotService:
                     logger.info(f"     📤 هدف: '{target_id}'")
                     
                     # Special check for the mentioned chat
-                    if source_id == '-1002289754739':
+                    if str(source_id) == '-1002289754739':
                         logger.warning(f"🎯 تم العثور على المهمة للمحادثة المطلوبة: {task_name}")
                         logger.warning(f"🎯 سيتم توجيه الرسائل من {source_id} إلى {target_id}")
             else:
@@ -377,7 +380,11 @@ class UserbotService:
                         if user_tasks:
                             logger.info(f"📋 تم تحميل {len(user_tasks)} مهمة للمستخدم {user_id}")
                             for task in user_tasks:
-                                logger.info(f"  • مهمة {task['id']}: {task['source_chat_id']} → {task['target_chat_id']}")
+                                task_name = task.get('task_name', f"مهمة {task['id']}")
+                                logger.info(f"  • {task_name}: {task['source_chat_id']} → {task['target_chat_id']}")
+                                # Special log for the specific task
+                                if str(task['source_chat_id']) == '-1002289754739':
+                                    logger.warning(f"🎯 مهمة Hidar جاهزة للتوجيه: {task['source_chat_id']} → {task['target_chat_id']}")
                         else:
                             logger.info(f"📝 لا توجد مهام نشطة للمستخدم {user_id}")
                     else:
