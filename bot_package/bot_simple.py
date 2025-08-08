@@ -529,7 +529,8 @@ class SimpleTelegramBot:
             [Button.inline(f"📥 إدارة المصادر ({sources_count})", f"manage_sources_{task_id}")],
             [Button.inline(f"📤 إدارة الأهداف ({targets_count})", f"manage_targets_{task_id}")],
             [Button.inline("🎬 فلاتر الوسائط", f"media_filters_{task_id}")],
-            [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")], # Added button for word filters
+            [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")],
+            [Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
             [Button.inline("🔙 رجوع لتفاصيل المهمة", f"task_manage_{task_id}")]
         ]
 
