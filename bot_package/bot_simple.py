@@ -290,7 +290,7 @@ class SimpleTelegramBot:
 
         if success:
             mode_text = "نسخ" if new_mode == 'copy' else "توجيه"
-            await event.answer(f"✅ تم تغيير وضع التوجيه إلى {mode_text}")
+            await event.answer("✅ تم تغيير وضع التوجيه إلى {mode_text}")
 
             # Force refresh UserBot tasks
             try:
@@ -949,7 +949,7 @@ class SimpleTelegramBot:
         target_chat_names = []
 
         for target_input in target_chat_inputs:
-            target_id, target_name = await self.parse_chat_input(target_input.strip())
+            target_id, target_name = self.parse_chat_input(target_input.strip())
             if target_id:
                 target_chat_ids.append(target_id)
                 target_chat_names.append(target_name)
@@ -1051,6 +1051,9 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 
+        # Get the name of the last target added
+        target_chat_name = target_chat_names[-1] if target_chat_names else target_chat_ids[-1]
+
         buttons = [
             [Button.inline("📋 عرض المهام", b"list_tasks")],
             [Button.inline("➕ إنشاء مهمة أخرى", b"create_task")],
@@ -1062,60 +1065,34 @@ class SimpleTelegramBot:
             f"🆔 رقم المهمة: #{task_id}\n"
             f"🏷️ اسم المهمة: {task_name}\n"
             f"📥 المصادر: {', '.join([str(name) for name in (source_chat_names or source_chat_ids)])}\n"
-            f"📤 الوجهة: {target_chat_name or target_chat_id}\n"
+            f"📤 الوجهة: {target_chat_name}\n"
             f"🟢 الحالة: نشطة\n\n"
             f"✅ سيتم توجيه جميع الرسائل الجديدة تلقائياً",
             buttons=buttons
         )
 
-    def parse_chat_input(self, chat_input):
-        """Parse chat input and return chat_ids and names"""
+    def parse_chat_input(self, chat_input: str) -> tuple:
+        """Parse chat input and return chat_id and name"""
         chat_input = chat_input.strip()
-        chat_ids = []
-        chat_names = []
 
-        # Split by comma if multiple inputs
-        if ',' in chat_input:
-            inputs = [inp.strip() for inp in chat_input.split(',') if inp.strip()]
+        if chat_input.startswith('@'):
+            # Username format
+            username = chat_input[1:]
+            return chat_input, username
+        elif chat_input.startswith('https://t.me/'):
+            # URL format
+            username = chat_input.split('/')[-1]
+            return f"@{username}", username
+        elif chat_input.startswith('-') and chat_input[1:].isdigit():
+            # Chat ID format
+            return chat_input, None
         else:
-            inputs = [chat_input] if chat_input else []
-
-        for chat_input_item in inputs:
-            chat_input_item = chat_input_item.strip()
-            if not chat_input_item:
-                continue
-
-            if chat_input_item.startswith('@'):
-                # Username format
-                username = chat_input_item[1:] if len(chat_input_item) > 1 else None
-                if username:
-                    chat_ids.append(chat_input_item)
-                    chat_names.append(username)
-            elif chat_input_item.startswith('https://t.me/'):
-                # URL format
-                username = chat_input_item.split('/')[-1]
-                if username:
-                    chat_ids.append(f"@{username}")
-                    chat_names.append(username)
-            elif chat_input_item.startswith('-') and len(chat_input_item) > 1 and chat_input_item[1:].isdigit():
-                # Chat ID format (negative)
-                chat_ids.append(chat_input_item)
-                chat_names.append(None) # Source name is None for chat IDs initially
-            else:
-                # Try to parse as numeric ID
-                try:
-                    chat_id = int(chat_input_item)
-                    chat_ids.append(str(chat_id))
-                    chat_names.append(None) # Source name is None for chat IDs initially
-                except ValueError:
-                    # Invalid format, skip this item
-                    continue
-
-        # Return None if no valid inputs were found
-        if not chat_ids:
-            return None, None
-
-        return chat_ids, chat_names
+            # Try to parse as numeric ID
+            try:
+                chat_id = int(chat_input)
+                return str(chat_id), None
+            except ValueError:
+                return None, None
 
     async def start_auth(self, event):
         """Start authentication process"""
