@@ -4882,37 +4882,72 @@ class SimpleTelegramBot:
             
             # Convert channel_id to proper format
             try:
-                channel_entity = int(channel_id)
+                if channel_id.startswith('-100'):
+                    # Convert to proper channel ID format
+                    channel_entity = int(channel_id)
+                elif channel_id.startswith('@'):
+                    # Username format
+                    channel_entity = channel_id
+                else:
+                    # Try to get entity by ID
+                    channel_entity = int(channel_id) if channel_id.lstrip('-').isdigit() else channel_id
             except ValueError:
-                # If it's a username, use as is
+                # If conversion fails, use as string
                 channel_entity = channel_id
             
-            # Get chat administrators using bot API
-            chat_members = await self.bot.get_participants(channel_entity, filter='admins')
+            # Get the channel entity first
+            try:
+                channel = await self.bot.get_entity(channel_entity)
+            except Exception as e:
+                logger.error(f"فشل في الحصول على معلومات القناة {channel_id}: {e}")
+                raise e
             
-            admin_count = 0
-            for member in chat_members:
-                try:
-                    user_id = member.id
-                    username = getattr(member, 'username', '') or ''
-                    first_name = getattr(member, 'first_name', '') or f'مشرف {user_id}'
-                    
-                    # Add admin to database
-                    self.db.add_admin_filter(
-                        task_id=task_id,
-                        admin_user_id=user_id,
-                        admin_username=username,
-                        admin_first_name=first_name,
-                        is_allowed=True
-                    )
-                    admin_count += 1
-                    
-                except Exception as e:
-                    logger.error(f"خطأ في إضافة المشرف {member}: {e}")
-                    continue
-            
-            logger.info(f"✅ تم إضافة {admin_count} مشرف للقناة {channel_id} باستخدام Bot API")
-            return admin_count
+            # Get chat administrators using proper method
+            try:
+                from telethon.tl.functions.channels import GetParticipantsRequest
+                from telethon.tl.types import ChannelParticipantsAdmins
+                
+                # Request admins with proper parameters
+                participants = await self.bot(GetParticipantsRequest(
+                    channel=channel,
+                    filter=ChannelParticipantsAdmins(),
+                    offset=0,
+                    limit=100,
+                    hash=0
+                ))
+                
+                admin_count = 0
+                for participant in participants.participants:
+                    try:
+                        # Find user info from participants.users
+                        user = next((u for u in participants.users if u.id == participant.user_id), None)
+                        if not user:
+                            continue
+                            
+                        user_id = user.id
+                        username = getattr(user, 'username', '') or ''
+                        first_name = getattr(user, 'first_name', '') or f'مشرف {user_id}'
+                        
+                        # Add admin to database
+                        self.db.add_admin_filter(
+                            task_id=task_id,
+                            admin_user_id=user_id,
+                            admin_username=username,
+                            admin_first_name=first_name,
+                            is_allowed=True
+                        )
+                        admin_count += 1
+                        
+                    except Exception as e:
+                        logger.error(f"خطأ في إضافة المشرف {participant}: {e}")
+                        continue
+                
+                logger.info(f"✅ تم إضافة {admin_count} مشرف للقناة {channel_id} باستخدام Bot API")
+                return admin_count
+                
+            except Exception as api_error:
+                logger.error(f"فشل استدعاء GetParticipantsRequest: {api_error}")
+                raise api_error
             
         except Exception as e:
             logger.error(f"خطأ في جلب المشرفين باستخدام Bot API: {e}")
