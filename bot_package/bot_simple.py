@@ -82,40 +82,36 @@ class SimpleTelegramBot:
 
 
     async def handle_callback(self, event):
-        """Handle callback queries"""
-        user_id = event.sender_id
-        data = event.data.decode('utf-8')
-
+        """Handle button callbacks"""
         try:
-            if data == "manage_tasks":
+            data = event.data.decode('utf-8')
+            user_id = event.sender_id
+
+            if data == "login":
+                await self.show_login_menu(event)
+            elif data == "manage_tasks":
                 await self.show_tasks_menu(event)
             elif data == "create_task":
-                await self.start_create_task(event)
+                await self.start_task_creation(event)
             elif data == "list_tasks":
-                await self.list_tasks(event)
-            elif data.startswith("task_manage_"):
-                task_id = int(data.split("_")[2])
-                await self.show_task_details(event, task_id)
+                await self.list_user_tasks(event)
             elif data.startswith("task_toggle_"):
                 task_id = int(data.split("_")[2])
                 await self.toggle_task(event, task_id)
             elif data.startswith("task_delete_"):
                 task_id = int(data.split("_")[2])
                 await self.delete_task(event, task_id)
-            elif data == "auth_phone":
-                await self.start_auth(event)
-            elif data == "back_main":
-                await self.show_main_menu(event)
             elif data == "settings":
-                await self.show_settings_menu(event)
+                await self.show_settings(event)
+            elif data == "check_userbot":
+                await self.check_userbot_status(event)
             elif data == "about":
                 await self.show_about(event)
-            elif data == "cancel_auth":
-                await self.cancel_auth(event)
-            else:
-                await self.handle_task_action(event, data)
+            elif data == "main_menu":
+                await self.show_main_menu(event)
+
         except Exception as e:
-            logger.error(f"خطأ في معالجة الاستعلام: {e}")
+            logger.error(f"خطأ في معالج الأزرار: {e}")
             await event.answer("❌ حدث خطأ، حاول مرة أخرى")
 
     async def handle_message(self, event):
@@ -437,20 +433,11 @@ class SimpleTelegramBot:
             except:
                 pass
 
-        # Ensure source_chat_names has proper values (replace None with proper names)
-        fixed_source_chat_names = []
-        for i, name in enumerate(source_chat_names):
-            if name is None or name == '':
-                # Use the chat_id as name if name is None
-                fixed_source_chat_names.append(source_chat_ids[i])
-            else:
-                fixed_source_chat_names.append(name)
-
         # Store source chat data along with task name
         task_data = {
             'task_name': task_name,
             'source_chat_ids': source_chat_ids,
-            'source_chat_names': fixed_source_chat_names
+            'source_chat_names': source_chat_names
         }
         self.db.set_conversation_state(user_id, 'waiting_target_chat', json.dumps(task_data))
 
@@ -459,7 +446,7 @@ class SimpleTelegramBot:
         ]
 
         await event.respond(
-            f"✅ تم تحديد المصادر: {', '.join(fixed_source_chat_names)}\n\n"
+            f"✅ تم تحديد المصادر: {', '.join(source_chat_names)}\n\n"
             f"📤 **الخطوة 3: تحديد الوجهة**\n\n"
             f"أرسل معرف أو رابط المجموعة/القناة المراد توجيه الرسائل إليها:\n\n"
             f"أمثلة:\n"
@@ -986,17 +973,116 @@ class SimpleTelegramBot:
             )
             self.db.clear_conversation_state(user_id)
 
-    async def show_settings_menu(self, event):
+    async def show_settings(self, event):
         """Show settings menu"""
         buttons = [
-            [Button.inline("🔄 إعادة تسجيل الدخول", b"auth_phone")],
-            [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
+            [Button.inline("🔍 فحص حالة UserBot", "check_userbot")],
+            [Button.inline("🔄 إعادة تسجيل الدخول", "login")],
+            [Button.inline("🗑️ حذف جميع المهام", "delete_all_tasks")],
+            [Button.inline("🏠 القائمة الرئيسية", "main_menu")]
         ]
 
         await event.edit(
-            "⚙️ الإعدادات\n\nاختر إعداد:",
+            "⚙️ **الإعدادات**\n\n"
+            "اختر إعداد:",
             buttons=buttons
         )
+
+    async def check_userbot_status(self, event):
+        """Check UserBot status for user"""
+        user_id = event.sender_id
+
+        try:
+            from userbot_service.userbot import userbot_instance
+
+            # Check if user is authenticated
+            if not self.db.is_user_authenticated(user_id):
+                await event.edit(
+                    "❌ **حالة UserBot: غير مسجل دخول**\n\n"
+                    "🔐 يجب تسجيل الدخول أولاً\n"
+                    "📱 اذهب إلى الإعدادات → إعادة تسجيل الدخول",
+                    buttons=[[Button.inline("🔄 تسجيل الدخول", "login"), Button.inline("🏠 الرئيسية", "main_menu")]]
+                )
+                return
+
+            # Check if UserBot is running
+            is_userbot_running = user_id in userbot_instance.clients
+
+            if is_userbot_running:
+                # Get user tasks
+                user_tasks = userbot_instance.user_tasks.get(user_id, [])
+                active_tasks = [t for t in user_tasks if t.get('is_active', True)]
+
+                # Get user info
+                user_info = await userbot_instance.get_user_info(user_id)
+                user_name = "غير معروف"
+                if user_info:
+                    user_name = f"{user_info.get('first_name', '')} {user_info.get('last_name', '')}".strip()
+
+                status_message = (
+                    f"✅ **حالة UserBot: متصل ويعمل**\n\n"
+                    f"👤 **معلومات الحساب:**\n"
+                    f"• الاسم: {user_name}\n"
+                    f"• المعرف: {user_id}\n\n"
+                    f"📋 **المهام:**\n"
+                    f"• إجمالي المهام: {len(user_tasks)}\n"
+                    f"• المهام النشطة: {len(active_tasks)}\n\n"
+                )
+
+                if active_tasks:
+                    status_message += "🔍 **المهام النشطة:**\n"
+                    for i, task in enumerate(active_tasks[:3], 1):
+                        task_name = task.get('task_name', f"مهمة {task['id']}")
+                        status_message += f"  {i}. {task_name}\n"
+                        status_message += f"     📥 {task['source_chat_id']} → 📤 {task['target_chat_id']}\n"
+
+                    if len(active_tasks) > 3:
+                        status_message += f"     ... و {len(active_tasks) - 3} مهمة أخرى\n"
+
+                    status_message += "\n✅ **جاهز لتوجيه الرسائل**"
+                else:
+                    status_message += "⚠️ **لا توجد مهام نشطة**\nأنشئ مهام لبدء التوجيه"
+
+            else:
+                status_message = (
+                    f"❌ **حالة UserBot: غير متصل**\n\n"
+                    f"🔄 **محاولة إعادة التشغيل...**\n"
+                    f"يرجى الانتظار..."
+                )
+
+                # Try to restart UserBot
+                session_data = self.db.get_user_session(user_id)
+                if session_data and session_data[2]:  # session_string exists
+                    success = await userbot_instance.start_with_session(user_id, session_data[2])
+                    if success:
+                        status_message = (
+                            f"✅ **تم إعادة تشغيل UserBot بنجاح**\n\n"
+                            f"🔄 قم بفحص الحالة مرة أخرى للحصول على التفاصيل"
+                        )
+                    else:
+                        status_message = (
+                            f"❌ **فشل في إعادة التشغيل**\n\n"
+                            f"🔧 **الحلول المقترحة:**\n"
+                            f"• إعادة تسجيل الدخول\n"
+                            f"• التحقق من اتصال الإنترنت\n"
+                            f"• التواصل مع الدعم"
+                        )
+
+            buttons = [
+                [Button.inline("🔄 فحص مرة أخرى", "check_userbot")],
+                [Button.inline("⚙️ الإعدادات", "settings"), Button.inline("🏠 الرئيسية", "main_menu")]
+            ]
+
+            await event.edit(status_message, buttons=buttons)
+
+        except Exception as e:
+            logger.error(f"خطأ في فحص حالة UserBot للمستخدم {user_id}: {e}")
+            await event.edit(
+                f"❌ **خطأ في فحص حالة UserBot**\n\n"
+                f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول",
+                buttons=[[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
+            )
+
 
     async def show_about(self, event):
         buttons = [

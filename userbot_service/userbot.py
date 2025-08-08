@@ -272,20 +272,36 @@ class UserbotService:
             logger.info(f"📱 تم العثور على {len(saved_sessions)} جلسة محفوظة")
             
             # Start userbot for each saved session
+            success_count = 0
             for user_id, session_string, phone_number in saved_sessions:
                 try:
                     logger.info(f"🔄 بدء تشغيل UserBot للمستخدم {user_id} ({phone_number})")
                     
+                    # Validate session string
+                    if not session_string or len(session_string) < 10:
+                        logger.warning(f"⚠️ جلسة غير صالحة للمستخدم {user_id}")
+                        continue
+                    
                     # Give a small delay between sessions
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
                     
                     success = await self.start_with_session(user_id, session_string)
                     
                     if success:
+                        success_count += 1
                         logger.info(f"✅ تم تشغيل UserBot بنجاح للمستخدم {user_id}")
+                        
                         # Load tasks immediately after successful connection
                         await self.refresh_user_tasks(user_id)
-                        logger.info(f"🔄 تم تحديث مهام المستخدم {user_id}")
+                        
+                        # Check if user has tasks
+                        user_tasks = self.user_tasks.get(user_id, [])
+                        if user_tasks:
+                            logger.info(f"📋 تم تحميل {len(user_tasks)} مهمة للمستخدم {user_id}")
+                            for task in user_tasks:
+                                logger.info(f"  • مهمة {task['id']}: {task['source_chat_id']} → {task['target_chat_id']}")
+                        else:
+                            logger.info(f"📝 لا توجد مهام نشطة للمستخدم {user_id}")
                     else:
                         logger.warning(f"⚠️ فشل في تشغيل UserBot للمستخدم {user_id}")
                         
@@ -294,15 +310,24 @@ class UserbotService:
                     continue
                     
             active_clients = len(self.clients)
-            logger.info(f"🎉 تم تشغيل {active_clients} من أصل {len(saved_sessions)} جلسة محفوظة")
+            logger.info(f"🎉 تم تشغيل {success_count} من أصل {len(saved_sessions)} جلسة محفوظة")
             
             # Log active tasks summary
             if active_clients > 0:
                 total_tasks = sum(len(tasks) for tasks in self.user_tasks.values())
                 logger.info(f"📋 إجمالي المهام النشطة: {total_tasks}")
-                for user_id, tasks in self.user_tasks.items():
-                    if tasks:
-                        logger.info(f"👤 المستخدم {user_id}: {len(tasks)} مهمة نشطة")
+                
+                if total_tasks > 0:
+                    logger.info("🔍 تفاصيل المهام النشطة:")
+                    for user_id, tasks in self.user_tasks.items():
+                        if tasks:
+                            logger.info(f"👤 المستخدم {user_id}: {len(tasks)} مهمة")
+                            for task in tasks:
+                                logger.info(f"   📝 {task.get('task_name', f'مهمة {task['id']}')} - {task['source_chat_id']} → {task['target_chat_id']}")
+                else:
+                    logger.warning("⚠️ لا توجد مهام نشطة - لن يتم توجيه أي رسائل")
+            else:
+                logger.warning("⚠️ لم يتم تشغيل أي UserBot - تحقق من صحة الجلسات المحفوظة")
             
         except Exception as e:
             logger.error(f"خطأ في تشغيل الجلسات الموجودة: {e}")
