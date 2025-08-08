@@ -1,6 +1,6 @@
 """
 Simple Telegram Bot using Telethon
-Handles both bot API and user API functionality
+Handles bot API and user API functionality
 """
 import logging
 import asyncio
@@ -116,6 +116,8 @@ class SimpleTelegramBot:
                 await self.show_main_menu(event)
             elif data == "cancel_auth":
                 await self.cancel_auth(event)
+            elif data == "login": # Added handler for login button
+                await self.start_login(event)
 
         except Exception as e:
             logger.error(f"خطأ في معالج الأزرار: {e}")
@@ -694,6 +696,21 @@ class SimpleTelegramBot:
             buttons=buttons
         )
 
+    async def start_login(self, event): # New function for login button
+        """Start login process"""
+        user_id = event.sender_id
+        session_data = self.db.get_user_session(user_id)
+
+        if session_data and len(session_data) >= 2 and session_data[2]: # Check for session string
+            await event.edit("🔄 أنت مسجل دخولك بالفعل.\n"
+                             "هل تريد تسجيل الخروج وإعادة تسجيل الدخول؟",
+                             buttons=[
+                                 [Button.inline("✅ نعم، إعادة تسجيل الدخول", b"auth_phone")],
+                                 [Button.inline("❌ لا، العودة للإعدادات", b"settings")]
+                             ])
+        else:
+            await self.start_auth(event) # If no session, start normal authentication
+
     async def handle_auth_message(self, event, state_data):
         """Handle authentication messages"""
         user_id = event.sender_id
@@ -755,10 +772,10 @@ class SimpleTelegramBot:
 
             await event.respond(
                 f"✅ تم إرسال رمز التحقق إلى {phone}\n\n"
-                "🔢 أرسل الرمز المكون من 5 أرقام:\n"
-                "• يمكن إضافة حروف لتجنب حظر تليجرام: aa12345\n"
-                "• أو إرسال الأرقام مباشرة: 12345\n\n"
-                "⏰ انتظر بضع ثواني حتى يصل الرمز",
+                f"🔢 أرسل الرمز المكون من 5 أرقام:\n"
+                f"• يمكن إضافة حروف لتجنب حظر تليجرام: aa12345\n"
+                f"• أو إرسال الأرقام مباشرة: 12345\n\n"
+                f"⏰ انتظر بضع ثواني حتى يصل الرمز",
                 buttons=buttons
             )
 
@@ -1052,7 +1069,7 @@ class SimpleTelegramBot:
         """Show settings menu"""
         buttons = [
             [Button.inline("🔍 فحص حالة UserBot", "check_userbot")],
-            [Button.inline("🔄 إعادة تسجيل الدخول", "login")],
+            [Button.inline("🔄 إعادة تسجيل الدخول", "login")], # Changed "re-login" to "login" to match handler
             [Button.inline("🗑️ حذف جميع المهام", "delete_all_tasks")],
             [Button.inline("🏠 القائمة الرئيسية", "main_menu")]
         ]
@@ -1070,8 +1087,9 @@ class SimpleTelegramBot:
         try:
             from userbot_service.userbot import userbot_instance
 
-            # Check if user is authenticated
-            if not self.db.is_user_authenticated(user_id):
+            # Check if user has session
+            session_data = self.db.get_user_session(user_id)
+            if not session_data or len(session_data) < 2: # Corrected check for session_data and its length
                 await event.edit(
                     "❌ **حالة UserBot: غير مسجل دخول**\n\n"
                     "🔐 يجب تسجيل الدخول أولاً\n"
