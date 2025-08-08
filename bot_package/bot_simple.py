@@ -302,11 +302,32 @@ class SimpleTelegramBot:
         new_status = not task['is_active']
         self.db.update_task_status(task_id, user_id, new_status)
 
-        # Update userbot tasks
+        # Update userbot tasks - ensure UserBot is running first
         try:
             from userbot_service.userbot import userbot_instance
+
+            # Check if UserBot is running, if not try to start it
+            if user_id not in userbot_instance.clients:
+                logger.info(f"🔄 UserBot غير متصل للمستخدم {user_id}, محاولة تشغيله...")
+                session_data = self.db.get_user_session(user_id)
+                if session_data and session_data[2]:  # session_string exists
+                    success = await userbot_instance.start_with_session(user_id, session_data[2])
+                    if success:
+                        logger.info(f"✅ تم تشغيل UserBot بنجاح للمستخدم {user_id}")
+                    else:
+                        logger.error(f"❌ فشل في تشغيل UserBot للمستخدم {user_id}")
+                else:
+                    logger.error(f"❌ لا توجد جلسة محفوظة للمستخدم {user_id}")
+
+            # Refresh tasks
             await userbot_instance.refresh_user_tasks(user_id)
             logger.info(f"تم تحديث مهام UserBot للمستخدم {user_id} بعد إنشاء المهمة")
+
+            # Verify task was loaded
+            user_tasks = userbot_instance.user_tasks.get(user_id, [])
+            active_tasks = [t for t in user_tasks if t.get('is_active', True)]
+            logger.info(f"📋 المهام النشطة للمستخدم {user_id}: {len(active_tasks)}")
+
         except Exception as e:
             logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 
@@ -327,11 +348,32 @@ class SimpleTelegramBot:
 
         self.db.delete_task(task_id, user_id)
 
-        # Update userbot tasks
+        # Update userbot tasks - ensure UserBot is running first
         try:
             from userbot_service.userbot import userbot_instance
+
+            # Check if UserBot is running, if not try to start it
+            if user_id not in userbot_instance.clients:
+                logger.info(f"🔄 UserBot غير متصل للمستخدم {user_id}, محاولة تشغيله...")
+                session_data = self.db.get_user_session(user_id)
+                if session_data and session_data[2]:  # session_string exists
+                    success = await userbot_instance.start_with_session(user_id, session_data[2])
+                    if success:
+                        logger.info(f"✅ تم تشغيل UserBot بنجاح للمستخدم {user_id}")
+                    else:
+                        logger.error(f"❌ فشل في تشغيل UserBot للمستخدم {user_id}")
+                else:
+                    logger.error(f"❌ لا توجد جلسة محفوظة للمستخدم {user_id}")
+
+            # Refresh tasks
             await userbot_instance.refresh_user_tasks(user_id)
             logger.info(f"تم تحديث مهام UserBot للمستخدم {user_id} بعد إنشاء المهمة")
+
+            # Verify task was loaded
+            user_tasks = userbot_instance.user_tasks.get(user_id, [])
+            active_tasks = [t for t in user_tasks if t.get('is_active', True)]
+            logger.info(f"📋 المهام النشطة للمستخدم {user_id}: {len(active_tasks)}")
+
         except Exception as e:
             logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 
@@ -513,7 +555,7 @@ class SimpleTelegramBot:
                         source_chat_names[i] = str(source_chat_ids[i])
                     else:
                         source_chat_names[i] = str(name)
-                
+
                 # Ensure all source_chat_ids are strings
                 source_chat_ids = [str(chat_id) for chat_id in source_chat_ids]
             except:
@@ -536,11 +578,32 @@ class SimpleTelegramBot:
         # Clear conversation state
         self.db.clear_conversation_state(user_id)
 
-        # Update userbot tasks
+        # Update userbot tasks - ensure UserBot is running first
         try:
             from userbot_service.userbot import userbot_instance
+
+            # Check if UserBot is running, if not try to start it
+            if user_id not in userbot_instance.clients:
+                logger.info(f"🔄 UserBot غير متصل للمستخدم {user_id}, محاولة تشغيله...")
+                session_data = self.db.get_user_session(user_id)
+                if session_data and session_data[2]:  # session_string exists
+                    success = await userbot_instance.start_with_session(user_id, session_data[2])
+                    if success:
+                        logger.info(f"✅ تم تشغيل UserBot بنجاح للمستخدم {user_id}")
+                    else:
+                        logger.error(f"❌ فشل في تشغيل UserBot للمستخدم {user_id}")
+                else:
+                    logger.error(f"❌ لا توجد جلسة محفوظة للمستخدم {user_id}")
+
+            # Refresh tasks
             await userbot_instance.refresh_user_tasks(user_id)
             logger.info(f"تم تحديث مهام UserBot للمستخدم {user_id} بعد إنشاء المهمة")
+
+            # Verify task was loaded
+            user_tasks = userbot_instance.user_tasks.get(user_id, [])
+            active_tasks = [t for t in user_tasks if t.get('is_active', True)]
+            logger.info(f"📋 المهام النشطة للمستخدم {user_id}: {len(active_tasks)}")
+
         except Exception as e:
             logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 

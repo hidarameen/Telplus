@@ -136,6 +136,8 @@ class UserbotService:
                         target_chat_id = task['target_chat_id'].strip()
                         task_name = task.get('task_name', f"مهمة {task['id']}")
                         
+                        logger.info(f"🔄 محاولة توجيه رسالة من {source_chat_id} إلى {target_chat_id} (المهمة: {task_name})")
+                        
                         # Parse target chat ID
                         if target_chat_id.startswith('@'):
                             target_entity = target_chat_id
@@ -143,17 +145,26 @@ class UserbotService:
                             target_entity = int(target_chat_id)
                         
                         # Forward the message
-                        await client.forward_messages(
+                        forwarded_msg = await client.forward_messages(
                             target_entity,
                             event.message
                         )
                         
                         logger.info(f"✅ تم توجيه رسالة من {source_chat_id} إلى {target_chat_id} (المهمة: {task_name}) للمستخدم {user_id}")
+                        logger.info(f"📝 معرف الرسالة المُوجهة: {forwarded_msg[0].id if forwarded_msg else 'غير معروف'}")
                         
                     except Exception as forward_error:
                         task_name = task.get('task_name', f"مهمة {task['id']}")
                         logger.error(f"❌ خطأ في توجيه الرسالة (المهمة: {task_name}) للمستخدم {user_id}: {forward_error}")
                         logger.error(f"تفاصيل الخطأ: مصدر={source_chat_id}, هدف={target_chat_id}")
+                        
+                        # Additional error details
+                        if "CHAT_ADMIN_REQUIRED" in str(forward_error):
+                            logger.error(f"🚫 يجب أن يكون UserBot مشرف في {target_chat_id}")
+                        elif "USER_BANNED_IN_CHANNEL" in str(forward_error):
+                            logger.error(f"🚫 UserBot محظور في {target_chat_id}")
+                        elif "CHANNEL_PRIVATE" in str(forward_error):
+                            logger.error(f"🚫 لا يمكن الوصول إلى {target_chat_id} - قناة خاصة")
                         
             except Exception as e:
                 logger.error(f"خطأ في معالج الرسائل للمستخدم {user_id}: {e}")
