@@ -12,7 +12,7 @@ import os
 import asyncio
 import logging
 from bot_package.bot_simple import run_simple_bot
-from userbot_service.userbot import userbot_instance
+from userbot_service.userbot import userbot_instance, start_userbot_service, stop_userbot_service
 from bot_package.config import BOT_TOKEN, API_ID, API_HASH
 
 # Set up logging
@@ -27,7 +27,7 @@ class TelegramBotSystem:
         self.bot_thread = None
         self.userbot_thread = None
         self.running = True
-    
+
     def start_telegram_bot(self):
         """Start Telegram bot"""
         logger.info("🤖 بدء تشغيل بوت تليجرام...")
@@ -35,7 +35,7 @@ class TelegramBotSystem:
             run_simple_bot()
         except Exception as e:
             logger.error(f"خطأ في بوت تليجرام: {e}")
-    
+
     def start_userbot_service(self):
         """Start userbot service (will wait for authentication)"""
         logger.info("👤 خدمة UserBot جاهزة وتنتظر تسجيل الدخول...")
@@ -45,26 +45,26 @@ class TelegramBotSystem:
                 time.sleep(1)
         except KeyboardInterrupt:
             pass
-    
+
     def start_all_services(self):
         """Start all services"""
         logger.info("🚀 بدء تشغيل نظام بوت تليجرام...")
-        
+
         # Start Telegram bot in separate thread
         self.bot_thread = threading.Thread(target=self.start_telegram_bot, daemon=True)
         self.bot_thread.start()
-        
+
         # Start userbot service monitoring
         self.userbot_thread = threading.Thread(target=self.start_userbot_service, daemon=True)
         self.userbot_thread.start()
-        
+
         logger.info("✅ تم تشغيل جميع الخدمات بنجاح")
         self.print_startup_info()
-    
+
     def print_startup_info(self):
         """Print startup information"""
         bot_username = BOT_TOKEN.split(':')[0] if BOT_TOKEN and ':' in BOT_TOKEN else 'غير محدد'
-        
+
         print("\n" + "="*60)
         print("🤖 نظام بوت التوجيه التلقائي - تليجرام")
         print("="*60)
@@ -83,12 +83,12 @@ class TelegramBotSystem:
         print("="*60)
         print("⌨️  اضغط Ctrl+C لإيقاف النظام")
         print("="*60)
-    
+
     def stop(self):
         """Stop all services"""
         logger.info("⏹️ إيقاف جميع الخدمات...")
         self.running = False
-        
+
         # Stop userbot if running
         try:
             loop = asyncio.new_event_loop()
@@ -97,7 +97,7 @@ class TelegramBotSystem:
             loop.close()
         except Exception as e:
             logger.error(f"خطأ في إيقاف UserBot: {e}")
-        
+
         logger.info("✅ تم إيقاف النظام بنجاح")
         sys.exit(0)
 
@@ -110,12 +110,12 @@ def check_environment():
     """Check if required environment variables are set"""
     required_vars = ['BOT_TOKEN', 'API_ID', 'API_HASH']
     missing_vars = []
-    
+
     for var in required_vars:
         value = os.getenv(var)
         if not value or (var != 'API_ID' and value == f'your_{var.lower()}_here'):
             missing_vars.append(var)
-    
+
     if missing_vars:
         print("\n" + "="*60)
         print("❌ متغيرات البيئة المطلوبة مفقودة:")
@@ -134,34 +134,34 @@ def check_environment():
         print("3. أعد تشغيل البرنامج")
         print("="*60)
         return False
-    
+
     return True
 
 def main():
     """Main function"""
     global bot_system
-    
+
     logger.info("🚀 بدء تشغيل نظام بوت تليجرام...")
-    
+
     # Check environment variables
     if not check_environment():
         sys.exit(1)
-    
+
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     # Create bot system instance
     bot_system = TelegramBotSystem()
-    
+
     try:
         # Start all services
         bot_system.start_all_services()
-        
+
         # Keep main thread alive
         while bot_system.running:
             time.sleep(1)
-            
+
     except KeyboardInterrupt:
         logger.info("🛑 تم الإيقاف بواسطة المستخدم")
         bot_system.stop()

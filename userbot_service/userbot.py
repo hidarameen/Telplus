@@ -244,17 +244,41 @@ class UserbotService:
     async def startup_existing_sessions(self):
         """Start userbot for all existing authenticated users"""
         try:
-            # This would be called on system startup to restore all user sessions
-            # For now, we'll implement it as a placeholder since sessions are started
-            # when users authenticate through the bot
-            logger.info("بحث عن جلسات المستخدمين الموجودة...")
+            logger.info("🔍 بحث عن جلسات المستخدمين المحفوظة...")
             
-            # In a real implementation, you might want to:
-            # 1. Query database for all authenticated users
-            # 2. Start their userbot sessions
-            # 3. Load their tasks
+            # Get all authenticated users from database
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT user_id, session_string, phone_number 
+                    FROM user_sessions 
+                    WHERE is_authenticated = 1 AND session_string IS NOT NULL
+                ''')
+                saved_sessions = cursor.fetchall()
             
-            logger.info("تم تشغيل جلسات المستخدمين الموجودة")
+            if not saved_sessions:
+                logger.info("📝 لا توجد جلسات محفوظة")
+                return
+            
+            logger.info(f"📱 تم العثور على {len(saved_sessions)} جلسة محفوظة")
+            
+            # Start userbot for each saved session
+            for user_id, session_string, phone_number in saved_sessions:
+                try:
+                    logger.info(f"🔄 بدء تشغيل UserBot للمستخدم {user_id} ({phone_number})")
+                    success = await self.start_with_session(user_id, session_string)
+                    
+                    if success:
+                        logger.info(f"✅ تم تشغيل UserBot بنجاح للمستخدم {user_id}")
+                    else:
+                        logger.warning(f"⚠️ فشل في تشغيل UserBot للمستخدم {user_id}")
+                        
+                except Exception as user_error:
+                    logger.error(f"❌ خطأ في تشغيل UserBot للمستخدم {user_id}: {user_error}")
+                    continue
+                    
+            active_clients = len(self.clients)
+            logger.info(f"🎉 تم تشغيل {active_clients} من أصل {len(saved_sessions)} جلسة محفوظة")
             
         except Exception as e:
             logger.error(f"خطأ في تشغيل الجلسات الموجودة: {e}")

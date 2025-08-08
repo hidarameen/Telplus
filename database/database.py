@@ -111,6 +111,17 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM user_sessions WHERE user_id = ?', (user_id,))
             conn.commit()
+    
+    def get_all_authenticated_users(self):
+        """Get all authenticated users with their sessions"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT user_id, phone_number, session_string 
+                FROM user_sessions 
+                WHERE is_authenticated = 1 AND session_string IS NOT NULL
+            ''')
+            return cursor.fetchall()
 
     # Task Management
     def create_task(self, user_id: int, task_name: str, source_chat_ids: list, 
