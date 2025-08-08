@@ -742,23 +742,22 @@ class Database:
             return cursor.rowcount > 0
 
     def get_filter_words(self, task_id: int, filter_type: str):
-        """Get all words/phrases for a filter"""
+        """Get all words/phrases for a filter - returns format compatible with bot functions"""
         filter_id = self.get_word_filter_id(task_id, filter_type)
         
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT word_or_phrase, is_case_sensitive FROM word_filter_entries
+                SELECT id, word_or_phrase, is_case_sensitive FROM word_filter_entries
                 WHERE filter_id = ?
                 ORDER BY word_or_phrase
             ''', (filter_id,))
             
+            # Return tuples in format (id, filter_id, word_or_phrase)
+            # This matches the expected format used in view_filter_words function
             words = []
             for row in cursor.fetchall():
-                words.append({
-                    'word': row['word_or_phrase'],
-                    'case_sensitive': bool(row['is_case_sensitive'])
-                })
+                words.append((row['id'], filter_id, row['word_or_phrase']))
             return words
 
     def get_word_id(self, task_id: int, filter_type: str, word: str):
@@ -870,3 +869,30 @@ class Database:
                         return False
         
         return True  # Message is allowed
+
+    def add_multiple_filter_words(self, task_id: int, filter_type: str, words_list: list):
+        """Add multiple words to a filter"""
+        filter_id = self.get_word_filter_id(task_id, filter_type)
+        added_count = 0
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for word in words_list:
+                word = word.strip()
+                if word:  # Only add non-empty words
+                    # Check if word already exists
+                    cursor.execute('''
+                        SELECT id FROM word_filter_entries
+                        WHERE filter_id = ? AND word_or_phrase = ?
+                    ''', (filter_id, word))
+                    
+                    if not cursor.fetchone():
+                        cursor.execute('''
+                            INSERT INTO word_filter_entries (filter_id, word_or_phrase, is_case_sensitive)
+                            VALUES (?, ?, FALSE)
+                        ''', (filter_id, word))
+                        added_count += 1
+            
+            conn.commit()
+            logger.info(f"✅ تم إضافة {added_count} كلمة إلى فلتر {filter_type} للمهمة {task_id}")
+            return added_count
