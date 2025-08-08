@@ -323,7 +323,8 @@ class UserbotService:
                         if tasks:
                             logger.info(f"👤 المستخدم {user_id}: {len(tasks)} مهمة")
                             for task in tasks:
-                                logger.info(f"   📝 {task.get('task_name', f'مهمة {task['id']}')} - {task['source_chat_id']} → {task['target_chat_id']}")
+                                task_name = task.get('task_name', f"مهمة {task['id']}")
+                                logger.info(f"   📝 {task_name} - {task['source_chat_id']} → {task['target_chat_id']}")
                 else:
                     logger.warning("⚠️ لا توجد مهام نشطة - لن يتم توجيه أي رسائل")
             else:
