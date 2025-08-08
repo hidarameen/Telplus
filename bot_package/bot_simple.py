@@ -222,7 +222,8 @@ class SimpleTelegramBot:
             await event.respond(
                 f"✅ تم إرسال رمز التحقق إلى {phone}\n\n"
                 "🔢 أرسل الرمز المكون من 5 أرقام:\n"
-                "مثال: 12345\n\n"
+                "• يمكن إضافة حروف لتجنب حظر تليجرام: aa12345\n"
+                "• أو إرسال الأرقام مباشرة: 12345\n\n"
                 "⏰ انتظر بضع ثواني حتى يصل الرمز",
                 buttons=buttons
             )
@@ -240,14 +241,21 @@ class SimpleTelegramBot:
         """Handle verification code input"""
         user_id = event.sender_id
         
-        # Validate code format
-        if not code.isdigit() or len(code) != 5:
+        # Extract digits from the message (handles formats like aa12345)
+        extracted_code = ''.join([char for char in code if char.isdigit()])
+        
+        # Validate extracted code
+        if len(extracted_code) != 5:
             await event.respond(
                 "❌ تنسيق الرمز غير صحيح\n\n"
-                "🔢 أرسل الرمز المكون من 5 أرقام بدون مسافات\n"
-                "مثال: 12345"
+                "🔢 أرسل الرمز المكون من 5 أرقام\n"
+                "يمكن إضافة حروف لتجنب الحظر مثل: aa12345\n"
+                "أو إرسال الأرقام مباشرة: 12345"
             )
             return
+        
+        # Use the extracted code
+        code = extracted_code
         
         try:
             auth_data = json.loads(data)
