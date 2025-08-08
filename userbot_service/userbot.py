@@ -899,7 +899,7 @@ class UserbotService:
             logger.error(f"خطأ في تشغيل الجلسات الموجودة: {e}")
 
     def fetch_channel_admins_sync(self, user_id: int, channel_id: str, task_id: int) -> int:
-        """Fetch channel admins and store them in database"""
+        """Fetch channel admins and store them in database using threading"""
         try:
             if user_id not in self.clients:
                 logger.error(f"لا توجد جلسة للمستخدم {user_id}")
@@ -910,12 +910,73 @@ class UserbotService:
                 logger.error(f"عميل UserBot غير متصل للمستخدم {user_id}")
                 return -1
             
-            # Store this task for later processing
-            # For now, return -2 to indicate that we need API credentials or configuration
-            logger.error(f"خطأ في الحصول على مشرفي القناة {channel_id}: مشكلة في asyncio event loop")
-            logger.info(f"💡 لحل هذه المشكلة، يحتاج المطور لإعداد API credentials صحيحة أو تحديث طريقة الاتصال")
-            return -2
+            # Use threading to run async code in a separate event loop
+            import concurrent.futures
+            import threading
             
+            def run_async_fetch():
+                """Run the async fetch in a new thread with its own event loop"""
+                try:
+                    # Create new event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    async def fetch_admins():
+                        # Get participants with admin filter
+                        participants = []
+                        try:
+                            async for participant in client.iter_participants(int(channel_id), filter='admin'):
+                                participants.append(participant)
+                                # Limit to reasonable number
+                                if len(participants) >= 50:
+                                    break
+                        except Exception as e:
+                            logger.error(f"خطأ في جلب المشاركين: {e}")
+                            return []
+                        return participants
+                    
+                    # Run the async function
+                    result = loop.run_until_complete(fetch_admins())
+                    loop.close()
+                    return result
+                    
+                except Exception as e:
+                    logger.error(f"خطأ في thread الجديد: {e}")
+                    return []
+            
+            # Execute in thread pool
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_async_fetch)
+                participants = future.result(timeout=30)  # 30 second timeout
+            
+            if not participants:
+                logger.info(f"لم يتم العثور على مشرفين في القناة {channel_id}")
+                return 0
+            
+            # Clear existing admins for this source
+            self.db.clear_admin_filters_for_source(task_id, channel_id)
+            
+            # Add new admins
+            admin_count = 0
+            for participant in participants:
+                try:
+                    self.db.add_admin_filter(
+                        task_id=task_id,
+                        admin_user_id=participant.id,
+                        admin_username=participant.username or "",
+                        admin_first_name=participant.first_name or "",
+                        is_allowed=True
+                    )
+                    admin_count += 1
+                except Exception as e:
+                    logger.error(f"خطأ في إضافة المشرف {participant.id}: {e}")
+            
+            logger.info(f"✅ تم تحديث {admin_count} مشرف للقناة {channel_id}")
+            return admin_count
+            
+        except concurrent.futures.TimeoutError:
+            logger.error(f"انتهت مهلة الاتصال للقناة {channel_id}")
+            return -1
         except Exception as e:
             logger.error(f"خطأ في جلب مشرفي القناة {channel_id}: {e}")
             return -1

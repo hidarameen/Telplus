@@ -3,7 +3,14 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 8, 2025 (CRITICAL BUG FIXES - Advanced Filters System)**: Fixed all issues with 7-filter advanced system:
+- **August 8, 2025 (ADMIN FILTER ENHANCEMENT)**: Completed admin filter with UI improvements:
+  - **ENHANCED**: Admin filter UI with single refresh button and integrated display
+  - **FIXED**: Removed duplicate refresh buttons for cleaner interface
+  - **IMPROVED**: Admin names display in same list with ✅/❌ toggle controls
+  - **ADDED**: Proper error handling for technical limitations with clear user messaging
+  - **DOCUMENTED**: AsyncIO event loop limitation when fetching admins via UserBot from bot context
+  - **STATUS**: Admin filter functional with manual configuration, auto-fetch blocked by technical limitation
+- **August 8, 2025 (Previous - CRITICAL BUG FIXES - Advanced Filters System)**: Fixed all issues with 7-filter advanced system:
   - **FIXED**: callback data parsing for multi-word filter types (forwarded_message, inline_button, etc.)
   - **ADDED**: Complete handlers for all missing filter buttons (working hours, language, duplicate, admin settings)
   - **ENHANCED**: Filter toggle functionality with proper status updates and UI refresh
