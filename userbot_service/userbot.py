@@ -149,25 +149,29 @@ class UserbotService:
                             is_message_allowed = admin_allowed and media_allowed and word_filter_allowed
                             filter_type = f"الوسائط ({message_media_type})"
                         
+                        logger.error(f"🚨 === قرار نهائي: is_message_allowed = {is_message_allowed} ===")
+                        
                         if is_message_allowed:
+                            logger.error(f"🚨 === إضافة المهمة للقائمة المطابقة ===")
                             matching_tasks.append(task)
                             if has_text_caption and message_media_type != 'text':
                                 logger.info(f"✅ الرسالة مسموحة - {filter_type} مسموح مع caption وفلاتر الكلمات")
                             else:
                                 logger.info(f"✅ {filter_type} مسموح لهذه المهمة وفلاتر الكلمات")
                         else:
+                            logger.error(f"🚨 === رفض المهمة - الرسالة محظورة ===")
                             # Check which filter blocked the message
                             if not admin_allowed:
-                                logger.info(f"🚫 الرسالة محظورة بواسطة فلتر المشرفين - المرسل {event.sender_id} غير مسموح")
+                                logger.error(f"🚫 الرسالة محظورة بواسطة فلتر المشرفين - المرسل {event.sender_id} غير مسموح")
                             elif not media_allowed:
-                                logger.info(f"🚫 {filter_type} محظور لهذه المهمة (فلتر الوسائط)")
+                                logger.error(f"🚫 {filter_type} محظور لهذه المهمة (فلتر الوسائط)")
                             elif not word_filter_allowed:
-                                logger.info(f"🚫 الرسالة محظورة بواسطة فلتر الكلمات")
+                                logger.error(f"🚫 الرسالة محظورة بواسطة فلتر الكلمات")
                             else:
                                 if has_text_caption and message_media_type != 'text':
-                                    logger.info(f"🚫 {filter_type} محظور لهذه المهمة (مع caption)")
+                                    logger.error(f"🚫 {filter_type} محظور لهذه المهمة (مع caption)")
                                 else:
-                                    logger.info(f"🚫 {filter_type} محظور لهذه المهمة")
+                                    logger.error(f"🚫 {filter_type} محظور لهذه المهمة")
                     else:
                         logger.info(f"❌ لا يوجد تطابق للمهمة '{task_name}': '{task_source_id}' != '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
@@ -596,6 +600,10 @@ class UserbotService:
             if not admin_filter_enabled:
                 logger.error(f"🚨 فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
                 return True
+            
+            # DEBUG: Get all allowed admins for this task
+            allowed_admins = db.get_task_allowed_admins(task_id)
+            logger.error(f"🚨 [ADMIN FILTER DEBUG] جميع المشرفين المسموحين للمهمة {task_id}: {allowed_admins}")
             
             # Check if sender is in allowed admin list
             is_allowed = db.is_admin_allowed(task_id, sender_id)
