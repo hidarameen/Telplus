@@ -225,6 +225,10 @@ class UserbotService:
                         inline_buttons = None
                         if message_settings['inline_buttons_enabled']:
                             inline_buttons = self.build_inline_buttons(task['id'])
+                            if inline_buttons:
+                                logger.info(f"🔘 تم بناء {len(inline_buttons)} صف من الأزرار الإنلاين للمهمة {task['id']}")
+                            else:
+                                logger.warning(f"⚠️ فشل في بناء الأزرار الإنلاين للمهمة {task['id']}")
 
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")
@@ -413,6 +417,7 @@ class UserbotService:
             from database.database import Database
             db = Database()
             settings = db.get_message_settings(task_id)
+            logger.info(f"🔧 إعدادات الرسالة للمهمة {task_id}: أزرار إنلاين={settings.get('inline_buttons_enabled', False)}")
             return settings
         except Exception as e:
             logger.error(f"خطأ في الحصول على إعدادات الرسالة: {e}")
@@ -450,7 +455,10 @@ class UserbotService:
             db = Database()
             buttons_data = db.get_inline_buttons(task_id)
             
+            logger.info(f"🔍 فحص أزرار إنلاين للمهمة {task_id}: تم العثور على {len(buttons_data) if buttons_data else 0} زر")
+            
             if not buttons_data:
+                logger.warning(f"❌ لا توجد أزرار إنلاين للمهمة {task_id}")
                 return None
             
             # Group buttons by row
