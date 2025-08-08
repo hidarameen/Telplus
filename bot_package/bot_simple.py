@@ -912,12 +912,14 @@ class SimpleTelegramBot:
         code = extracted_code
 
         try:
-            auth_data = json.loads(data)
+            # data is already a dict from handle_auth_message
+            auth_data = data
             phone = auth_data['phone']
             phone_code_hash = auth_data['phone_code_hash']
 
             # Create client and sign in
-            temp_client = TelegramClient(':memory:', int(API_ID), API_HASH)
+            session_name = auth_data.get('session_name', f'auth_{user_id}_{int(datetime.now().timestamp())}')
+            temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
             await temp_client.connect()
 
             try:
@@ -1007,7 +1009,8 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         try:
-            auth_data = json.loads(data)
+            # data is already a dict from handle_auth_message
+            auth_data = data
             phone = auth_data['phone']
             session_string = auth_data['session_client'] # This is the session string from previous step
 
