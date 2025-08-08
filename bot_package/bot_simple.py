@@ -325,11 +325,24 @@ class SimpleTelegramBot:
         if not sources:
             message += "❌ لا توجد مصادر حالياً\n\n"
         else:
-            message += f"📋 المصادر الحالية ({len(sources)}):""\n\n"
+            message += f"📋 المصادر الحالية ({len(sources)}):\n\n"
             for i, source in enumerate(sources[:10], 1):  # Show max 10
-                name = source.get('chat_name') or source.get('chat_id')
-                message += f"{i}. {name}\n"
-                message += f"   📍 `{source.get('chat_id')}`\n\n"
+                chat_id = source.get('chat_id')
+                chat_name = source.get('chat_name') or chat_id
+                
+                # Create channel link if it's a channel ID (starts with -100)
+                if str(chat_id).startswith('-100'):
+                    # Convert -100XXXXXXXXX to https://t.me/c/XXXXXXXXX/1
+                    clean_id = str(chat_id)[4:]  # Remove -100 prefix
+                    channel_link = f"https://t.me/c/{clean_id}/1"
+                    message += f"{i}. [{chat_name}]({channel_link})\n\n"
+                else:
+                    # For usernames or other formats
+                    if str(chat_id).startswith('@'):
+                        channel_link = f"https://t.me/{chat_id[1:]}"
+                        message += f"{i}. [{chat_name}]({channel_link})\n\n"
+                    else:
+                        message += f"{i}. {chat_name}\n\n"
 
         buttons = [
             [Button.inline("➕ إضافة مصدر", f"add_source_{task_id}")]
@@ -368,11 +381,24 @@ class SimpleTelegramBot:
         if not targets:
             message += "❌ لا توجد أهداف حالياً\n\n"
         else:
-            message += f"📋 الأهداف الحالية ({len(targets)}):""\n\n"
+            message += f"📋 الأهداف الحالية ({len(targets)}):\n\n"
             for i, target in enumerate(targets[:10], 1):  # Show max 10
-                name = target.get('chat_name') or target.get('chat_id')
-                message += f"{i}. {name}\n"
-                message += f"   📍 `{target.get('chat_id')}`\n\n"
+                chat_id = target.get('chat_id')
+                chat_name = target.get('chat_name') or target.get('chat_id')
+                
+                # Create channel link if it's a channel ID (starts with -100)
+                if str(chat_id).startswith('-100'):
+                    # Convert -100XXXXXXXXX to https://t.me/c/XXXXXXXXX/1
+                    clean_id = str(chat_id)[4:]  # Remove -100 prefix
+                    channel_link = f"https://t.me/c/{clean_id}/1"
+                    message += f"{i}. [{chat_name}]({channel_link})\n\n"
+                else:
+                    # For usernames or other formats
+                    if str(chat_id).startswith('@'):
+                        channel_link = f"https://t.me/{chat_id[1:]}"
+                        message += f"{i}. [{chat_name}]({channel_link})\n\n"
+                    else:
+                        message += f"{i}. {chat_name}\n\n"
 
         buttons = [
             [Button.inline("➕ إضافة هدف", f"add_target_{task_id}")]
@@ -658,26 +684,52 @@ class SimpleTelegramBot:
         ]
 
         # Build sources text
-        sources_text = f"📥 **المصادر ({len(sources)}):**\n"
+        sources_text = f"📥 المصادر ({len(sources)}):\n"
         if not sources:
             sources_text += "• لا توجد مصادر\n"
         else:
             for i, source in enumerate(sources[:5], 1):  # Show max 5
-                source_name = source.get('chat_name') or source.get('chat_id')
-                sources_text += f"• {source_name}\n"
-                sources_text += f"  📍 `{source.get('chat_id')}`\n"
+                chat_id = source.get('chat_id')
+                chat_name = source.get('chat_name') or chat_id
+                
+                # Create channel link if it's a channel ID (starts with -100)
+                if str(chat_id).startswith('-100'):
+                    # Convert -100XXXXXXXXX to https://t.me/c/XXXXXXXXX/1
+                    clean_id = str(chat_id)[4:]  # Remove -100 prefix
+                    channel_link = f"https://t.me/c/{clean_id}/1"
+                    sources_text += f"• [{chat_name}]({channel_link})\n"
+                else:
+                    # For usernames or other formats
+                    if str(chat_id).startswith('@'):
+                        channel_link = f"https://t.me/{chat_id[1:]}"
+                        sources_text += f"• [{chat_name}]({channel_link})\n"
+                    else:
+                        sources_text += f"• {chat_name}\n"
             if len(sources) > 5:
                 sources_text += f"  ... و {len(sources) - 5} مصدر آخر\n"
 
         # Build targets text
-        targets_text = f"\n📤 **الأهداف ({len(targets)}):**\n"
+        targets_text = f"\n📤 الأهداف ({len(targets)}):\n"
         if not targets:
             targets_text += "• لا توجد أهداف\n"
         else:
             for i, target in enumerate(targets[:5], 1):  # Show max 5
-                target_name = target.get('chat_name') or target.get('chat_id')
-                targets_text += f"• {target_name}\n"
-                targets_text += f"  📍 `{target.get('chat_id')}`\n"
+                chat_id = target.get('chat_id')
+                chat_name = target.get('chat_name') or chat_id
+                
+                # Create channel link if it's a channel ID (starts with -100)
+                if str(chat_id).startswith('-100'):
+                    # Convert -100XXXXXXXXX to https://t.me/c/XXXXXXXXX/1
+                    clean_id = str(chat_id)[4:]  # Remove -100 prefix
+                    channel_link = f"https://t.me/c/{clean_id}/1"
+                    targets_text += f"• [{chat_name}]({channel_link})\n"
+                else:
+                    # For usernames or other formats
+                    if str(chat_id).startswith('@'):
+                        channel_link = f"https://t.me/{chat_id[1:]}"
+                        targets_text += f"• [{chat_name}]({channel_link})\n"
+                    else:
+                        targets_text += f"• {chat_name}\n"
             if len(targets) > 5:
                 targets_text += f"  ... و {len(targets) - 5} هدف آخر\n"
 
