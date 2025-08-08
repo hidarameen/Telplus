@@ -300,7 +300,8 @@ class SimpleTelegramBot:
                     try:
                         task_id = int(parts[2])
                         admin_user_id = int(parts[3])
-                        await self.toggle_admin(event, task_id, admin_user_id)
+                        source_chat_id = parts[4] if len(parts) >= 5 else None
+                        await self.toggle_admin(event, task_id, admin_user_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المشرف للتبديل: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -4788,7 +4789,7 @@ class SimpleTelegramBot:
             for admin in admin_filters:
                 status = "✅" if admin['is_allowed'] else "❌"
                 name = admin['admin_first_name'] or admin['admin_username'] or f"المستخدم {admin['admin_user_id']}"
-                admin_buttons.append([Button.inline(f"{status} {name}", f"toggle_admin_{task_id}_{admin['admin_user_id']}")])
+                admin_buttons.append([Button.inline(f"{status} {name}", f"toggle_admin_{task_id}_{admin['admin_user_id']}_{source_chat_id}")])
         
         # Control buttons - only one refresh button
         control_buttons = [
@@ -4808,7 +4809,7 @@ class SimpleTelegramBot:
             buttons=buttons
         )
     
-    async def toggle_admin(self, event, task_id, admin_user_id):
+    async def toggle_admin(self, event, task_id, admin_user_id, source_chat_id=None):
         """Toggle admin filter status"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
@@ -4826,20 +4827,17 @@ class SimpleTelegramBot:
             # Refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
             
-            # Find which source this admin belongs to and refresh that view
-            admin_filters = self.db.get_admin_filters(task_id)
-            admin_found = None
-            for admin in admin_filters:
-                if admin['admin_user_id'] == admin_user_id:
-                    admin_found = admin
-                    break
-                    
-            if admin_found:
-                # Get source chat ID for this admin - we'll need to enhance the database to track this
-                # For now, just refresh the general admin filters view
-                await self.show_admin_filters(event, task_id)
+            # Stay in the same source admin view if source_chat_id is provided
+            if source_chat_id:
+                await self.show_source_admins(event, task_id, source_chat_id)
             else:
-                await self.show_admin_filters(event, task_id)
+                # Fallback to first source if no specific source provided
+                sources = self.db.get_task_sources(task_id)
+                if sources:
+                    first_source = sources[0]['chat_id']
+                    await self.show_source_admins(event, task_id, first_source)
+                else:
+                    await self.show_admin_filters(event, task_id)
         else:
             await event.answer("❌ فشل في تغيير حالة المشرف")
     
