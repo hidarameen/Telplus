@@ -6,10 +6,13 @@ This is a Telegram message forwarding automation system built entirely with Tele
 - **August 8, 2025**: Completely rebuilt word filter system with comprehensive features:
   - Fixed critical callback data parsing issues for word filter buttons
   - Added missing database methods for word filter enable/disable functionality 
-  - Implemented comprehensive word filter interface with separate whitelist/blacklist controls
+  - **NEW: Separated whitelist and blacklist into independent management interfaces**
+  - **NEW: Each filter type has its own dedicated button with sub-controls**
+  - Implemented comprehensive word filter interface with separate controls
   - Added multi-word input capability (lines, commas, phrases supported)
   - Added filter viewing functionality showing current word counts
   - Added secure filter clearing with confirmation dialogs
+  - **NEW: Context-aware navigation - each filter returns to its own management page**
   - Integrated all features with UserBot for real-time message filtering
   - Enhanced error handling and logging throughout the system
 
