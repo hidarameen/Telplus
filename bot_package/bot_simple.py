@@ -503,7 +503,8 @@ class SimpleTelegramBot:
                 parts = data.split("_")
                 if len(parts) >= 5:
                     try:
-                        task_id = int(parts[4])
+                        # Get the last part which should be the task_id
+                        task_id = int(parts[-1])
                         await self.clear_inline_buttons_execute(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الأزرار: {e}, data='{data}', parts={parts}")
@@ -3517,13 +3518,17 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للإعدادات", f"task_settings_{task_id}")]
         ]
 
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
         await event.edit(
             f"🔘 أزرار إنلاين - المهمة #{task_id}\n\n"
             f"📊 **الحالة**: {status}\n"
             f"🔢 **عدد الأزرار**: {len(buttons_list)}\n\n"
             f"🔄 **الوظيفة**: إضافة أزرار قابلة للنقر أسفل الرسائل المُوجهة\n\n"
             f"💡 **مثال**: زر 'زيارة الموقع' أو 'اشترك في القناة'\n\n"
-            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الأزرار",
+            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الأزرار\n\n"
+            f"🕐 آخر تحديث: {timestamp}",
             buttons=buttons
         )
 
@@ -3544,9 +3549,8 @@ class SimpleTelegramBot:
             self.db.clear_inline_buttons(task_id)
             await event.answer("✅ تم إلغاء تفعيل الأزرار الإنلاين")
         else:
-            # Currently disabled, enable by redirecting to add button
-            await self.start_add_inline_button(event, task_id)
-            return
+            # Currently disabled, show info message
+            await event.answer("💡 لتفعيل الأزرار، اضغط 'إضافة أزرار' وأضف زر واحد على الأقل")
         
         await self.show_inline_buttons_settings(event, task_id)
 
