@@ -262,6 +262,48 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر المشرفين: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("admin_list_"): # Handler for admin list
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_admin_list(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لقائمة المشرفين: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("source_admins_"): # Handler for source admins
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[2])
+                        source_chat_id = parts[3]
+                        await self.show_source_admins(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر لمشرفي المصدر: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("refresh_source_admins_"): # Handler for refreshing source admins
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        source_chat_id = parts[4]
+                        await self.refresh_source_admin_list(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر لتحديث المشرفين: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+                    except IndexError as e:
+                        logger.error(f"❌ خطأ في تحليل البيانات لتحديث المشرفين: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_admin_"): # Handler for toggle admin
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[2])
+                        admin_user_id = int(parts[3])
+                        await self.toggle_admin(event, task_id, admin_user_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/المشرف للتبديل: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("duplicate_filter_"): # Handler for duplicate filter
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -288,6 +330,24 @@ class SimpleTelegramBot:
                         await self.show_forwarded_message_filter(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلتر الرسائل المعاد توجيهها: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_inline_block_"): # Handler for toggle inline button block
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_inline_button_block(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الأزرار: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_forwarded_block_"): # Handler for toggle forwarded message block
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_forwarded_message_block(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الرسائل المعاد توجيهها: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_advanced_filter_"): # Handler for toggling advanced filters
                 parts = data.split("_")
@@ -4784,7 +4844,7 @@ class SimpleTelegramBot:
             await event.answer("❌ فشل في تغيير حالة المشرف")
     
     async def refresh_source_admin_list(self, event, task_id, source_chat_id):
-        """Refresh admin list for a specific source channel"""
+        """Refresh admin list for a specific source channel using Bot API"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
@@ -4795,14 +4855,8 @@ class SimpleTelegramBot:
         await event.answer("🔄 جاري تحديث مشرفي هذه القناة...")
         
         try:
-            # Access userbot through userbot_instance using a different approach
-            from userbot_service.userbot import userbot_instance
-            
-            # Add a small delay to let the previous operation complete
-            await asyncio.sleep(0.5)
-            
-            # Use userbot's fetch_admins method which handles the async properly
-            admin_count = await userbot_instance.fetch_channel_admins(user_id, source_chat_id, task_id)
+            # Use bot API to fetch admins
+            admin_count = await self.fetch_channel_admins_with_bot(task_id, source_chat_id)
             
             if admin_count > 0:
                 await event.edit(f"✅ تم تحديث {admin_count} مشرف للقناة")
@@ -4813,14 +4867,75 @@ class SimpleTelegramBot:
                 await event.edit("✅ لا يوجد مشرفون في هذه القناة")
                 await asyncio.sleep(0.3)
                 await self.show_source_admins(event, task_id, source_chat_id)
-            elif admin_count == -2:
-                await event.edit("⚠️ مشكلة تقنية في جلب المشرفين من تليجرام\n💡 تم إضافة المالك كمشرف للاختبار")
             else:
-                await event.edit("❌ فشل في الحصول على المشرفين. تأكد من أن الحساب عضو في القناة")
+                await event.edit("❌ فشل في الحصول على المشرفين. تأكد من أن البوت عضو في القناة وله صلاحيات كافية")
                 
         except Exception as e:
             logger.error(f"❌ خطأ في تحديث مشرفي القناة {source_chat_id}: {e}")
             await event.edit("❌ حدث خطأ أثناء تحديث مشرفي القناة. جرب مرة أخرى")
+
+    async def fetch_channel_admins_with_bot(self, task_id: int, channel_id: str) -> int:
+        """Fetch channel admins using Bot API instead of UserBot"""
+        try:
+            # Clear existing admins for this source first
+            self.db.clear_admin_filters_for_source(task_id, channel_id)
+            
+            # Convert channel_id to proper format
+            try:
+                channel_entity = int(channel_id)
+            except ValueError:
+                # If it's a username, use as is
+                channel_entity = channel_id
+            
+            # Get chat administrators using bot API
+            chat_members = await self.bot.get_participants(channel_entity, filter='admins')
+            
+            admin_count = 0
+            for member in chat_members:
+                try:
+                    user_id = member.id
+                    username = getattr(member, 'username', '') or ''
+                    first_name = getattr(member, 'first_name', '') or f'مشرف {user_id}'
+                    
+                    # Add admin to database
+                    self.db.add_admin_filter(
+                        task_id=task_id,
+                        admin_user_id=user_id,
+                        admin_username=username,
+                        admin_first_name=first_name,
+                        is_allowed=True
+                    )
+                    admin_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"خطأ في إضافة المشرف {member}: {e}")
+                    continue
+            
+            logger.info(f"✅ تم إضافة {admin_count} مشرف للقناة {channel_id} باستخدام Bot API")
+            return admin_count
+            
+        except Exception as e:
+            logger.error(f"خطأ في جلب المشرفين باستخدام Bot API: {e}")
+            # Fallback: Add bot owner as admin
+            try:
+                # Get the first user from the task to use as owner
+                task = self.db.get_task_with_sources_targets(task_id, None)
+                if task:
+                    owner_id = task.get('user_id')
+                    if owner_id:
+                        self.db.add_admin_filter(
+                            task_id=task_id,
+                            admin_user_id=owner_id,
+                            admin_username="owner",
+                            admin_first_name="المالك",
+                            is_allowed=True
+                        )
+                        logger.info(f"✅ تم إضافة المالك كمشرف للقناة {channel_id}")
+                        return 1
+            except Exception as fallback_error:
+                logger.error(f"خطأ في إضافة المالك كمشرف: {fallback_error}")
+            
+            return -1
     
     async def show_duplicate_filter(self, event, task_id):
         """Show duplicate filter management"""

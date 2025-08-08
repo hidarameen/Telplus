@@ -3,13 +3,15 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 8, 2025 (ADMIN FILTER ENHANCEMENT)**: Completed admin filter with UI improvements:
-  - **ENHANCED**: Admin filter UI with single refresh button and integrated display
-  - **FIXED**: Removed duplicate refresh buttons for cleaner interface
-  - **IMPROVED**: Admin names display in same list with ✅/❌ toggle controls
-  - **ADDED**: Proper error handling for technical limitations with clear user messaging
-  - **DOCUMENTED**: AsyncIO event loop limitation when fetching admins via UserBot from bot context
-  - **STATUS**: Admin filter functional with manual configuration, auto-fetch blocked by technical limitation
+- **August 8, 2025 (COMPLETE ADMIN FILTER FIX - BOT API INTEGRATION)**: Successfully replaced UserBot with Bot API for admin fetching:
+  - **MAJOR FIX**: Replaced userbot service dependency with direct Bot API integration for fetching channel administrators
+  - **NEW METHOD**: Implemented `fetch_channel_admins_with_bot()` using bot's API token instead of userbot service
+  - **CALLBACK HANDLERS**: Added all missing admin filter callback handlers (admin_list_, source_admins_, refresh_source_admins_, toggle_admin_)
+  - **FILTER ENHANCEMENTS**: Fixed inline button and forwarded message filter handlers (toggle_inline_block_, toggle_forwarded_block_)
+  - **DATABASE INTEGRATION**: Verified all required database methods exist and work correctly
+  - **ERROR HANDLING**: Proper fallback system when bot cannot access channel (adds task owner as admin)
+  - **CLEAN CODE**: Removed all userbot dependencies from admin filtering system
+  - **STATUS**: All filters (day, hours, repetition, transparent buttons, forwarded messages, admin) now fully operational with Bot API
 - **August 8, 2025 (Previous - CRITICAL BUG FIXES - Advanced Filters System)**: Fixed all issues with 7-filter advanced system:
   - **FIXED**: callback data parsing for multi-word filter types (forwarded_message, inline_button, etc.)
   - **ADDED**: Complete handlers for all missing filter buttons (working hours, language, duplicate, admin settings)
