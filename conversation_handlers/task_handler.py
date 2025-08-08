@@ -157,6 +157,24 @@ class TaskHandler:
             task_id = int(parts[2])
             filter_type = parts[3]
             await self._clear_filter_execute(update, context, task_id, filter_type)
+        elif data.startswith("text_replacements_"):
+            task_id = int(data.split("_")[2])
+            await self._show_text_replacements(update, context, task_id)
+        elif data.startswith("toggle_replacement_"):
+            task_id = int(data.split("_")[2])
+            await self._toggle_text_replacement(update, context, task_id)
+        elif data.startswith("add_replacement_"):
+            task_id = int(data.split("_")[2])
+            await self._start_add_replacement(update, context, task_id)
+        elif data.startswith("view_replacements_"):
+            task_id = int(data.split("_")[2])
+            await self._view_replacements(update, context, task_id)
+        elif data.startswith("clear_replacements_"):
+            task_id = int(data.split("_")[2])
+            await self._clear_replacements_confirm(update, context, task_id)
+        elif data.startswith("confirm_clear_replacements_"):
+            task_id = int(data.split("_")[3])
+            await self._clear_replacements_execute(update, context, task_id)
 
     async def _show_task_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
         """Show task details"""
@@ -174,6 +192,7 @@ class TaskHandler:
         keyboard = [
             [InlineKeyboardButton(toggle_text, callback_data=toggle_action)],
             [InlineKeyboardButton("🔍 فلاتر الكلمات", callback_data=f"word_filters_{task_id}")],
+            [InlineKeyboardButton("🔄 استبدال النصوص", callback_data=f"text_replacements_{task_id}")],
             [InlineKeyboardButton("🗑️ حذف المهمة", callback_data=f"task_delete_{task_id}")],
             [InlineKeyboardButton("📋 عرض المهام", callback_data="list_tasks")]
         ]
@@ -188,6 +207,10 @@ class TaskHandler:
             f"📤 **الوجهة:**\n"
             f"• اسم: {task['target_chat_name'] or 'غير محدد'}\n"
             f"• معرف: `{task['target_chat_id']}`\n\n"
+            f"⚙️ **الميزات المتاحة:**\n"
+            f"• 🔍 فلاتر الكلمات (قائمة بيضاء/سوداء)\n"
+            f"• 🔄 استبدال النصوص (تعديل المحتوى)\n"
+            f"• 🗑️ إدارة المهمة (حذف/إيقاف)\n\n"
             f"📅 تاريخ الإنشاء: {task['created_at'][:16]}",
             reply_markup=reply_markup,
             parse_mode='Markdown'
@@ -252,6 +275,10 @@ class TaskHandler:
                 task_id = int(data.split('_')[0])
                 filter_type = data.split('_')[1]
                 await self._handle_add_words(update, context, task_id, filter_type, message_text)
+            elif state == 'waiting_text_replacements':
+                # Handle adding text replacements
+                task_id = int(data)
+                await self._handle_add_replacements(update, context, task_id, message_text)
             else:
                 return False
         except Exception as e:
@@ -656,3 +683,231 @@ class TaskHandler:
         
         await update.callback_query.answer(f"✅ تم حذف {deleted_count} كلمة من {filter_name}")
         await self._manage_filter_words(update, context, task_id, filter_type)
+
+    # Text Replacement Management Functions
+    async def _show_text_replacements(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Show text replacement management interface"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get replacement settings and count
+        is_enabled = self.db.is_text_replacement_enabled(task_id)
+        replacements = self.db.get_text_replacements(task_id)
+        
+        status = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        toggle_text = "⏸️ إلغاء التفعيل" if is_enabled else "▶️ تفعيل"
+
+        keyboard = [
+            [InlineKeyboardButton(toggle_text, callback_data=f"toggle_replacement_{task_id}")],
+            [InlineKeyboardButton(f"➕ إضافة استبدالات", callback_data=f"add_replacement_{task_id}")],
+            [InlineKeyboardButton(f"👀 عرض الاستبدالات ({len(replacements)})", callback_data=f"view_replacements_{task_id}")],
+            [InlineKeyboardButton("🗑️ إفراغ الاستبدالات", callback_data=f"clear_replacements_{task_id}")],
+            [InlineKeyboardButton("🔙 عودة للمهمة", callback_data=f"task_manage_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            f"🔄 استبدال النصوص - المهمة #{task_id}\n\n"
+            f"📊 **الحالة**: {status}\n"
+            f"📝 **عدد الاستبدالات**: {len(replacements)}\n\n"
+            f"🔄 **الوظيفة**: استبدال كلمات أو عبارات محددة في الرسائل قبل توجيهها إلى الهدف\n\n"
+            f"💡 **مثال**: استبدال 'مرحبا' بـ 'أهلا وسهلا' في جميع الرسائل\n\n"
+            f"⚠️ **ملاحظة**: عند تفعيل الاستبدال، سيتم تحويل وضع التوجيه تلقائياً إلى 'نسخ' للرسائل المعدلة",
+            reply_markup=reply_markup
+        )
+
+    async def _toggle_text_replacement(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Toggle text replacement status"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        current_status = self.db.is_text_replacement_enabled(task_id)
+        new_status = not current_status
+        
+        # Update replacement status
+        self.db.set_text_replacement_enabled(task_id, new_status)
+        
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        
+        await update.callback_query.answer(f"✅ {status_text} استبدال النصوص")
+        await self._show_text_replacements(update, context, task_id)
+
+    async def _start_add_replacement(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Start adding text replacements"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        # Set conversation state
+        self.db.set_conversation_state(user_id, 'waiting_text_replacements', str(task_id))
+
+        keyboard = [
+            [InlineKeyboardButton("❌ إلغاء", callback_data=f"text_replacements_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            f"➕ إضافة استبدالات نصية\n\n"
+            f"📝 **تنسيق الإدخال**: كل استبدال في سطر منفصل بالتنسيق التالي:\n"
+            f"`النص_الأصلي >> النص_الجديد`\n\n"
+            f"💡 **أمثلة:**\n"
+            f"`مرحبا >> أهلا وسهلا`\n"
+            f"`عاجل >> 🚨 عاجل 🚨`\n"
+            f"`تليجرام >> تلغرام`\n\n"
+            f"🔧 **ميزات متقدمة** (اختيارية):\n"
+            f"• إضافة `#حساس` في نهاية السطر للحساسية للحروف الكبيرة/الصغيرة\n"
+            f"• إضافة `#كلمة` في نهاية السطر للاستبدال ككلمة كاملة فقط\n\n"
+            f"**مثال متقدم:**\n"
+            f"`Hello >> مرحبا #حساس #كلمة`\n\n"
+            f"⚠️ **ملاحظة**: يمكنك إدخال عدة استبدالات في رسالة واحدة",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def _handle_add_replacements(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                     task_id: int, message_text: str):
+        """Handle adding text replacements"""
+        user_id = update.effective_user.id
+        
+        # Parse replacements from message
+        replacements_to_add = []
+        
+        lines = message_text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and '>>' in line:
+                # Split by '>>' to get find and replace parts
+                parts = line.split('>>', 1)
+                if len(parts) == 2:
+                    find_text = parts[0].strip()
+                    replace_part = parts[1].strip()
+                    
+                    # Check for advanced options
+                    is_case_sensitive = '#حساس' in replace_part
+                    is_whole_word = '#كلمة' in replace_part
+                    
+                    # Clean replace text from options
+                    replace_text = replace_part.replace('#حساس', '').replace('#كلمة', '').strip()
+                    
+                    if find_text and replace_text:
+                        replacements_to_add.append((find_text, replace_text, is_case_sensitive, is_whole_word))
+        
+        if not replacements_to_add:
+            await update.message.reply_text(
+                "❌ لم يتم العثور على استبدالات صحيحة. تأكد من استخدام التنسيق:\n"
+                "`النص_الأصلي >> النص_الجديد`"
+            )
+            return
+
+        # Add replacements to database
+        added_count = self.db.add_multiple_text_replacements(task_id, replacements_to_add)
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        keyboard = [
+            [InlineKeyboardButton("👀 عرض الاستبدالات", callback_data=f"view_replacements_{task_id}")],
+            [InlineKeyboardButton("➕ إضافة المزيد", callback_data=f"add_replacement_{task_id}")],
+            [InlineKeyboardButton("🔙 عودة للإدارة", callback_data=f"text_replacements_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(
+            f"✅ تم إضافة {added_count} استبدال نصي\n\n"
+            f"📊 إجمالي الاستبدالات المرسلة: {len(replacements_to_add)}\n"
+            f"📝 الاستبدالات المضافة: {added_count}\n"
+            f"🔄 الاستبدالات المكررة: {len(replacements_to_add) - added_count}\n\n"
+            f"✅ استبدال النصوص جاهز للاستخدام!",
+            reply_markup=reply_markup
+        )
+
+    async def _view_replacements(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """View text replacements"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        replacements = self.db.get_text_replacements(task_id)
+
+        if not replacements:
+            message = f"🔄 استبدالات النصوص\n\n❌ لا توجد استبدالات مضافة حالياً"
+        else:
+            message = f"🔄 استبدالات النصوص\n\n📋 الاستبدالات المضافة ({len(replacements)}):\n\n"
+            
+            for i, replacement in enumerate(replacements[:15], 1):  # Show max 15 replacements
+                find_text = replacement['find_text']
+                replace_text = replacement['replace_text']
+                options = []
+                
+                if replacement['is_case_sensitive']:
+                    options.append("حساس للأحرف")
+                if replacement['is_whole_word']:
+                    options.append("كلمة كاملة")
+                
+                options_text = f" ({', '.join(options)})" if options else ""
+                
+                message += f"{i}. `{find_text}` → `{replace_text}`{options_text}\n"
+            
+            if len(replacements) > 15:
+                message += f"\n... و {len(replacements) - 15} استبدال آخر"
+
+        keyboard = [
+            [InlineKeyboardButton("➕ إضافة استبدالات", callback_data=f"add_replacement_{task_id}")],
+            [InlineKeyboardButton("🔙 عودة للإدارة", callback_data=f"text_replacements_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            message, 
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def _clear_replacements_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Confirm clearing text replacements"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        replacements = self.db.get_text_replacements(task_id)
+
+        keyboard = [
+            [InlineKeyboardButton("✅ نعم، احذف الكل", callback_data=f"confirm_clear_replacements_{task_id}")],
+            [InlineKeyboardButton("❌ إلغاء", callback_data=f"text_replacements_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            f"⚠️ تأكيد حذف الاستبدالات النصية\n\n"
+            f"🗑️ هل أنت متأكد من حذف جميع الاستبدالات ({len(replacements)} استبدال)؟\n\n"
+            f"❌ **تحذير**: هذا الإجراء لا يمكن التراجع عنه!\n\n"
+            f"سيتم حذف جميع استبدالات النصوص نهائياً.",
+            reply_markup=reply_markup
+        )
+
+    async def _clear_replacements_execute(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Execute clearing text replacements"""
+        user_id = update.effective_user.id
+        
+        # Clear all replacements
+        deleted_count = self.db.clear_text_replacements(task_id)
+        
+        await update.callback_query.answer(f"✅ تم حذف جميع الاستبدالات النصية")
+        await self._show_text_replacements(update, context, task_id)

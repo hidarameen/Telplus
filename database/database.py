@@ -129,6 +129,33 @@ class Database:
                 )
             ''')
 
+            # Task text replacements table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_text_replacements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    is_enabled BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Text replacement entries table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS text_replacement_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    replacement_id INTEGER NOT NULL,
+                    find_text TEXT NOT NULL,
+                    replace_text TEXT NOT NULL,
+                    is_case_sensitive BOOLEAN DEFAULT FALSE,
+                    is_whole_word BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (replacement_id) REFERENCES task_text_replacements (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
@@ -900,3 +927,184 @@ class Database:
             conn.commit()
             logger.info(f"✅ تم إضافة {added_count} كلمة إلى فلتر {filter_type} للمهمة {task_id}")
             return added_count
+
+    # Text Replacement Management
+    def get_text_replacement_id(self, task_id: int):
+        """Get or create text replacement configuration for task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id FROM task_text_replacements WHERE task_id = ?
+            ''', (task_id,))
+            
+            result = cursor.fetchone()
+            if result:
+                return result['id']
+            
+            # Create new replacement configuration (enabled by default)
+            cursor.execute('''
+                INSERT INTO task_text_replacements (task_id, is_enabled)
+                VALUES (?, TRUE)
+            ''', (task_id,))
+            conn.commit()
+            return cursor.lastrowid
+
+    def is_text_replacement_enabled(self, task_id: int):
+        """Check if text replacement is enabled for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT is_enabled FROM task_text_replacements WHERE task_id = ?
+            ''', (task_id,))
+            
+            result = cursor.fetchone()
+            return bool(result['is_enabled']) if result else False
+
+    def set_text_replacement_enabled(self, task_id: int, is_enabled: bool):
+        """Enable/disable text replacement for a task"""
+        replacement_id = self.get_text_replacement_id(task_id)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE task_text_replacements 
+                SET is_enabled = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (is_enabled, replacement_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def add_text_replacement(self, task_id: int, find_text: str, replace_text: str, 
+                           is_case_sensitive: bool = False, is_whole_word: bool = False):
+        """Add text replacement rule"""
+        replacement_id = self.get_text_replacement_id(task_id)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO text_replacement_entries 
+                (replacement_id, find_text, replace_text, is_case_sensitive, is_whole_word)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (replacement_id, find_text, replace_text, is_case_sensitive, is_whole_word))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_text_replacements(self, task_id: int):
+        """Get all text replacements for a task"""
+        replacement_id = self.get_text_replacement_id(task_id)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, find_text, replace_text, is_case_sensitive, is_whole_word
+                FROM text_replacement_entries
+                WHERE replacement_id = ?
+                ORDER BY find_text
+            ''', (replacement_id,))
+            
+            return cursor.fetchall()
+
+    def remove_text_replacement(self, replacement_entry_id: int):
+        """Remove text replacement rule by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM text_replacement_entries WHERE id = ?
+            ''', (replacement_entry_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def clear_text_replacements(self, task_id: int):
+        """Clear all text replacements for a task"""
+        replacement_id = self.get_text_replacement_id(task_id)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM text_replacement_entries WHERE replacement_id = ?
+            ''', (replacement_id,))
+            conn.commit()
+            return cursor.rowcount >= 0
+
+    def add_multiple_text_replacements(self, task_id: int, replacements_list: list):
+        """Add multiple text replacements at once
+        replacements_list: List of tuples (find_text, replace_text, is_case_sensitive, is_whole_word)
+        """
+        replacement_id = self.get_text_replacement_id(task_id)
+        added_count = 0
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for replacement in replacements_list:
+                if len(replacement) >= 2:
+                    find_text = replacement[0].strip()
+                    replace_text = replacement[1].strip()
+                    is_case_sensitive = replacement[2] if len(replacement) > 2 else False
+                    is_whole_word = replacement[3] if len(replacement) > 3 else False
+                    
+                    if find_text:  # Only add non-empty find text
+                        # Check if replacement already exists
+                        cursor.execute('''
+                            SELECT id FROM text_replacement_entries
+                            WHERE replacement_id = ? AND find_text = ?
+                        ''', (replacement_id, find_text))
+                        
+                        if not cursor.fetchone():
+                            cursor.execute('''
+                                INSERT INTO text_replacement_entries 
+                                (replacement_id, find_text, replace_text, is_case_sensitive, is_whole_word)
+                                VALUES (?, ?, ?, ?, ?)
+                            ''', (replacement_id, find_text, replace_text, is_case_sensitive, is_whole_word))
+                            added_count += 1
+            
+            conn.commit()
+            logger.info(f"✅ تم إضافة {added_count} استبدال نصي للمهمة {task_id}")
+            return added_count
+
+    def apply_text_replacements(self, task_id: int, message_text: str):
+        """Apply text replacements to message text"""
+        if not message_text or not self.is_text_replacement_enabled(task_id):
+            return message_text
+        
+        replacements = self.get_text_replacements(task_id)
+        if not replacements:
+            return message_text
+        
+        modified_text = message_text
+        replacement_count = 0
+        
+        for replacement in replacements:
+            find_text = replacement['find_text']
+            replace_text = replacement['replace_text']
+            is_case_sensitive = replacement['is_case_sensitive']
+            is_whole_word = replacement['is_whole_word']
+            
+            if is_whole_word:
+                # Use word boundary matching
+                import re
+                pattern = r'\b' + re.escape(find_text) + r'\b'
+                flags = 0 if is_case_sensitive else re.IGNORECASE
+                
+                old_text = modified_text
+                modified_text = re.sub(pattern, replace_text, modified_text, flags=flags)
+                if old_text != modified_text:
+                    replacement_count += 1
+            else:
+                # Simple text replacement
+                if is_case_sensitive:
+                    if find_text in modified_text:
+                        modified_text = modified_text.replace(find_text, replace_text)
+                        replacement_count += 1
+                else:
+                    # Case insensitive replacement
+                    import re
+                    pattern = re.escape(find_text)
+                    old_text = modified_text
+                    modified_text = re.sub(pattern, replace_text, modified_text, flags=re.IGNORECASE)
+                    if old_text != modified_text:
+                        replacement_count += 1
+        
+        if replacement_count > 0:
+            logger.info(f"✅ تم تطبيق {replacement_count} استبدال على الرسالة للمهمة {task_id}")
+        
+        return modified_text

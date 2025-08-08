@@ -199,23 +199,31 @@ class UserbotService:
                             logger.error(f"❌ لا يمكن الوصول للمحادثة الهدف {target_entity}: {entity_error}")
                             continue
 
+                        # Apply text replacements if enabled
+                        original_text = event.message.text or ""
+                        modified_text = self.apply_text_replacements(task['id'], original_text) if original_text else original_text
+                        
+                        # Log replacement if text was modified
+                        if original_text != modified_text and original_text:
+                            logger.info(f"🔄 تم تطبيق استبدال نصي: '{original_text}' → '{modified_text}'")
+
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")
 
                         if forward_mode == 'copy':
-                            # Copy mode: send as new message
+                            # Copy mode: send as new message with replacements applied
                             if event.message.media:
-                                # Media message with or without caption
+                                # Media message with or without caption (apply replacements to caption)
                                 forwarded_msg = await client.send_file(
                                     target_entity,
                                     event.message.media,
-                                    caption=event.message.text or ""
+                                    caption=modified_text
                                 )
                             elif event.message.text:
-                                # Pure text message (no media)
+                                # Pure text message (apply replacements to text)
                                 forwarded_msg = await client.send_message(
                                     target_entity,
-                                    event.message.text
+                                    modified_text
                                 )
                             else:
                                 # Fallback to forward for other types
@@ -224,11 +232,26 @@ class UserbotService:
                                     event.message
                                 )
                         else:
-                            # Forward mode: forward message normally
-                            forwarded_msg = await client.forward_messages(
-                                target_entity,
-                                event.message
-                            )
+                            # Forward mode: if replacements were applied, use copy mode instead
+                            if original_text != modified_text and original_text:
+                                logger.info(f"🔄 تحويل إلى وضع النسخ بسبب الاستبدال النصي")
+                                if event.message.media:
+                                    forwarded_msg = await client.send_file(
+                                        target_entity,
+                                        event.message.media,
+                                        caption=modified_text
+                                    )
+                                else:
+                                    forwarded_msg = await client.send_message(
+                                        target_entity,
+                                        modified_text
+                                    )
+                            else:
+                                # No replacements, forward normally
+                                forwarded_msg = await client.forward_messages(
+                                    target_entity,
+                                    event.message
+                                )
 
                         if forwarded_msg:
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
@@ -346,6 +369,17 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر الكلمات: {e}")
             return True  # Default to allowed on error
+
+    def apply_text_replacements(self, task_id, message_text):
+        """Apply text replacements to message text"""
+        try:
+            from database.database import Database
+            db = Database()
+            modified_text = db.apply_text_replacements(task_id, message_text)
+            return modified_text
+        except Exception as e:
+            logger.error(f"خطأ في تطبيق الاستبدالات النصية: {e}")
+            return message_text  # Return original text on error
 
 
     async def stop_user(self, user_id: int):

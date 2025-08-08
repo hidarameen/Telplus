@@ -3,14 +3,16 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 8, 2025 (Final Update)**: Word filter system fully operational and tested:
-  - **COMPLETED**: All word filter functionality working perfectly - buttons for adding, viewing, and clearing words
-  - **VERIFIED**: Whitelist filtering active - messages blocked when not containing approved words
-  - **VERIFIED**: Blacklist filtering active - messages blocked when containing forbidden words
-  - **FIXED**: Database filter creation to enable filters by default (TRUE instead of FALSE)
-  - **FIXED**: Message editing conflicts by implementing separate response functions for post-addition navigation
-  - **CONFIRMED**: Real-time filtering working with 4 active tasks processing messages correctly
-  - **SYSTEM STATUS**: All components operational - Bot API, UserBot service, database, and word filtering
+- **August 8, 2025 (Latest Update)**: Added comprehensive text replacement/substitution feature:
+  - **NEW FEATURE**: Text replacement system with full CRUD operations
+  - **IMPLEMENTED**: Enable/disable toggle for text replacements per task
+  - **ADDED**: Advanced replacement options (case sensitivity, whole word matching)
+  - **CREATED**: Bulk input capability with format: `find_text >> replace_text`
+  - **INTEGRATED**: Real-time text modification in UserBot message processing
+  - **ENHANCED**: Auto-conversion to copy mode when text replacements are applied
+  - **UI COMPLETE**: Full management interface with add, view, clear, and toggle functions
+  - **DATABASE**: Extended schema with task_text_replacements and text_replacement_entries tables
+  - **VERIFIED**: All previous functionality (word filters) remains operational with 4 active tasks
 
 # User Preferences
 
