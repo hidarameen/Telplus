@@ -512,6 +512,70 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الأزرار: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("forwarding_settings_"): # Handler for forwarding settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_forwarding_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التوجيه: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_link_preview_"): # Handler for toggling link preview
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_link_preview(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل معاينة الرابط: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_pin_message_"): # Handler for toggling pin message
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_pin_message(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تثبيت الرسالة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_silent_notifications_"): # Handler for toggling silent notifications
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_silent_notifications(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الإشعارات الصامتة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_auto_delete_"): # Handler for toggling auto delete
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_auto_delete(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الحذف التلقائي: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_auto_delete_time_"): # Handler for setting auto delete time
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
+                        await self.start_set_auto_delete_time(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد وقت الحذف التلقائي: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_delete_time_"): # Handler for direct time setting
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        seconds = int(parts[4])
+                        await self.set_delete_time_direct(event, task_id, seconds)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة أو الوقت: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
 
 
         except Exception as e:
@@ -584,6 +648,10 @@ class SimpleTelegramBot:
             elif state == 'waiting_button_data': # Handle adding inline button
                 task_id = int(data)
                 await self.handle_add_inline_button(event, task_id, event.text)
+                return
+            elif state == 'waiting_auto_delete_time': # Handle setting auto delete time
+                task_id = int(data)
+                await self.handle_set_auto_delete_time(event, task_id, event.text)
                 return
 
         # Check if this chat is a target chat for any active forwarding task
@@ -658,6 +726,7 @@ class SimpleTelegramBot:
             [Button.inline(f"🔄 تغيير وضع التوجيه ({forward_mode_text})", f"toggle_forward_mode_{task_id}")],
             [Button.inline(f"📥 إدارة المصادر ({sources_count})", f"manage_sources_{task_id}")],
             [Button.inline(f"📤 إدارة الأهداف ({targets_count})", f"manage_targets_{task_id}")],
+            [Button.inline("🔧 إعدادات التوجيه", f"forwarding_settings_{task_id}")],
             [Button.inline("🎬 فلاتر الوسائط", f"media_filters_{task_id}")],
             [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")],
             [Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
@@ -3847,6 +3916,222 @@ class SimpleTelegramBot:
         
         await event.answer(f"✅ تم حذف جميع الأزرار الإنلاين")
         await self.show_inline_buttons_settings(event, task_id)
+
+    # Forwarding Settings Methods
+    async def show_forwarding_settings(self, event, task_id):
+        """Show forwarding settings menu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_forwarding_settings(task_id)
+        
+        # Format status icons and time
+        link_preview_status = "🟢 مفعل" if settings['link_preview_enabled'] else "🔴 معطل"
+        pin_message_status = "🟢 مفعل" if settings['pin_message_enabled'] else "🔴 معطل"
+        silent_status = "🟢 بصمت" if settings['silent_notifications'] else "🔴 مع إشعار"
+        auto_delete_status = "🟢 مفعل" if settings['auto_delete_enabled'] else "🔴 معطل"
+        
+        # Convert seconds to readable format
+        delete_time = settings['auto_delete_time']
+        if delete_time >= 3600:
+            time_display = f"{delete_time // 3600} ساعة"
+        elif delete_time >= 60:
+            time_display = f"{delete_time // 60} دقيقة"
+        else:
+            time_display = f"{delete_time} ثانية"
+
+        buttons = [
+            [Button.inline(f"🔗 معاينة الرابط ({link_preview_status})", f"toggle_link_preview_{task_id}")],
+            [Button.inline(f"📌 تثبيت الرسالة ({pin_message_status})", f"toggle_pin_message_{task_id}")],
+            [Button.inline(f"🔔 الإشعارات ({silent_status})", f"toggle_silent_notifications_{task_id}")],
+            [Button.inline(f"🗑️ الحذف التلقائي ({auto_delete_status})", f"toggle_auto_delete_{task_id}")],
+        ]
+        
+        if settings['auto_delete_enabled']:
+            buttons.append([Button.inline(f"⏰ تعديل المدة ({time_display})", f"set_auto_delete_time_{task_id}")])
+            
+        buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
+
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        message_text = (
+            f"🔧 إعدادات التوجيه - المهمة #{task_id}\n\n"
+            f"📋 **الإعدادات الحالية**:\n\n"
+            f"🔗 **معاينة الرابط**: {link_preview_status}\n"
+            f"   └ عرض معاينة للروابط المُوجهة\n\n"
+            f"📌 **تثبيت الرسالة**: {pin_message_status}\n"
+            f"   └ تثبيت الرسالة في المحادثة الهدف\n\n"
+            f"🔔 **الإشعارات**: {silent_status}\n"
+            f"   └ إشعار المشتركين عند النشر\n\n"
+            f"🗑️ **الحذف التلقائي**: {auto_delete_status}\n"
+        )
+        
+        if settings['auto_delete_enabled']:
+            message_text += f"   └ حذف تلقائي بعد: {time_display}\n\n"
+        else:
+            message_text += f"   └ الرسائل تبقى إلى الأبد\n\n"
+            
+        message_text += f"🕐 آخر تحديث: {timestamp}"
+        
+        try:
+            await event.edit(message_text, buttons=buttons)
+        except Exception as e:
+            logger.warning(f"فشل تحرير الرسالة، إرسال رسالة جديدة: {e}")
+            await event.respond(message_text, buttons=buttons)
+
+    async def toggle_link_preview(self, event, task_id):
+        """Toggle link preview setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_link_preview(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} معاينة الرابط")
+        await self.show_forwarding_settings(event, task_id)
+
+    async def toggle_pin_message(self, event, task_id):
+        """Toggle pin message setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_pin_message(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} تثبيت الرسالة")
+        await self.show_forwarding_settings(event, task_id)
+
+    async def toggle_silent_notifications(self, event, task_id):
+        """Toggle silent notifications setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_silent_notifications(task_id)
+        
+        status_text = "النشر بصمت" if new_state else "النشر مع إشعار"
+        await event.answer(f"✅ تم تفعيل {status_text}")
+        await self.show_forwarding_settings(event, task_id)
+
+    async def toggle_auto_delete(self, event, task_id):
+        """Toggle auto delete setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_auto_delete(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} الحذف التلقائي")
+        await self.show_forwarding_settings(event, task_id)
+
+    async def start_set_auto_delete_time(self, event, task_id):
+        """Start setting auto delete time"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        current_settings = self.db.get_forwarding_settings(task_id)
+        current_time = current_settings['auto_delete_time']
+        
+        # Convert to readable format
+        if current_time >= 3600:
+            current_display = f"{current_time // 3600} ساعة"
+        elif current_time >= 60:
+            current_display = f"{current_time // 60} دقيقة"
+        else:
+            current_display = f"{current_time} ثانية"
+
+        self.db.set_conversation_state(user_id, 'waiting_auto_delete_time', str(task_id))
+
+        buttons = [
+            [Button.inline("⏰ 5 دقائق", f"set_delete_time_{task_id}_300")],
+            [Button.inline("⏰ 30 دقيقة", f"set_delete_time_{task_id}_1800")],
+            [Button.inline("⏰ 1 ساعة", f"set_delete_time_{task_id}_3600")],
+            [Button.inline("⏰ 6 ساعات", f"set_delete_time_{task_id}_21600")],
+            [Button.inline("⏰ 24 ساعة", f"set_delete_time_{task_id}_86400")],
+            [Button.inline("❌ إلغاء", f"forwarding_settings_{task_id}")]
+        ]
+
+        await event.edit(
+            f"⏰ تحديد مدة الحذف التلقائي\n\n"
+            f"📊 **المدة الحالية**: {current_display}\n\n"
+            f"🎯 **اختر مدة جديدة**:\n\n"
+            f"💡 أو أرسل رقماً بالثواني (مثال: 7200 للساعتين)\n\n"
+            f"⚠️ **تنبيه**: سيتم حذف الرسائل تلقائياً بعد المدة المحددة",
+            buttons=buttons
+        )
+
+    async def handle_set_auto_delete_time(self, event, task_id, time_str):
+        """Handle setting auto delete time from text input"""
+        user_id = event.sender_id
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        try:
+            seconds = int(time_str.strip())
+            if seconds < 60:
+                await event.respond("❌ أقل مدة مسموحة هي 60 ثانية")
+                return
+            elif seconds > 604800:  # 7 days
+                await event.respond("❌ أقصى مدة مسموحة هي 7 أيام (604800 ثانية)")
+                return
+                
+            self.db.set_auto_delete_time(task_id, seconds)
+            
+            # Convert to readable format
+            if seconds >= 3600:
+                time_display = f"{seconds // 3600} ساعة"
+            elif seconds >= 60:
+                time_display = f"{seconds // 60} دقيقة"
+            else:
+                time_display = f"{seconds} ثانية"
+                
+            await event.respond(f"✅ تم تحديد مدة الحذف التلقائي إلى {time_display}")
+            await self.show_forwarding_settings(event, task_id)
+            
+        except ValueError:
+            await event.respond("❌ يرجى إدخال رقم صحيح بالثواني")
+
+    async def set_delete_time_direct(self, event, task_id, seconds):
+        """Set auto delete time directly from button"""
+        user_id = event.sender_id
+        
+        self.db.set_auto_delete_time(task_id, seconds)
+        
+        # Convert to readable format
+        if seconds >= 3600:
+            time_display = f"{seconds // 3600} ساعة"
+        elif seconds >= 60:
+            time_display = f"{seconds // 60} دقيقة"
+        else:
+            time_display = f"{seconds} ثانية"
+            
+        await event.answer(f"✅ تم تحديد مدة الحذف التلقائي إلى {time_display}")
+        await self.show_forwarding_settings(event, task_id)
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()

@@ -214,6 +214,22 @@ class Database:
                 )
             ''')
 
+            # Task forwarding settings table - for advanced forwarding options
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_forwarding_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    link_preview_enabled BOOLEAN DEFAULT TRUE,
+                    pin_message_enabled BOOLEAN DEFAULT FALSE,
+                    silent_notifications BOOLEAN DEFAULT FALSE,
+                    auto_delete_enabled BOOLEAN DEFAULT FALSE,
+                    auto_delete_time INTEGER DEFAULT 3600,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
@@ -1364,3 +1380,88 @@ class Database:
             
             conn.commit()
             return deleted_count
+
+    # Forwarding Settings Management
+    def get_forwarding_settings(self, task_id: int) -> dict:
+        """Get forwarding settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT link_preview_enabled, pin_message_enabled, silent_notifications, 
+                       auto_delete_enabled, auto_delete_time
+                FROM task_forwarding_settings 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'link_preview_enabled': result['link_preview_enabled'],
+                    'pin_message_enabled': result['pin_message_enabled'],
+                    'silent_notifications': result['silent_notifications'],
+                    'auto_delete_enabled': result['auto_delete_enabled'],
+                    'auto_delete_time': result['auto_delete_time']
+                }
+            else:
+                # Return default settings
+                return {
+                    'link_preview_enabled': True,
+                    'pin_message_enabled': False,
+                    'silent_notifications': False,
+                    'auto_delete_enabled': False,
+                    'auto_delete_time': 3600
+                }
+
+    def update_forwarding_settings(self, task_id: int, **kwargs):
+        """Update forwarding settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get current settings
+            current_settings = self.get_forwarding_settings(task_id)
+            
+            # Update with new values
+            current_settings.update(kwargs)
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_forwarding_settings 
+                (task_id, link_preview_enabled, pin_message_enabled, silent_notifications, 
+                 auto_delete_enabled, auto_delete_time, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (task_id, current_settings['link_preview_enabled'], 
+                  current_settings['pin_message_enabled'], current_settings['silent_notifications'],
+                  current_settings['auto_delete_enabled'], current_settings['auto_delete_time']))
+            
+            conn.commit()
+
+    def toggle_link_preview(self, task_id: int) -> bool:
+        """Toggle link preview setting"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings['link_preview_enabled']
+        self.update_forwarding_settings(task_id, link_preview_enabled=new_state)
+        return new_state
+
+    def toggle_pin_message(self, task_id: int) -> bool:
+        """Toggle pin message setting"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings['pin_message_enabled']
+        self.update_forwarding_settings(task_id, pin_message_enabled=new_state)
+        return new_state
+
+    def toggle_silent_notifications(self, task_id: int) -> bool:
+        """Toggle silent notifications setting"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings['silent_notifications']
+        self.update_forwarding_settings(task_id, silent_notifications=new_state)
+        return new_state
+
+    def toggle_auto_delete(self, task_id: int) -> bool:
+        """Toggle auto delete setting"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings['auto_delete_enabled']
+        self.update_forwarding_settings(task_id, auto_delete_enabled=new_state)
+        return new_state
+
+    def set_auto_delete_time(self, task_id: int, seconds: int):
+        """Set auto delete time in seconds"""
+        self.update_forwarding_settings(task_id, auto_delete_time=seconds)

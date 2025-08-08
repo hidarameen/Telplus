@@ -230,6 +230,9 @@ class UserbotService:
                             else:
                                 logger.warning(f"⚠️ فشل في بناء الأزرار الإنلاين للمهمة {task['id']}")
 
+                        # Get forwarding settings
+                        forwarding_settings = self.get_forwarding_settings(task['id'])
+                        
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")
 
@@ -239,50 +242,84 @@ class UserbotService:
                                 logger.info(f"🔄 استخدام وضع النسخ بسبب التنسيق المطبق")
                             
                             if event.message.media:
-                                # Media message with or without caption
-                                forwarded_msg = await client.send_file(
-                                    target_entity,
-                                    event.message.media,
-                                    caption=final_text
-                                )
+                                # Check media type to handle web page separately
+                                from telethon.tl.types import MessageMediaWebPage
+                                if isinstance(event.message.media, MessageMediaWebPage):
+                                    # Web page - send as text message
+                                    forwarded_msg = await client.send_message(
+                                        target_entity,
+                                        final_text or event.message.text or "رسالة",
+                                        link_preview=forwarding_settings['link_preview_enabled'],
+                                        silent=forwarding_settings['silent_notifications']
+                                    )
+                                else:
+                                    # Regular media message with caption
+                                    forwarded_msg = await client.send_file(
+                                        target_entity,
+                                        event.message.media,
+                                        caption=final_text,
+                                        silent=forwarding_settings['silent_notifications']
+                                    )
                             elif event.message.text or final_text:
                                 # Pure text message
                                 forwarded_msg = await client.send_message(
                                     target_entity,
-                                    final_text or "رسالة"
+                                    final_text or "رسالة",
+                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                    silent=forwarding_settings['silent_notifications']
                                 )
                             else:
                                 # Fallback to forward for other types
                                 forwarded_msg = await client.forward_messages(
                                     target_entity,
-                                    event.message
+                                    event.message,
+                                    silent=forwarding_settings['silent_notifications']
                                 )
                         else:
                             # Forward mode: check if we need copy mode
                             if requires_copy_mode:
                                 logger.info(f"🔄 تحويل إلى وضع النسخ بسبب التنسيق")
                                 if event.message.media:
-                                    forwarded_msg = await client.send_file(
-                                        target_entity,
-                                        event.message.media,
-                                        caption=final_text
-                                    )
+                                    # Check media type to handle web page separately
+                                    from telethon.tl.types import MessageMediaWebPage
+                                    if isinstance(event.message.media, MessageMediaWebPage):
+                                        # Web page - send as text message
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            final_text or event.message.text or "رسالة",
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications']
+                                        )
+                                    else:
+                                        # Regular media message with caption
+                                        forwarded_msg = await client.send_file(
+                                            target_entity,
+                                            event.message.media,
+                                            caption=final_text,
+                                            silent=forwarding_settings['silent_notifications']
+                                        )
                                 else:
                                     forwarded_msg = await client.send_message(
                                         target_entity,
-                                        final_text or "رسالة"
+                                        final_text or "رسالة",
+                                        link_preview=forwarding_settings['link_preview_enabled'],
+                                        silent=forwarding_settings['silent_notifications']
                                     )
                             else:
                                 # No formatting changes, forward normally
                                 forwarded_msg = await client.forward_messages(
                                     target_entity,
-                                    event.message
+                                    event.message,
+                                    silent=forwarding_settings['silent_notifications']
                                 )
 
                         if forwarded_msg:
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                             logger.info(f"✅ تم توجيه الرسالة بنجاح من {source_chat_id} إلى {target_chat_id}")
                             logger.info(f"📝 معرف الرسالة المُوجهة: {msg_id} (المهمة: {task_name})")
+                            
+                            # Apply post-forwarding settings
+                            await self.apply_post_forwarding_settings(client, target_entity, msg_id, forwarding_settings, task['id'])
                             
                             # If inline buttons are enabled, notify bot to add them
                             if inline_buttons and message_settings['inline_buttons_enabled']:
@@ -456,6 +493,24 @@ class UserbotService:
                 'inline_buttons_enabled': False
             }
 
+    def get_forwarding_settings(self, task_id: int) -> dict:
+        """Get forwarding settings for a task"""
+        try:
+            from database.database import Database
+            db = Database()
+            settings = db.get_forwarding_settings(task_id)
+            logger.info(f"🔧 إعدادات التوجيه للمهمة {task_id}: معاينة الرابط={settings.get('link_preview_enabled', True)}, تثبيت={settings.get('pin_message_enabled', False)}")
+            return settings
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على إعدادات التوجيه: {e}")
+            return {
+                'link_preview_enabled': True,
+                'pin_message_enabled': False,
+                'silent_notifications': False,
+                'auto_delete_enabled': False,
+                'auto_delete_time': 3600
+            }
+
     def apply_message_formatting(self, text: str, settings: dict) -> str:
         """Apply header and footer formatting to message text"""
         if not text:
@@ -509,6 +564,46 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في بناء الأزرار الإنلاين: {e}")
             return None
+
+    async def apply_post_forwarding_settings(self, client: TelegramClient, target_entity, msg_id: int, forwarding_settings: dict, task_id: int):
+        """Apply post-forwarding settings like pin message and auto delete"""
+        try:
+            # Pin message if enabled
+            if forwarding_settings['pin_message_enabled']:
+                try:
+                    await client.pin_message(target_entity, msg_id, notify=not forwarding_settings['silent_notifications'])
+                    logger.info(f"📌 تم تثبيت الرسالة {msg_id} في {target_entity}")
+                except Exception as pin_error:
+                    logger.error(f"❌ فشل في تثبيت الرسالة {msg_id}: {pin_error}")
+
+            # Schedule auto delete if enabled
+            if forwarding_settings['auto_delete_enabled'] and forwarding_settings['auto_delete_time'] > 0:
+                import asyncio
+                delete_time = forwarding_settings['auto_delete_time']
+                logger.info(f"⏰ جدولة حذف الرسالة {msg_id} بعد {delete_time} ثانية")
+                
+                # Schedule deletion in background
+                asyncio.create_task(
+                    self._schedule_message_deletion(client, target_entity, msg_id, delete_time, task_id)
+                )
+                
+        except Exception as e:
+            logger.error(f"خطأ في تطبيق إعدادات ما بعد التوجيه: {e}")
+
+    async def _schedule_message_deletion(self, client: TelegramClient, target_entity, msg_id: int, delay_seconds: int, task_id: int):
+        """Schedule message deletion after specified delay"""
+        try:
+            import asyncio
+            await asyncio.sleep(delay_seconds)
+            
+            try:
+                await client.delete_messages(target_entity, msg_id)
+                logger.info(f"🗑️ تم حذف الرسالة {msg_id} تلقائياً من {target_entity} (المهمة {task_id})")
+            except Exception as delete_error:
+                logger.error(f"❌ فشل في حذف الرسالة {msg_id} تلقائياً: {delete_error}")
+                
+        except Exception as e:
+            logger.error(f"خطأ في جدولة حذف الرسالة: {e}")
 
 
     async def stop_user(self, user_id: int):

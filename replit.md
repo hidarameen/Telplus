@@ -3,7 +3,19 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 8, 2025 (Critical Bug Fix - FULLY OPERATIONAL)**: Fixed inline buttons deletion issue:
+- **August 8, 2025 (MAJOR FEATURE RELEASE - Advanced Forwarding Settings)**: Completed comprehensive forwarding control system:
+  - **NEW FEATURE**: Advanced forwarding settings with 4 core options:
+    - Link preview control (enable/disable web page previews)
+    - Message pinning in target channels (auto-pin forwarded messages)
+    - Notification control (silent forwarding vs. with notifications)
+    - Auto-delete with customizable timing (60s to 7 days)
+  - **DATABASE ENHANCEMENT**: Added `task_forwarding_settings` table with comprehensive settings storage
+  - **UI INTEGRATION**: Arabic interface with intuitive toggle controls and time selection
+  - **USERBOT IMPLEMENTATION**: Full integration with message forwarding pipeline
+  - **ERROR HANDLING**: Robust handling of media types including MessageMediaWebPage
+  - **BACKGROUND PROCESSING**: Automated scheduling for message deletion and pinning
+  - **SYSTEM STATUS**: All advanced settings tested and working, 4 active tasks operational
+- **August 8, 2025 (Previous - Critical Bug Fix)**: Fixed inline buttons deletion issue:
   - **CRITICAL BUG FIXED**: Transparent buttons now preserved when disabling inline buttons feature
   - **DATABASE ENHANCEMENT**: Added proper `task_message_settings` table for enable/disable status tracking
   - **ARCHITECTURE IMPROVEMENT**: Separated button storage from enable/disable logic to prevent data loss
@@ -11,7 +23,6 @@ This is a Telegram message forwarding automation system built entirely with Tele
   - **BACKWARD COMPATIBILITY**: All existing functionality preserved while fixing the core issue
   - **AUTO-ENABLE**: Buttons now automatically enable when first button is added
   - **AUTO-DISABLE**: Feature properly disables (without deletion) when all buttons are cleared
-  - **SYSTEM STATUS**: All 4 user tasks active, UserBot connected, no runtime errors
 - **August 8, 2025 (Previous Update)**: Completed comprehensive message formatting system:
   - **RESOLVED**: Critical database integration issues - added missing tables and functions
   - **FIXED**: MessageNotModifiedError in inline buttons toggle functionality
@@ -45,6 +56,9 @@ Preferred communication style: Simple, everyday language.
 - **Schema Design**: 
   - Tasks table for forwarding configurations (source chats, target chats, active status)
   - User sessions table for storing Telegram session strings and phone numbers
+  - Advanced routing settings table for link preview, pinning, notifications, and auto-delete controls
+  - Message formatting settings for headers, footers, and inline buttons management
+  - Text replacement and word filtering tables for content modification
 - **Session Management**: Flask sessions for web authentication, Telegram StringSession for userbot persistence
 
 ## Authentication and Authorization
