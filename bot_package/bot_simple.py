@@ -96,14 +96,20 @@ class SimpleTelegramBot:
             elif data == "list_tasks":
                 await self.list_tasks(event)
             elif data.startswith("task_toggle_"):
-                task_id = int(data.split("_")[2])
-                await self.toggle_task(event, task_id)
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.toggle_task(event, task_id)
             elif data.startswith("task_delete_"):
-                task_id = int(data.split("_")[2])
-                await self.delete_task(event, task_id)
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.delete_task(event, task_id)
             elif data.startswith("task_manage_"):
-                task_id = int(data.split("_")[2])
-                await self.show_task_details(event, task_id)
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.show_task_details(event, task_id)
             elif data == "settings":
                 await self.show_settings(event)
             elif data == "check_userbot":
@@ -117,7 +123,7 @@ class SimpleTelegramBot:
             elif data == "cancel_auth":
                 await self.cancel_auth(event)
             elif data == "login": # Added handler for login button
-                await self.start_login(event)
+                await self.handle_relogin(event)
 
         except Exception as e:
             logger.error(f"خطأ في معالج الأزرار: {e}")
@@ -711,6 +717,29 @@ class SimpleTelegramBot:
         else:
             await self.start_auth(event) # If no session, start normal authentication
 
+    async def handle_relogin(self, event):
+        """Handle re-login request - clear session and start fresh authentication"""
+        user_id = event.sender_id
+        
+        # Clear existing session data
+        self.db.delete_user_session(user_id)
+        
+        # Clear conversation state if any
+        self.db.clear_conversation_state(user_id)
+        
+        # Start fresh authentication
+        await event.edit(
+            "🔄 تم تسجيل الخروج من الجلسة السابقة\n\n"
+            "📱 سيتم بدء عملية تسجيل دخول جديدة..."
+        )
+        
+        # Small delay for better UX
+        import asyncio
+        await asyncio.sleep(1)
+        
+        # Start authentication process
+        await self.start_auth(event)
+
     async def handle_auth_message(self, event, state_data):
         """Handle authentication messages"""
         user_id = event.sender_id
@@ -1036,14 +1065,20 @@ class SimpleTelegramBot:
             return
 
         if data.startswith("task_manage_"):
-            task_id = int(data.split("_")[2])
-            await self.show_task_details(event, task_id)
+            parts = data.split("_")
+            if len(parts) >= 3:
+                task_id = int(parts[2])
+                await self.show_task_details(event, task_id)
         elif data.startswith("task_toggle_"):
-            task_id = int(data.split("_")[2])
-            await self.toggle_task(event, task_id)
+            parts = data.split("_")
+            if len(parts) >= 3:
+                task_id = int(parts[2])
+                await self.toggle_task(event, task_id)
         elif data.startswith("task_delete_"):
-            task_id = int(data.split("_")[2])
-            await self.delete_task(event, task_id)
+            parts = data.split("_")
+            if len(parts) >= 3:
+                task_id = int(parts[2])
+                await self.delete_task(event, task_id)
 
     async def handle_task_message(self, event, state_data):
         """Handle task creation messages"""
@@ -1069,7 +1104,7 @@ class SimpleTelegramBot:
         """Show settings menu"""
         buttons = [
             [Button.inline("🔍 فحص حالة UserBot", "check_userbot")],
-            [Button.inline("🔄 إعادة تسجيل الدخول", "login")], # Changed "re-login" to "login" to match handler
+            [Button.inline("🔄 إعادة تسجيل الدخول", b"login")],
             [Button.inline("🗑️ حذف جميع المهام", "delete_all_tasks")],
             [Button.inline("🏠 القائمة الرئيسية", "main_menu")]
         ]
