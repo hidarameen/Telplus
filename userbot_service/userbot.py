@@ -65,21 +65,14 @@ class UserbotService:
     async def _setup_event_handlers(self, user_id: int, client: TelegramClient):
         """Set up message forwarding event handlers"""
         
-        @client.on(events.NewMessage)
+        @client.on(events.NewMessage(incoming=True))
         async def message_handler(event):
             try:
+                logger.info(f"🔔 استقبال رسالة جديدة من المستخدم {user_id}")
+                logger.info(f"📍 Chat ID: {event.chat_id}, Message: {event.text[:50] if event.text else 'رسالة بدون نص'}...")
                 # Get user tasks
                 tasks = self.user_tasks.get(user_id, [])
                 
-                # Log incoming message details
-                chat_info = f"Chat ID: {event.chat_id}"
-                if hasattr(event.chat, 'username') and event.chat.username:
-                    chat_info += f", Username: @{event.chat.username}"
-                if hasattr(event.chat, 'title') and event.chat.title:
-                    chat_info += f", Title: {event.chat.title}"
-                
-                logger.info(f"🔔 رسالة جديدة من المستخدم {user_id} - {chat_info}")
-                logger.info(f"📝 محتوى الرسالة: {event.text[:100] if event.text else 'رسالة بدون نص'}")
                 
                 # Get source chat ID and username first
                 source_chat_id = event.chat_id
