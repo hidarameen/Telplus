@@ -728,6 +728,42 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الرسائل المعاد توجيهها: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_working_hours_"): # Handler for setting working hours
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_set_working_hours(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد ساعات العمل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("add_language_"): # Handler for adding language
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.start_add_language(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة لغة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("duplicate_settings_"): # Handler for duplicate settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_duplicate_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التكرار: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("refresh_admins_"): # Handler for refreshing admins
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.refresh_admin_list(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديث المشرفين: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
 
 
         except Exception as e:
@@ -804,6 +840,14 @@ class SimpleTelegramBot:
             elif state == 'waiting_auto_delete_time': # Handle setting auto delete time
                 task_id = int(data)
                 await self.handle_set_auto_delete_time(event, task_id, event.text)
+                return
+            elif state == 'set_working_hours': # Handle setting working hours
+                task_id = data.get('task_id')
+                await self.handle_set_working_hours(event, task_id, event.text)
+                return
+            elif state == 'add_language': # Handle adding language filter
+                task_id = data.get('task_id')
+                await self.handle_add_language_filter(event, task_id, event.text)
                 return
 
         # Check if this chat is a target chat for any active forwarding task
@@ -4696,7 +4740,26 @@ class SimpleTelegramBot:
         
         # Get current status
         advanced_settings = self.db.get_advanced_filters_settings(task_id)
-        current_status = advanced_settings.get(f'{filter_type}_enabled', False)
+        
+        # Map filter types to their column names
+        filter_column_map = {
+            'day': 'day_filter_enabled',
+            'day_filter': 'day_filter_enabled',
+            'working_hours': 'working_hours_enabled',
+            'language': 'language_filter_enabled', 
+            'language_filter': 'language_filter_enabled',
+            'admin': 'admin_filter_enabled',
+            'admin_filter': 'admin_filter_enabled',
+            'duplicate': 'duplicate_filter_enabled',
+            'duplicate_filter': 'duplicate_filter_enabled',
+            'inline_button': 'inline_button_filter_enabled',
+            'inline_button_filter': 'inline_button_filter_enabled',
+            'forwarded_message': 'forwarded_message_filter_enabled',
+            'forwarded_message_filter': 'forwarded_message_filter_enabled'
+        }
+        
+        column_name = filter_column_map.get(filter_type, f'{filter_type}_enabled')
+        current_status = advanced_settings.get(column_name, False)
         new_status = not current_status
         
         # Update the filter
@@ -4770,6 +4833,196 @@ class SimpleTelegramBot:
             await self.show_forwarded_message_filter(event, task_id)
         else:
             await event.answer("❌ فشل في تحديث الإعداد")
+    
+    async def start_set_working_hours(self, event, task_id):
+        """Start conversation to set working hours"""
+        await event.edit("⏰ تحديد ساعات العمل\n\nأرسل الساعات بالصيغة: ساعة_البداية:دقيقة-ساعة_النهاية:دقيقة\nمثال: 09:00-17:30")
+        
+        # Set conversation state
+        user_id = event.sender_id
+        self.conversation_states[user_id] = {
+            'action': 'set_working_hours',
+            'task_id': task_id
+        }
+    
+    async def start_add_language(self, event, task_id):
+        """Start conversation to add language filter"""
+        await event.edit("🌍 إضافة فلتر لغة\n\nأرسل رمز اللغة (مثال: ar للعربية، en للإنجليزية)\nأو اسم اللغة كاملاً")
+        
+        # Set conversation state
+        user_id = event.sender_id
+        self.conversation_states[user_id] = {
+            'action': 'add_language',
+            'task_id': task_id
+        }
+    
+    async def show_duplicate_settings(self, event, task_id):
+        """Show duplicate detection settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_duplicate_settings(task_id)
+        
+        text_check = "✅ مُفعل" if settings['check_text_similarity'] else "❌ مُعطل"
+        media_check = "✅ مُفعل" if settings['check_media_similarity'] else "❌ مُعطل"
+        threshold = settings['similarity_threshold'] * 100
+        time_window = settings['time_window_hours']
+        
+        buttons = [
+            [Button.inline(f"📝 فحص النص ({text_check})", f"toggle_text_check_{task_id}")],
+            [Button.inline(f"🖼️ فحص الوسائط ({media_check})", f"toggle_media_check_{task_id}")],
+            [Button.inline(f"📊 نسبة التشابه: {threshold:.0f}%", f"set_threshold_{task_id}")],
+            [Button.inline(f"⏱️ النافذة الزمنية: {time_window}ساعة", f"set_time_window_{task_id}")],
+            [Button.inline("🔙 رجوع لفلتر التكرار", f"duplicate_filter_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"⚙️ إعدادات فلتر التكرار: {task_name}\n\n"
+            f"🔍 فحص النص: {text_check}\n"
+            f"🖼️ فحص الوسائط: {media_check}\n"
+            f"📊 نسبة التشابه: {threshold:.0f}%\n"
+            f"⏱️ النافذة الزمنية: {time_window} ساعة\n\n"
+            f"💡 النافذة الزمنية تحدد المدة التي يتم فحص التكرار خلالها",
+            buttons=buttons
+        )
+    
+    async def refresh_admin_list(self, event, task_id):
+        """Refresh the admin list for all source chats"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        await event.answer("🔄 جاري تحديث قائمة المشرفين...")
+        
+        try:
+            # Get all source chats for this task
+            source_chats = self.db.get_source_chats(task_id)
+            updated_count = 0
+            
+            for source_chat in source_chats:
+                source_id = source_chat['source_chat_id']
+                try:
+                    # Get admin list from userbot service
+                    if hasattr(self, 'userbot_client') and self.userbot_client:
+                        participants = await self.userbot_client.get_participants(source_id, filter='admin')
+                        
+                        # Clear existing admins for this source
+                        self.db.clear_admin_filters(task_id, source_id)
+                        
+                        # Add new admins
+                        for participant in participants:
+                            self.db.add_admin_filter(task_id, source_id, participant.id, 
+                                                   participant.first_name or "", 
+                                                   participant.username or "", True)
+                        updated_count += 1
+                        
+                except Exception as e:
+                    logger.error(f"❌ فشل في تحديث مشرفي {source_id}: {e}")
+            
+            if updated_count > 0:
+                await event.edit(f"✅ تم تحديث قائمة المشرفين لـ {updated_count} مصدر")
+                await self.show_admin_filters(event, task_id)
+            else:
+                await event.edit("❌ فشل في تحديث قائمة المشرفين")
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث المشرفين: {e}")
+            await event.edit("❌ حدث خطأ أثناء التحديث")
+    
+    async def handle_set_working_hours(self, event, task_id, text):
+        """Handle setting working hours from user input"""
+        try:
+            # Parse time format: HH:MM-HH:MM
+            if '-' not in text:
+                await event.respond("❌ صيغة غير صحيحة. استخدم: ساعة:دقيقة-ساعة:دقيقة (مثال: 09:00-17:30)")
+                return
+            
+            start_time, end_time = text.strip().split('-')
+            
+            # Parse start time
+            start_hour, start_minute = map(int, start_time.split(':'))
+            end_hour, end_minute = map(int, end_time.split(':'))
+            
+            # Validate time ranges
+            if not (0 <= start_hour <= 23 and 0 <= start_minute <= 59 and 
+                    0 <= end_hour <= 23 and 0 <= end_minute <= 59):
+                await event.respond("❌ ساعات أو دقائق غير صحيحة")
+                return
+                
+            # Set working hours
+            success = self.db.set_working_hours(task_id, start_hour, start_minute, end_hour, end_minute)
+            
+            if success:
+                await event.respond(f"✅ تم تحديد ساعات العمل من {start_time} إلى {end_time}")
+                user_id = event.sender_id
+                self.db.clear_conversation_state(user_id)
+                await self.show_working_hours_filter(event, task_id)
+            else:
+                await event.respond("❌ فشل في حفظ ساعات العمل")
+                
+        except ValueError:
+            await event.respond("❌ صيغة غير صحيحة. استخدم: ساعة:دقيقة-ساعة:دقيقة (مثال: 09:00-17:30)")
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديد ساعات العمل: {e}")
+            await event.respond("❌ حدث خطأ أثناء التحديد")
+    
+    async def handle_add_language_filter(self, event, task_id, text):
+        """Handle adding language filter from user input"""
+        try:
+            language_input = text.strip().lower()
+            
+            # Common language mappings
+            language_map = {
+                'ar': 'العربية', 'arabic': 'العربية', 'عربي': 'العربية', 'عربية': 'العربية',
+                'en': 'English', 'english': 'English', 'انجليزي': 'English', 'إنجليزي': 'English',
+                'fr': 'Français', 'french': 'Français', 'فرنسي': 'Français',
+                'es': 'Español', 'spanish': 'Español', 'اسباني': 'Español',
+                'de': 'Deutsch', 'german': 'Deutsch', 'الماني': 'Deutsch',
+                'ru': 'Русский', 'russian': 'Русский', 'روسي': 'Русский',
+                'tr': 'Türkçe', 'turkish': 'Türkçe', 'تركي': 'Türkçe'
+            }
+            
+            # Find language code and name
+            if language_input in language_map:
+                lang_code = language_input
+                lang_name = language_map[language_input]
+            else:
+                # Check if it's a full language name
+                lang_code = None
+                lang_name = None
+                for code, name in language_map.items():
+                    if name.lower() == language_input or language_input in name.lower():
+                        lang_code = code if len(code) == 2 else language_input
+                        lang_name = name
+                        break
+                
+                if not lang_code:
+                    # Use input as both code and name
+                    lang_code = language_input[:2]
+                    lang_name = language_input.title()
+            
+            # Add language filter
+            success = self.db.add_language_filter(task_id, lang_code, lang_name, True)
+            
+            if success:
+                await event.respond(f"✅ تم إضافة فلتر اللغة: {lang_name}")
+                user_id = event.sender_id
+                self.db.clear_conversation_state(user_id)
+                await self.show_language_filters(event, task_id)
+            else:
+                await event.respond("❌ فشل في إضافة فلتر اللغة أو أنها موجودة مسبقاً")
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة فلتر اللغة: {e}")
+            await event.respond("❌ حدث خطأ أثناء الإضافة")
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()
