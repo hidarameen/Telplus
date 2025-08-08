@@ -9,7 +9,7 @@ API_HASH = os.getenv('API_HASH', 'your_api_hash_here')
 
 # Flask Configuration
 SECRET_KEY = os.getenv('SECRET_KEY', 'your_secret_key_here')
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///telegram_bot.db')
+DATABASE_URL = 'sqlite:///telegram_bot.db'
 
 # Session Configuration
 SESSION_FILE = 'user_session'
