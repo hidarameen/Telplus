@@ -156,6 +156,48 @@ class Database:
                 )
             ''')
 
+            # Task headers table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_headers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    header_text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Task footers table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_footers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    footer_text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Task inline buttons table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_inline_buttons (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    button_text TEXT NOT NULL,
+                    button_url TEXT NOT NULL,
+                    row_position INTEGER DEFAULT 0,
+                    col_position INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
