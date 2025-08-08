@@ -274,7 +274,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, source_chat_id, source_chat_name, target_chat_id, target_chat_name
+                SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name, forward_mode
                 FROM tasks 
                 WHERE user_id = ? AND is_active = 1
             ''', (user_id,))
@@ -283,10 +283,12 @@ class Database:
             for row in cursor.fetchall():
                 tasks.append({
                     'id': row[0],
-                    'source_chat_id': row[1],
-                    'source_chat_name': row[2],
-                    'target_chat_id': row[3],
-                    'target_chat_name': row[4]
+                    'task_name': row[1],
+                    'source_chat_id': row[2],
+                    'source_chat_name': row[3],
+                    'target_chat_id': row[4],
+                    'target_chat_name': row[5],
+                    'forward_mode': row[6] or 'forward'
                 })
             return tasks
 
@@ -295,7 +297,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, source_chat_id, source_chat_name, target_chat_id, target_chat_name
+                SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name, forward_mode
                 FROM tasks 
                 WHERE is_active = 1
             """, )
@@ -304,10 +306,12 @@ class Database:
             for row in cursor.fetchall():
                 tasks.append({
                     'id': row[0],
-                    'source_chat_id': row[1],
-                    'source_chat_name': row[2],
-                    'target_chat_id': row[3],
-                    'target_chat_name': row[4]
+                    'task_name': row[1],
+                    'source_chat_id': row[2],
+                    'source_chat_name': row[3],
+                    'target_chat_id': row[4],
+                    'target_chat_name': row[5],
+                    'forward_mode': row[6] or 'forward'
                 })
             return tasks
 
@@ -417,23 +421,45 @@ class Database:
         """Remove source from task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            # First check if the source exists
+            cursor.execute('SELECT COUNT(*) FROM task_sources WHERE id = ? AND task_id = ?', (source_id, task_id))
+            exists = cursor.fetchone()[0] > 0
+            
+            if not exists:
+                logger.warning(f"⚠️ محاولة حذف مصدر غير موجود: source_id={source_id}, task_id={task_id}")
+                return False
+            
             cursor.execute('''
                 DELETE FROM task_sources 
                 WHERE id = ? AND task_id = ?
             ''', (source_id, task_id))
             conn.commit()
-            return cursor.rowcount > 0
+            
+            deleted_count = cursor.rowcount
+            logger.info(f"🗑️ حذف مصدر: source_id={source_id}, task_id={task_id}, deleted={deleted_count}")
+            return deleted_count > 0
 
     def remove_task_target(self, target_id: int, task_id: int):
         """Remove target from task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            # First check if the target exists
+            cursor.execute('SELECT COUNT(*) FROM task_targets WHERE id = ? AND task_id = ?', (target_id, task_id))
+            exists = cursor.fetchone()[0] > 0
+            
+            if not exists:
+                logger.warning(f"⚠️ محاولة حذف هدف غير موجود: target_id={target_id}, task_id={task_id}")
+                return False
+            
             cursor.execute('''
                 DELETE FROM task_targets 
                 WHERE id = ? AND task_id = ?
             ''', (target_id, task_id))
             conn.commit()
-            return cursor.rowcount > 0
+            
+            deleted_count = cursor.rowcount
+            logger.info(f"🗑️ حذف هدف: target_id={target_id}, task_id={task_id}, deleted={deleted_count}")
+            return deleted_count > 0
 
     def get_task_with_sources_targets(self, task_id: int, user_id: int = None):
         """Get task with all sources and targets"""
@@ -469,6 +495,7 @@ class Database:
         """Migrate existing task to new structure"""
         task = self.get_task(task_id)
         if not task:
+            logger.error(f"❌ لا يمكن العثور على المهمة {task_id} للتهجير")
             return False
             
         with self.get_connection() as conn:
@@ -476,24 +503,34 @@ class Database:
             
             # Check if already migrated
             cursor.execute('SELECT COUNT(*) FROM task_sources WHERE task_id = ?', (task_id,))
-            if cursor.fetchone()[0] > 0:
+            sources_count = cursor.fetchone()[0]
+            cursor.execute('SELECT COUNT(*) FROM task_targets WHERE task_id = ?', (task_id,))
+            targets_count = cursor.fetchone()[0]
+            
+            if sources_count > 0 and targets_count > 0:
+                logger.info(f"✅ المهمة {task_id} مهاجرة بالفعل ({sources_count} مصادر, {targets_count} أهداف)")
                 return True  # Already migrated
             
-            # Migrate source
-            if task.get('source_chat_id'):
+            logger.info(f"🔄 بدء تهجير المهمة {task_id} إلى البنية الجديدة")
+            
+            # Migrate source if not exists
+            if sources_count == 0 and task.get('source_chat_id'):
                 cursor.execute('''
                     INSERT INTO task_sources (task_id, chat_id, chat_name)
                     VALUES (?, ?, ?)
                 ''', (task_id, task['source_chat_id'], task['source_chat_name']))
+                logger.info(f"➕ أضيف مصدر: {task['source_chat_id']}")
             
-            # Migrate target  
-            if task.get('target_chat_id'):
+            # Migrate target if not exists
+            if targets_count == 0 and task.get('target_chat_id'):
                 cursor.execute('''
                     INSERT INTO task_targets (task_id, chat_id, chat_name)
                     VALUES (?, ?, ?)
                 ''', (task_id, task['target_chat_id'], task['target_chat_name']))
+                logger.info(f"➕ أضيف هدف: {task['target_chat_id']}")
             
             conn.commit()
+            logger.info(f"✅ تم تهجير المهمة {task_id} بنجاح")
             return True
 
     # Cleanup and maintenance

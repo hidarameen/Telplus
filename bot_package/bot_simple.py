@@ -291,6 +291,16 @@ class SimpleTelegramBot:
         if success:
             mode_text = "نسخ" if new_mode == 'copy' else "توجيه"
             await event.answer(f"✅ تم تغيير وضع التوجيه إلى {mode_text}")
+            
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+                    logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير وضع التوجيه للمهمة {task_id}")
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+                
             await self.show_task_settings(event, task_id)
         else:
             await event.answer("❌ فشل في تغيير وضع التوجيه")
@@ -298,6 +308,10 @@ class SimpleTelegramBot:
     async def manage_task_sources(self, event, task_id):
         """Manage task sources"""
         user_id = event.sender_id
+        
+        # First migrate task to new structure if needed
+        self.db.migrate_task_to_new_structure(task_id)
+        
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
@@ -337,6 +351,10 @@ class SimpleTelegramBot:
     async def manage_task_targets(self, event, task_id):
         """Manage task targets"""
         user_id = event.sender_id
+        
+        # First migrate task to new structure if needed
+        self.db.migrate_task_to_new_structure(task_id)
+        
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
@@ -425,9 +443,21 @@ class SimpleTelegramBot:
         """Remove source from task"""
         user_id = event.sender_id
         
+        # First migrate task to new structure if needed
+        self.db.migrate_task_to_new_structure(task_id)
+        
         success = self.db.remove_task_source(source_id, task_id)
         
         if success:
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+                    logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف مصدر من المهمة {task_id}")
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+                
             await event.answer("✅ تم حذف المصدر بنجاح")
             await self.manage_task_sources(event, task_id)
         else:
@@ -437,9 +467,21 @@ class SimpleTelegramBot:
         """Remove target from task"""
         user_id = event.sender_id
         
+        # First migrate task to new structure if needed
+        self.db.migrate_task_to_new_structure(task_id)
+        
         success = self.db.remove_task_target(target_id, task_id)
         
         if success:
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+                    logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف هدف من المهمة {task_id}")
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+                
             await event.answer("✅ تم حذف الهدف بنجاح")
             await self.manage_task_targets(event, task_id)
         else:
@@ -732,6 +774,11 @@ class SimpleTelegramBot:
             self.db.clear_conversation_state(user_id)
             return
         
+        # Debug: log received data
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔍 إضافة مصدر/هدف: task_id={task_id}, action={action}, input='{chat_input}'")
+        
         # Parse chat input
         chat_ids, chat_names = self.parse_chat_input(chat_input)
         
@@ -773,6 +820,15 @@ class SimpleTelegramBot:
         if added_count > 0:
             item_name = "مصدر" if action == 'add_source' else "هدف"
             plural = "مصادر" if action == 'add_source' and added_count > 1 else "أهداف" if action == 'add_target' and added_count > 1 else item_name
+            
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+                    logger.info(f"🔄 تم تحديث مهام UserBot بعد إضافة {plural} للمهمة {task_id}")
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
             
             await event.respond(f"✅ تم إضافة {added_count} {plural} بنجاح!")
             
