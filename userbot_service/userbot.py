@@ -105,7 +105,8 @@ class UserbotService:
 
                 # Check media filters first
                 message_media_type = self.get_message_media_type(event.message)
-                logger.info(f"🎬 نوع الوسائط للرسالة: {message_media_type}")
+                has_text_caption = bool(event.message.text)  # Check if message has text/caption
+                logger.info(f"🎬 نوع الوسائط للرسالة: {message_media_type}, يحتوي على نص/caption: {has_text_caption}")
 
                 # Find matching tasks for this source chat
                 matching_tasks = []
@@ -123,12 +124,31 @@ class UserbotService:
                     if task_source_id == source_chat_id_str:
                         logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
-                        # Check media filter
-                        if self.is_media_allowed(task_id, message_media_type):
+                        # Enhanced media filter check
+                        media_allowed = self.is_media_allowed(task_id, message_media_type)
+                        text_allowed = True  # Default to allowed
+                        
+                        # If message has text/caption, check text filter separately
+                        if has_text_caption:
+                            text_allowed = self.is_media_allowed(task_id, 'text')
+                            logger.info(f"🔍 فحص فلتر النص/Caption: مسموح={text_allowed}")
+                        
+                        # Message is allowed only if both media and text (if exists) are allowed
+                        is_message_allowed = media_allowed and text_allowed
+                        
+                        if is_message_allowed:
                             matching_tasks.append(task)
-                            logger.info(f"✅ الوسائط مسموحة لهذه المهمة: {message_media_type}")
+                            if has_text_caption:
+                                logger.info(f"✅ الرسالة مسموحة - الوسائط: {media_allowed}, النص: {text_allowed}")
+                            else:
+                                logger.info(f"✅ الوسائط مسموحة لهذه المهمة: {message_media_type}")
                         else:
-                            logger.info(f"🚫 الوسائط محظورة لهذه المهمة: {message_media_type}")
+                            if not media_allowed and not text_allowed:
+                                logger.info(f"🚫 الرسالة محظورة - الوسائط والنص محظوران")
+                            elif not media_allowed:
+                                logger.info(f"🚫 الوسائط محظورة لهذه المهمة: {message_media_type}")
+                            elif not text_allowed:
+                                logger.info(f"🚫 النص/Caption محظور لهذه المهمة")
                     else:
                         logger.info(f"❌ لا يوجد تطابق للمهمة '{task_name}': '{task_source_id}' != '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
