@@ -453,7 +453,7 @@ class SimpleTelegramBot:
         ]
 
         await event.respond(
-            f"✅ تم تحديد المصادر: {', '.join(source_chat_names)}\n\n"
+            f"✅ تم تحديد المصادر: {', '.join([str(name) for name in source_chat_names if name])}\n\n"
             f"📤 **الخطوة 3: تحديد الوجهة**\n\n"
             f"أرسل معرف أو رابط المجموعة/القناة المراد توجيه الرسائل إليها:\n\n"
             f"أمثلة:\n"
@@ -507,10 +507,15 @@ class SimpleTelegramBot:
                 if len(source_chat_names) < len(source_chat_ids):
                     source_chat_names.extend([None] * (len(source_chat_ids) - len(source_chat_names)))
 
-                # Replace None values with chat IDs
+                # Replace None values with chat IDs and ensure all are strings
                 for i, name in enumerate(source_chat_names):
                     if name is None or name == '':
-                        source_chat_names[i] = source_chat_ids[i]
+                        source_chat_names[i] = str(source_chat_ids[i])
+                    else:
+                        source_chat_names[i] = str(name)
+                
+                # Ensure all source_chat_ids are strings
+                source_chat_ids = [str(chat_id) for chat_id in source_chat_ids]
             except:
                 await event.respond("❌ حدث خطأ في البيانات، يرجى البدء من جديد")
                 return
@@ -549,7 +554,7 @@ class SimpleTelegramBot:
             f"🎉 تم إنشاء المهمة بنجاح!\n\n"
             f"🆔 رقم المهمة: #{task_id}\n"
             f"🏷️ اسم المهمة: {task_name}\n"
-            f"📥 المصادر: {', '.join(source_chat_names or source_chat_ids)}\n"
+            f"📥 المصادر: {', '.join([str(name) for name in (source_chat_names or source_chat_ids)])}\n"
             f"📤 الوجهة: {target_chat_name or target_chat_id}\n"
             f"🟢 الحالة: نشطة\n\n"
             f"✅ سيتم توجيه جميع الرسائل الجديدة تلقائياً",
