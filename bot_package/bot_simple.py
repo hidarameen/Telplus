@@ -140,7 +140,13 @@ class SimpleTelegramBot:
         state_data = self.db.get_conversation_state(user_id)
 
         if state_data:
-            state, data = state_data
+            state, data_str = state_data
+            try:
+                data = json.loads(data_str) if data_str else {}
+            except:
+                data = {}
+            
+            state_data = (state, data)
 
             # Handle authentication states
             if state in ['waiting_phone', 'waiting_code', 'waiting_password']:
@@ -203,7 +209,7 @@ class SimpleTelegramBot:
             return
 
         # Set conversation state
-        self.db.set_conversation_state(user_id, 'waiting_task_name')
+        self.db.set_conversation_state(user_id, 'waiting_task_name', json.dumps({}))
 
         buttons = [
             [Button.inline("❌ إلغاء", b"manage_tasks")]
@@ -395,7 +401,11 @@ class SimpleTelegramBot:
         if not state_data:
             return
 
-        state, data = state_data
+        state, data_str = state_data
+        try:
+            data = json.loads(data_str) if data_str else {}
+        except:
+            data = {}
         message_text = event.raw_text.strip()
 
         try:
@@ -685,7 +695,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         # Save conversation state in database
-        self.db.set_conversation_state(user_id, 'waiting_phone', {})
+        self.db.set_conversation_state(user_id, 'waiting_phone', json.dumps({}))
 
         buttons = [
             [Button.inline("❌ إلغاء", b"cancel_auth")]
