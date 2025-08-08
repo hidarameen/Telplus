@@ -8,7 +8,7 @@ from telethon import TelegramClient, events
 from telethon.tl.custom import Button
 from telethon.sessions import StringSession
 from database.database import Database
-from userbot_service.userbot import userbot_instance
+from bot_service.userbot import userbot_instance
 from bot_package.config import BOT_TOKEN, API_ID, API_HASH
 import json
 from datetime import datetime
@@ -294,7 +294,7 @@ class SimpleTelegramBot:
 
             # Force refresh UserBot tasks
             try:
-                from userbot_service.userbot import userbot_instance
+                from bot_service.userbot import userbot_instance
                 if user_id in userbot_instance.clients:
                     await userbot_instance.refresh_user_tasks(user_id)
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير وضع التوجيه للمهمة {task_id}")
@@ -337,7 +337,7 @@ class SimpleTelegramBot:
 
         # Add remove buttons for each source (max 8 buttons per row due to Telegram limits)
         for source in sources[:8]:  # Limit to avoid too many buttons
-            name = source.get('chat_name') or source.get('chat_id')[:15]
+            name = source.get('chat_name') or source.get('chat_id')
             if len(name) > 12:
                 name = name[:12] + "..."
             buttons.append([
@@ -346,7 +346,7 @@ class SimpleTelegramBot:
 
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
-        await event.edit(message, buttons=buttons)
+        await event.edit(message, buttons=buttons, parse_mode='Markdown')
 
     async def manage_task_targets(self, event, task_id):
         """Manage task targets"""
@@ -380,7 +380,7 @@ class SimpleTelegramBot:
 
         # Add remove buttons for each target (max 8 buttons per row due to Telegram limits)
         for target in targets[:8]:  # Limit to avoid too many buttons
-            name = target.get('chat_name') or target.get('chat_id')[:15]
+            name = target.get('chat_name') or target.get('chat_id')
             if len(name) > 12:
                 name = name[:12] + "..."
             buttons.append([
@@ -451,7 +451,7 @@ class SimpleTelegramBot:
         if success:
             # Force refresh UserBot tasks
             try:
-                from userbot_service.userbot import userbot_instance
+                from bot_service.userbot import userbot_instance
                 if user_id in userbot_instance.clients:
                     await userbot_instance.refresh_user_tasks(user_id)
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف مصدر من المهمة {task_id}")
@@ -475,7 +475,7 @@ class SimpleTelegramBot:
         if success:
             # Force refresh UserBot tasks
             try:
-                from userbot_service.userbot import userbot_instance
+                from bot_service.userbot import userbot_instance
                 if user_id in userbot_instance.clients:
                     await userbot_instance.refresh_user_tasks(user_id)
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف هدف من المهمة {task_id}")
@@ -582,14 +582,14 @@ class SimpleTelegramBot:
         for i, task in enumerate(tasks[:10], 1):  # Show max 10 tasks
             status = "🟢 نشطة" if task['is_active'] else "🔴 متوقفة"
             task_name = task.get('task_name', 'مهمة بدون اسم')
-            
+
             # Get all sources and targets for this task
             task_with_details = self.db.get_task_with_sources_targets(task['id'], user_id)
-            
+
             if task_with_details:
                 sources = task_with_details.get('sources', [])
                 targets = task_with_details.get('targets', [])
-                
+
                 # Build sources text
                 if not sources:
                     sources_text = "لا توجد مصادر"
@@ -598,7 +598,7 @@ class SimpleTelegramBot:
                     sources_text = str(source_name)
                 else:
                     sources_text = f"{len(sources)} مصادر"
-                
+
                 # Build targets text
                 if not targets:
                     targets_text = "لا توجد أهداف"
@@ -611,7 +611,7 @@ class SimpleTelegramBot:
                 # Fallback to old data
                 sources_text = task['source_chat_name'] or task['source_chat_id'] or "غير محدد"
                 targets_text = task['target_chat_name'] or task['target_chat_id'] or "غير محدد"
-            
+
             message += f"{i}. {status} - {task_name}\n"
             message += f"   📥 من: {sources_text}\n"
             message += f"   📤 إلى: {targets_text}\n\n"
@@ -629,10 +629,10 @@ class SimpleTelegramBot:
     async def show_task_details(self, event, task_id):
         """Show task details"""
         user_id = event.sender_id
-        
+
         # First migrate task to new structure if needed
         self.db.migrate_task_to_new_structure(task_id)
-        
+
         # Get task with all sources and targets
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
@@ -706,7 +706,7 @@ class SimpleTelegramBot:
 
         # Update userbot tasks - ensure UserBot is running first
         try:
-            from userbot_service.userbot import userbot_instance
+            from bot_service.userbot import userbot_instance
 
             # Check if UserBot is running, if not try to start it
             if user_id not in userbot_instance.clients:
@@ -752,7 +752,7 @@ class SimpleTelegramBot:
 
         # Update userbot tasks - ensure UserBot is running first
         try:
-            from userbot_service.userbot import userbot_instance
+            from bot_service.userbot import userbot_instance
 
             # Check if UserBot is running, if not try to start it
             if user_id not in userbot_instance.clients:
@@ -883,7 +883,7 @@ class SimpleTelegramBot:
 
             # Force refresh UserBot tasks
             try:
-                from userbot_service.userbot import userbot_instance
+                from bot_service.userbot import userbot_instance
                 if user_id in userbot_instance.clients:
                     await userbot_instance.refresh_user_tasks(user_id)
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد إضافة {plural} للمهمة {task_id}")
@@ -1066,7 +1066,7 @@ class SimpleTelegramBot:
 
         # Update userbot tasks - ensure UserBot is running first
         try:
-            from userbot_service.userbot import userbot_instance
+            from bot_service.userbot import userbot_instance
 
             # Check if UserBot is running, if not try to start it
             if user_id not in userbot_instance.clients:
@@ -1626,7 +1626,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         try:
-            from userbot_service.userbot import userbot_instance
+            from bot_service.userbot import userbot_instance
 
             # Check if user has session
             session_data = self.db.get_user_session(user_id)
