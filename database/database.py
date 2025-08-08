@@ -224,9 +224,26 @@ class Database:
                     silent_notifications BOOLEAN DEFAULT FALSE,
                     auto_delete_enabled BOOLEAN DEFAULT FALSE,
                     auto_delete_time INTEGER DEFAULT 3600,
+                    sync_edit_enabled BOOLEAN DEFAULT FALSE,
+                    sync_delete_enabled BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Message mappings table - for tracking forwarded messages
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS message_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    source_chat_id TEXT NOT NULL,
+                    source_message_id INTEGER NOT NULL,
+                    target_chat_id TEXT NOT NULL,
+                    target_message_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, source_chat_id, source_message_id, target_chat_id)
                 )
             ''')
 
@@ -1388,7 +1405,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT link_preview_enabled, pin_message_enabled, silent_notifications, 
-                       auto_delete_enabled, auto_delete_time
+                       auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled
                 FROM task_forwarding_settings 
                 WHERE task_id = ?
             ''', (task_id,))
@@ -1400,7 +1417,9 @@ class Database:
                     'pin_message_enabled': result['pin_message_enabled'],
                     'silent_notifications': result['silent_notifications'],
                     'auto_delete_enabled': result['auto_delete_enabled'],
-                    'auto_delete_time': result['auto_delete_time']
+                    'auto_delete_time': result['auto_delete_time'],
+                    'sync_edit_enabled': result['sync_edit_enabled'],
+                    'sync_delete_enabled': result['sync_delete_enabled']
                 }
             else:
                 # Return default settings
@@ -1409,7 +1428,9 @@ class Database:
                     'pin_message_enabled': False,
                     'silent_notifications': False,
                     'auto_delete_enabled': False,
-                    'auto_delete_time': 3600
+                    'auto_delete_time': 3600,
+                    'sync_edit_enabled': False,
+                    'sync_delete_enabled': False
                 }
 
     def update_forwarding_settings(self, task_id: int, **kwargs):
@@ -1426,11 +1447,12 @@ class Database:
             cursor.execute('''
                 INSERT OR REPLACE INTO task_forwarding_settings 
                 (task_id, link_preview_enabled, pin_message_enabled, silent_notifications, 
-                 auto_delete_enabled, auto_delete_time, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (task_id, current_settings['link_preview_enabled'], 
                   current_settings['pin_message_enabled'], current_settings['silent_notifications'],
-                  current_settings['auto_delete_enabled'], current_settings['auto_delete_time']))
+                  current_settings['auto_delete_enabled'], current_settings['auto_delete_time'],
+                  current_settings['sync_edit_enabled'], current_settings['sync_delete_enabled']))
             
             conn.commit()
 
@@ -1462,6 +1484,55 @@ class Database:
         self.update_forwarding_settings(task_id, auto_delete_enabled=new_state)
         return new_state
 
+    def toggle_sync_edit(self, task_id: int) -> bool:
+        """Toggle sync edit setting"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings['sync_edit_enabled']
+        self.update_forwarding_settings(task_id, sync_edit_enabled=new_state)
+        return new_state
+
+    def toggle_sync_delete(self, task_id: int) -> bool:
+        """Toggle sync delete setting"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings['sync_delete_enabled']
+        self.update_forwarding_settings(task_id, sync_delete_enabled=new_state)
+        return new_state
+
     def set_auto_delete_time(self, task_id: int, seconds: int):
         """Set auto delete time in seconds"""
         self.update_forwarding_settings(task_id, auto_delete_time=seconds)
+
+    # Message Mapping Methods for Synchronization
+    def save_message_mapping(self, task_id: int, source_chat_id: str, source_message_id: int, target_chat_id: str, target_message_id: int):
+        """Save message mapping for synchronization"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO message_mappings 
+                (task_id, source_chat_id, source_message_id, target_chat_id, target_message_id)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (task_id, source_chat_id, source_message_id, target_chat_id, target_message_id))
+            conn.commit()
+
+    def get_message_mappings_by_source(self, task_id: int, source_chat_id: str, source_message_id: int) -> List[Dict]:
+        """Get all target message mappings for a source message"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, target_chat_id, target_message_id 
+                FROM message_mappings 
+                WHERE task_id = ? AND source_chat_id = ? AND source_message_id = ?
+            ''', (task_id, source_chat_id, source_message_id))
+            results = cursor.fetchall()
+            return [{
+                'id': row['id'],
+                'target_chat_id': row['target_chat_id'],
+                'target_message_id': row['target_message_id']
+            } for row in results]
+
+    def delete_message_mapping(self, mapping_id: int):
+        """Delete a message mapping"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM message_mappings WHERE id = ?', (mapping_id,))
+            conn.commit()

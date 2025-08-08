@@ -318,6 +318,19 @@ class UserbotService:
                             logger.info(f"✅ تم توجيه الرسالة بنجاح من {source_chat_id} إلى {target_chat_id}")
                             logger.info(f"📝 معرف الرسالة المُوجهة: {msg_id} (المهمة: {task_name})")
                             
+                            # Save message mapping for synchronization
+                            try:
+                                self.db.save_message_mapping(
+                                    task_id=task['id'],
+                                    source_chat_id=str(source_chat_id),
+                                    source_message_id=event.message.id,
+                                    target_chat_id=str(target_chat_id),
+                                    target_message_id=msg_id
+                                )
+                                logger.info(f"💾 تم حفظ تطابق الرسالة للمزامنة: {source_chat_id}:{event.message.id} → {target_chat_id}:{msg_id}")
+                            except Exception as mapping_error:
+                                logger.error(f"❌ فشل في حفظ تطابق الرسالة: {mapping_error}")
+                            
                             # Apply post-forwarding settings
                             await self.apply_post_forwarding_settings(client, target_entity, msg_id, forwarding_settings, task['id'])
                             
@@ -350,6 +363,114 @@ class UserbotService:
 
             except Exception as e:
                 logger.error(f"خطأ في معالج الرسائل للمستخدم {user_id}: {e}")
+
+        @client.on(events.MessageEdited)
+        async def message_edit_handler(event):
+            """Handle message edit synchronization"""
+            try:
+                source_chat_id = event.chat_id
+                source_message_id = event.message.id
+                
+                logger.info(f"🔄 تم تعديل رسالة: Chat={source_chat_id}, Message={source_message_id}")
+                
+                # Get tasks that match this source chat
+                tasks = self.user_tasks.get(user_id, [])
+                matching_tasks = [task for task in tasks if str(task['source_chat_id']) == str(source_chat_id)]
+                
+                if not matching_tasks:
+                    return
+                
+                # Check sync settings for each matching task
+                for task in matching_tasks:
+                    task_id = task['id']
+                    forwarding_settings = self.get_forwarding_settings(task_id)
+                    
+                    if not forwarding_settings.get('sync_edit_enabled', False):
+                        continue
+                        
+                    logger.info(f"🔄 مزامنة التعديل مفعلة للمهمة {task_id}")
+                    
+                    # Find all target messages that were forwarded from this source message
+                    message_mappings = self.db.get_message_mappings_by_source(task_id, source_chat_id, source_message_id)
+                    
+                    for mapping in message_mappings:
+                        target_chat_id = mapping['target_chat_id']
+                        target_message_id = mapping['target_message_id']
+                        
+                        try:
+                            # Get target entity
+                            target_entity = await client.get_entity(int(target_chat_id))
+                            
+                            # Update the target message with the edited content
+                            await client.edit_message(
+                                target_entity, 
+                                target_message_id, 
+                                event.message.text or event.message.message,
+                                file=None if not event.message.media else event.message.media
+                            )
+                            
+                            logger.info(f"✅ تم تحديث الرسالة المتزامنة: {target_chat_id}:{target_message_id}")
+                            
+                        except Exception as sync_error:
+                            logger.error(f"❌ فشل في مزامنة تعديل الرسالة: {sync_error}")
+                            
+            except Exception as e:
+                logger.error(f"خطأ في معالج تعديل الرسائل للمستخدم {user_id}: {e}")
+
+        @client.on(events.MessageDeleted)
+        async def message_delete_handler(event):
+            """Handle message delete synchronization"""
+            try:
+                if not hasattr(event, 'chat_id') or not hasattr(event, 'deleted_ids'):
+                    return
+                    
+                source_chat_id = event.chat_id
+                deleted_ids = event.deleted_ids
+                
+                logger.info(f"🗑️ تم حذف رسائل: Chat={source_chat_id}, IDs={deleted_ids}")
+                
+                # Get tasks that match this source chat
+                tasks = self.user_tasks.get(user_id, [])
+                matching_tasks = [task for task in tasks if str(task['source_chat_id']) == str(source_chat_id)]
+                
+                if not matching_tasks:
+                    return
+                
+                # Check sync settings for each matching task and deleted message
+                for task in matching_tasks:
+                    task_id = task['id']
+                    forwarding_settings = self.get_forwarding_settings(task_id)
+                    
+                    if not forwarding_settings.get('sync_delete_enabled', False):
+                        continue
+                        
+                    logger.info(f"🗑️ مزامنة الحذف مفعلة للمهمة {task_id}")
+                    
+                    for source_message_id in deleted_ids:
+                        # Find all target messages that were forwarded from this source message
+                        message_mappings = self.db.get_message_mappings_by_source(task_id, source_chat_id, source_message_id)
+                        
+                        for mapping in message_mappings:
+                            target_chat_id = mapping['target_chat_id']
+                            target_message_id = mapping['target_message_id']
+                            
+                            try:
+                                # Get target entity
+                                target_entity = await client.get_entity(int(target_chat_id))
+                                
+                                # Delete the target message
+                                await client.delete_messages(target_entity, target_message_id)
+                                
+                                logger.info(f"✅ تم حذف الرسالة المتزامنة: {target_chat_id}:{target_message_id}")
+                                
+                                # Remove the mapping from database since message is deleted
+                                self.db.delete_message_mapping(mapping['id'])
+                                
+                            except Exception as sync_error:
+                                logger.error(f"❌ فشل في مزامنة حذف الرسالة: {sync_error}")
+                                
+            except Exception as e:
+                logger.error(f"خطأ في معالج حذف الرسائل للمستخدم {user_id}: {e}")
 
     async def refresh_user_tasks(self, user_id: int):
         """Refresh user tasks from database"""

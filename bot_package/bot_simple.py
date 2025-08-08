@@ -557,6 +557,24 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الحذف التلقائي: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_sync_edit_"): # Handler for toggling sync edit
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_sync_edit(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل مزامنة التعديل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_sync_delete_"): # Handler for toggling sync delete
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_sync_delete(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل مزامنة الحذف: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("set_auto_delete_time_"): # Handler for setting auto delete time
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -3934,6 +3952,8 @@ class SimpleTelegramBot:
         pin_message_status = "🟢 مفعل" if settings['pin_message_enabled'] else "🔴 معطل"
         silent_status = "🟢 بصمت" if settings['silent_notifications'] else "🔴 مع إشعار"
         auto_delete_status = "🟢 مفعل" if settings['auto_delete_enabled'] else "🔴 معطل"
+        sync_edit_status = "🟢 مفعل" if settings['sync_edit_enabled'] else "🔴 معطل"
+        sync_delete_status = "🟢 مفعل" if settings['sync_delete_enabled'] else "🔴 معطل"
         
         # Convert seconds to readable format
         delete_time = settings['auto_delete_time']
@@ -3949,6 +3969,8 @@ class SimpleTelegramBot:
             [Button.inline(f"📌 تثبيت الرسالة ({pin_message_status})", f"toggle_pin_message_{task_id}")],
             [Button.inline(f"🔔 الإشعارات ({silent_status})", f"toggle_silent_notifications_{task_id}")],
             [Button.inline(f"🗑️ الحذف التلقائي ({auto_delete_status})", f"toggle_auto_delete_{task_id}")],
+            [Button.inline(f"🔄 مزامنة التعديل ({sync_edit_status})", f"toggle_sync_edit_{task_id}")],
+            [Button.inline(f"🗂️ مزامنة الحذف ({sync_delete_status})", f"toggle_sync_delete_{task_id}")],
         ]
         
         if settings['auto_delete_enabled']:
@@ -3976,7 +3998,13 @@ class SimpleTelegramBot:
         else:
             message_text += f"   └ الرسائل تبقى إلى الأبد\n\n"
             
-        message_text += f"🕐 آخر تحديث: {timestamp}"
+        message_text += (
+            f"🔄 **مزامنة التعديل**: {sync_edit_status}\n"
+            f"   └ تحديث الرسالة في الأهداف عند تعديلها في المصدر\n\n"
+            f"🗂️ **مزامنة الحذف**: {sync_delete_status}\n"
+            f"   └ حذف الرسالة من الأهداف عند حذفها من المصدر\n\n"
+            f"🕐 آخر تحديث: {timestamp}"
+        )
         
         try:
             await event.edit(message_text, buttons=buttons)
@@ -4042,6 +4070,36 @@ class SimpleTelegramBot:
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
         await event.answer(f"✅ {status_text} الحذف التلقائي")
+        await self.show_forwarding_settings(event, task_id)
+
+    async def toggle_sync_edit(self, event, task_id):
+        """Toggle sync edit setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_sync_edit(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} مزامنة التعديل")
+        await self.show_forwarding_settings(event, task_id)
+
+    async def toggle_sync_delete(self, event, task_id):
+        """Toggle sync delete setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_sync_delete(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} مزامنة الحذف")
         await self.show_forwarding_settings(event, task_id)
 
     async def start_set_auto_delete_time(self, event, task_id):
