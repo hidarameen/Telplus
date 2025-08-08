@@ -333,7 +333,7 @@ class SimpleTelegramBot:
                 del self.conversation_states[user_id]
     
     async def handle_source_chat(self, event, chat_input):
-        """Handle source chat input"""
+        """Handle source chat input using database conversation state"""
         user_id = event.sender_id
         
         # Parse chat input
@@ -349,14 +349,12 @@ class SimpleTelegramBot:
             )
             return
         
-        # Store source chat data
-        self.conversation_states[user_id] = {
-            'state': 'waiting_target_chat',
-            'data': {
-                'source_chat_id': source_chat_id,
-                'source_chat_name': source_chat_name
-            }
+        # Store source chat data in database
+        task_data = {
+            'source_chat_id': source_chat_id,
+            'source_chat_name': source_chat_name
         }
+        self.db.set_conversation_state(user_id, 'waiting_target_chat', json.dumps(task_data))
         
         buttons = [
             [Button.inline("❌ إلغاء", b"manage_tasks")]
@@ -375,7 +373,7 @@ class SimpleTelegramBot:
         )
     
     async def handle_target_chat(self, event, chat_input):
-        """Handle target chat input"""
+        """Handle target chat input using database conversation state"""
         user_id = event.sender_id
         
         # Parse target chat
@@ -391,10 +389,24 @@ class SimpleTelegramBot:
             )
             return
         
-        # Get source chat data
-        source_data = self.conversation_states[user_id]['data']
-        source_chat_id = source_data['source_chat_id']
-        source_chat_name = source_data['source_chat_name']
+        # Get source chat data from database
+        state_data = self.db.get_conversation_state(user_id)
+        if not state_data:
+            await event.respond("❌ حدث خطأ، يرجى البدء من جديد")
+            return
+        
+        state, data = state_data
+        if data:
+            try:
+                source_data = json.loads(data)
+                source_chat_id = source_data['source_chat_id']
+                source_chat_name = source_data['source_chat_name']
+            except:
+                await event.respond("❌ حدث خطأ في البيانات، يرجى البدء من جديد")
+                return
+        else:
+            await event.respond("❌ لم يتم تحديد المصدر، يرجى البدء من جديد")
+            return
         
         # Create task in database
         task_id = self.db.create_task(
@@ -406,7 +418,7 @@ class SimpleTelegramBot:
         )
         
         # Clear conversation state
-        del self.conversation_states[user_id]
+        self.db.clear_conversation_state(user_id)
         
         # Update userbot tasks
         try:
@@ -653,18 +665,19 @@ class SimpleTelegramBot:
             
         user_id = event.sender_id
         
-        # Check if user is in authentication process
+        # Check if user is in authentication or task creation process
         state_data = self.db.get_conversation_state(user_id)
         
-        if state_data:
-            await self.handle_auth_message(event, state_data)
-            return
-        
-        # Check if user is in task creation process
-        state_data = self.db.get_conversation_state(user_id)
         if state_data:
             state, data = state_data
-            if state.startswith('waiting_'):
+            
+            # Handle authentication states
+            if state in ['waiting_phone', 'waiting_code', 'waiting_password']:
+                await self.handle_auth_message(event, state_data)
+                return
+            
+            # Handle task creation states
+            elif state in ['waiting_source_chat', 'waiting_target_chat']:
                 await self.handle_task_message(event, state_data)
                 return
         
@@ -975,21 +988,127 @@ class SimpleTelegramBot:
             buttons=buttons
         )
     
-    # Placeholder methods for other functionality
     async def start_create_task(self, event):
-        await event.edit("⚠️ ميزة إنشاء المهام قيد التطوير...")
+        """Start creating new task"""
+        user_id = event.sender_id
+        
+        # Check if user is authenticated
+        if not self.db.is_user_authenticated(user_id):
+            await event.edit("❌ يجب تسجيل الدخول أولاً لإنشاء المهام")
+            return
+        
+        # Set conversation state
+        self.db.set_conversation_state(user_id, 'waiting_source_chat')
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", b"manage_tasks")]
+        ]
+        
+        await event.edit(
+            "➕ إنشاء مهمة توجيه جديدة\n\n"
+            "📥 **الخطوة 1: تحديد المصدر**\n\n"
+            "أرسل معرف أو رابط المجموعة/القناة المصدر:\n\n"
+            "أمثلة:\n"
+            "• @channelname\n"
+            "• https://t.me/channelname\n"
+            "• -1001234567890\n\n"
+            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات قراءة الرسائل",
+            buttons=buttons
+        )
     
     async def list_tasks(self, event):
-        await event.edit("⚠️ ميزة عرض المهام قيد التطوير...")
+        """List user tasks"""
+        user_id = event.sender_id
+        
+        # Check if user is authenticated
+        if not self.db.is_user_authenticated(user_id):
+            await event.edit("❌ يجب تسجيل الدخول أولاً لعرض المهام")
+            return
+        
+        tasks = self.db.get_user_tasks(user_id)
+        
+        if not tasks:
+            buttons = [
+                [Button.inline("➕ إنشاء مهمة جديدة", b"create_task")],
+                [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
+            ]
+            
+            await event.edit(
+                "📋 قائمة المهام\n\n"
+                "❌ لا توجد مهام حالياً\n\n"
+                "أنشئ مهمتك الأولى للبدء!",
+                buttons=buttons
+            )
+            return
+        
+        # Build tasks list
+        message = "📋 قائمة المهام:\n\n"
+        buttons = []
+        
+        for i, task in enumerate(tasks[:10], 1):  # Show max 10 tasks
+            status = "🟢 نشطة" if task['is_active'] else "🔴 متوقفة"
+            message += f"{i}. {status}\n"
+            message += f"   📥 من: {task['source_chat_name'] or task['source_chat_id']}\n"
+            message += f"   📤 إلى: {task['target_chat_name'] or task['target_chat_id']}\n\n"
+            
+            # Add task button
+            buttons.append([
+                Button.inline(f"⚙️ مهمة {i}", f"task_manage_{task['id']}")
+            ])
+        
+        buttons.append([Button.inline("➕ إنشاء مهمة جديدة", b"create_task")])
+        buttons.append([Button.inline("🏠 القائمة الرئيسية", b"back_main")])
+        
+        await event.edit(message, buttons=buttons)
     
     async def handle_task_action(self, event, data):
-        await event.edit("⚠️ إدارة المهام قيد التطوير...")
+        """Handle task actions"""
+        user_id = event.sender_id
+        
+        # Check if user is authenticated
+        if not self.db.is_user_authenticated(user_id):
+            await event.edit("❌ يجب تسجيل الدخول أولاً")
+            return
+        
+        if data.startswith("task_manage_"):
+            task_id = int(data.split("_")[2])
+            await self.show_task_details(event, task_id)
+        elif data.startswith("task_toggle_"):
+            task_id = int(data.split("_")[2])
+            await self.toggle_task(event, task_id)
+        elif data.startswith("task_delete_"):
+            task_id = int(data.split("_")[2])
+            await self.delete_task(event, task_id)
     
     async def handle_task_message(self, event, state_data):
-        await event.respond("⚠️ إنشاء المهام قيد التطوير...")
+        """Handle task creation messages"""
+        user_id = event.sender_id
+        state, data = state_data
+        message_text = event.text.strip()
+        
+        try:
+            if state == 'waiting_source_chat':
+                await self.handle_source_chat(event, message_text)
+            elif state == 'waiting_target_chat':
+                await self.handle_target_chat(event, message_text)
+        except Exception as e:
+            logger.error(f"خطأ في إنشاء المهمة للمستخدم {user_id}: {e}")
+            await event.respond(
+                "❌ حدث خطأ أثناء إنشاء المهمة. حاول مرة أخرى."
+            )
+            self.db.clear_conversation_state(user_id)
     
     async def show_settings_menu(self, event):
-        await event.edit("⚠️ الإعدادات قيد التطوير...")
+        """Show settings menu"""
+        buttons = [
+            [Button.inline("🔄 إعادة تسجيل الدخول", b"auth_phone")],
+            [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
+        ]
+        
+        await event.edit(
+            "⚙️ الإعدادات\n\nاختر إعداد:",
+            buttons=buttons
+        )
     
     async def show_about(self, event):
         buttons = [
