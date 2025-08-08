@@ -7,6 +7,7 @@ import asyncio
 from typing import Dict, List, Optional
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, AuthKeyUnregisteredError
+from telethon.sessions import StringSession
 from database.database import Database
 from bot_package.config import API_ID, API_HASH
 import time
@@ -25,13 +26,10 @@ class UserbotService:
         try:
             # Create client with session string
             client = TelegramClient(
-                f':memory:{user_id}', 
-                API_ID, 
+                StringSession(session_string),
+                int(API_ID), 
                 API_HASH
             )
-            
-            # Load session
-            client.session.load(session_string)
             
             # Connect and check if session is valid
             await client.connect()

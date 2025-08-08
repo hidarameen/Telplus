@@ -6,6 +6,7 @@ import logging
 import asyncio
 from telethon import TelegramClient, events
 from telethon.tl.custom import Button
+from telethon.sessions import StringSession
 from database.database import Database
 from userbot_service.userbot import userbot_instance
 from bot_package.config import BOT_TOKEN, API_ID, API_HASH
@@ -314,8 +315,9 @@ class SimpleTelegramBot:
                 # Try to sign in
                 result = await temp_client.sign_in(phone, code, phone_code_hash=phone_code_hash)
                 
-                # Get session string
-                session_string = temp_client.session.save()
+                # Get session string properly
+                from telethon.sessions import StringSession
+                session_string = StringSession.save(temp_client.session)
                 
                 # Save session to database
                 self.db.save_user_session(user_id, phone, session_string)
@@ -326,8 +328,8 @@ class SimpleTelegramBot:
                 
                 # Send session to Saved Messages
                 try:
-                    user_client = TelegramClient(':memory:', int(API_ID), API_HASH)
-                    user_client.session = temp_client.session
+                    # Create new client with the same session for sending message
+                    user_client = TelegramClient(StringSession(session_string), int(API_ID), API_HASH)
                     await user_client.connect()
                     
                     session_message = (
