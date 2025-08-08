@@ -8,7 +8,7 @@ from telethon import TelegramClient, events
 from telethon.tl.custom import Button
 from telethon.sessions import StringSession
 from database.database import Database
-from bot_service.userbot import userbot_instance
+from userbot_service.userbot import userbot_instance
 from bot_package.config import BOT_TOKEN, API_ID, API_HASH
 import json
 from datetime import datetime
@@ -216,7 +216,7 @@ class SimpleTelegramBot:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT target_chat_id FROM tasks 
+                    SELECT target_chat_id FROM tasks
                     WHERE is_active = 1 AND target_chat_id = ?
                 ''', (str(chat_id),))
                 target_tasks = cursor.fetchall()
@@ -294,7 +294,7 @@ class SimpleTelegramBot:
 
             # Force refresh UserBot tasks
             try:
-                from bot_service.userbot import userbot_instance
+                from userbot_service.userbot import userbot_instance
                 if user_id in userbot_instance.clients:
                     await userbot_instance.refresh_user_tasks(user_id)
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير وضع التوجيه للمهمة {task_id}")
@@ -451,7 +451,7 @@ class SimpleTelegramBot:
         if success:
             # Force refresh UserBot tasks
             try:
-                from bot_service.userbot import userbot_instance
+                from userbot_service.userbot import userbot_instance
                 if user_id in userbot_instance.clients:
                     await userbot_instance.refresh_user_tasks(user_id)
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف مصدر من المهمة {task_id}")
@@ -475,7 +475,7 @@ class SimpleTelegramBot:
         if success:
             # Force refresh UserBot tasks
             try:
-                from bot_service.userbot import userbot_instance
+                from userbot_service.userbot import userbot_instance
                 if user_id in userbot_instance.clients:
                     await userbot_instance.refresh_user_tasks(user_id)
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف هدف من المهمة {task_id}")
@@ -706,7 +706,7 @@ class SimpleTelegramBot:
 
         # Update userbot tasks - ensure UserBot is running first
         try:
-            from bot_service.userbot import userbot_instance
+            from userbot_service.userbot import userbot_instance
 
             # Check if UserBot is running, if not try to start it
             if user_id not in userbot_instance.clients:
@@ -752,7 +752,7 @@ class SimpleTelegramBot:
 
         # Update userbot tasks - ensure UserBot is running first
         try:
-            from bot_service.userbot import userbot_instance
+            from userbot_service.userbot import userbot_instance
 
             # Check if UserBot is running, if not try to start it
             if user_id not in userbot_instance.clients:
@@ -883,7 +883,7 @@ class SimpleTelegramBot:
 
             # Force refresh UserBot tasks
             try:
-                from bot_service.userbot import userbot_instance
+                from userbot_service.userbot import userbot_instance
                 if user_id in userbot_instance.clients:
                     await userbot_instance.refresh_user_tasks(user_id)
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد إضافة {plural} للمهمة {task_id}")
@@ -1066,7 +1066,7 @@ class SimpleTelegramBot:
 
         # Update userbot tasks - ensure UserBot is running first
         try:
-            from bot_service.userbot import userbot_instance
+            from userbot_service.userbot import userbot_instance
 
             # Check if UserBot is running, if not try to start it
             if user_id not in userbot_instance.clients:
@@ -1626,7 +1626,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         try:
-            from bot_service.userbot import userbot_instance
+            from userbot_service.userbot import userbot_instance
 
             # Check if user has session
             session_data = self.db.get_user_session(user_id)
