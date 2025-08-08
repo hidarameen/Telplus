@@ -247,6 +247,140 @@ class Database:
                 )
             ''')
 
+            # Advanced filters master table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_advanced_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    day_filter_enabled BOOLEAN DEFAULT FALSE,
+                    working_hours_enabled BOOLEAN DEFAULT FALSE,
+                    language_filter_enabled BOOLEAN DEFAULT FALSE,
+                    admin_filter_enabled BOOLEAN DEFAULT FALSE,
+                    duplicate_filter_enabled BOOLEAN DEFAULT FALSE,
+                    inline_button_filter_enabled BOOLEAN DEFAULT FALSE,
+                    forwarded_message_filter_enabled BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Day filters table - for specifying allowed/blocked days
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_day_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    day_number INTEGER NOT NULL CHECK (day_number >= 0 AND day_number <= 6),
+                    is_allowed BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, day_number)
+                )
+            ''')
+
+            # Working hours table - for time-based filtering
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_working_hours (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    start_hour INTEGER DEFAULT 0 CHECK (start_hour >= 0 AND start_hour <= 23),
+                    start_minute INTEGER DEFAULT 0 CHECK (start_minute >= 0 AND start_minute <= 59),
+                    end_hour INTEGER DEFAULT 23 CHECK (end_hour >= 0 AND end_hour <= 23),
+                    end_minute INTEGER DEFAULT 59 CHECK (end_minute >= 0 AND end_minute <= 59),
+                    timezone_offset INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Language filters table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_language_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    language_code TEXT NOT NULL,
+                    language_name TEXT,
+                    is_allowed BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, language_code)
+                )
+            ''')
+
+            # Admin filters table - for filtering by admin users
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_admin_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    admin_user_id INTEGER NOT NULL,
+                    admin_username TEXT,
+                    admin_first_name TEXT,
+                    is_allowed BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, admin_user_id)
+                )
+            ''')
+
+            # Duplicate settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_duplicate_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    check_text_similarity BOOLEAN DEFAULT TRUE,
+                    check_media_similarity BOOLEAN DEFAULT TRUE,
+                    similarity_threshold REAL DEFAULT 0.85,
+                    time_window_hours INTEGER DEFAULT 24,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Forwarded messages log - for duplicate detection
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS forwarded_messages_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    source_chat_id TEXT NOT NULL,
+                    source_message_id INTEGER NOT NULL,
+                    message_text TEXT,
+                    message_hash TEXT,
+                    media_type TEXT,
+                    media_hash TEXT,
+                    forwarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    INDEX(task_id, message_hash),
+                    INDEX(task_id, media_hash)
+                )
+            ''')
+
+            # Inline button filter settings
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_inline_button_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    block_messages_with_buttons BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Forwarded message filter settings
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_forwarded_message_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    block_forwarded_messages BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             # Add new columns for synchronization if they don't exist
             try:
                 cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN sync_edit_enabled BOOLEAN DEFAULT FALSE")
@@ -261,7 +395,7 @@ class Database:
                 pass  # Column already exists
 
             conn.commit()
-            logger.info("✅ تم تهيئة جداول SQLite بنجاح")
+            logger.info("✅ تم تهيئة جداول SQLite بنجاح مع الفلاتر المتقدمة")
 
     # User Session Management
     def save_user_session(self, user_id: int, phone_number: str, session_string: str):
@@ -1549,3 +1683,453 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM message_mappings WHERE id = ?', (mapping_id,))
             conn.commit()
+
+    # ===== Advanced Filters Management =====
+    
+    def get_advanced_filters_settings(self, task_id: int) -> Dict:
+        """Get advanced filters settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM task_advanced_filters WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'day_filter_enabled': bool(result['day_filter_enabled']),
+                    'working_hours_enabled': bool(result['working_hours_enabled']),
+                    'language_filter_enabled': bool(result['language_filter_enabled']),
+                    'admin_filter_enabled': bool(result['admin_filter_enabled']),
+                    'duplicate_filter_enabled': bool(result['duplicate_filter_enabled']),
+                    'inline_button_filter_enabled': bool(result['inline_button_filter_enabled']),
+                    'forwarded_message_filter_enabled': bool(result['forwarded_message_filter_enabled'])
+                }
+            else:
+                # Create default settings
+                self.create_default_advanced_filters_settings(task_id)
+                return {
+                    'day_filter_enabled': False,
+                    'working_hours_enabled': False,
+                    'language_filter_enabled': False,
+                    'admin_filter_enabled': False,
+                    'duplicate_filter_enabled': False,
+                    'inline_button_filter_enabled': False,
+                    'forwarded_message_filter_enabled': False
+                }
+                
+    def create_default_advanced_filters_settings(self, task_id: int):
+        """Create default advanced filters settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_advanced_filters (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            conn.commit()
+            
+    def update_advanced_filter_setting(self, task_id: int, filter_type: str, enabled: bool):
+        """Update a specific advanced filter setting"""
+        valid_filters = {
+            'day_filter': 'day_filter_enabled',
+            'working_hours': 'working_hours_enabled', 
+            'language_filter': 'language_filter_enabled',
+            'admin_filter': 'admin_filter_enabled',
+            'duplicate_filter': 'duplicate_filter_enabled',
+            'inline_button_filter': 'inline_button_filter_enabled',
+            'forwarded_message_filter': 'forwarded_message_filter_enabled'
+        }
+        
+        if filter_type not in valid_filters:
+            logger.error(f"نوع فلتر غير صالح: {filter_type}")
+            return False
+            
+        column_name = valid_filters[filter_type]
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Create record if doesn't exist
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_advanced_filters (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            
+            # Update the specific filter
+            cursor.execute(f'''
+                UPDATE task_advanced_filters 
+                SET {column_name} = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = ?
+            ''', (enabled, task_id))
+            
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    # ===== Day Filters Management =====
+    
+    def get_day_filters(self, task_id: int) -> List[Dict]:
+        """Get day filters for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT day_number, is_allowed FROM task_day_filters
+                WHERE task_id = ?
+                ORDER BY day_number
+            ''', (task_id,))
+            
+            # Create a dict for all days (0=Monday to 6=Sunday)
+            day_names = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
+            day_filters = {}
+            
+            # Get existing filters
+            for row in cursor.fetchall():
+                day_filters[row['day_number']] = bool(row['is_allowed'])
+            
+            # Fill in missing days with default (allowed)
+            result = []
+            for day_num in range(7):
+                result.append({
+                    'day_number': day_num,
+                    'day_name': day_names[day_num],
+                    'is_allowed': day_filters.get(day_num, True)
+                })
+            
+            return result
+            
+    def set_day_filter(self, task_id: int, day_number: int, is_allowed: bool):
+        """Set day filter for a specific day"""
+        if day_number < 0 or day_number > 6:
+            logger.error(f"رقم يوم غير صالح: {day_number}")
+            return False
+            
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_day_filters 
+                (task_id, day_number, is_allowed)
+                VALUES (?, ?, ?)
+            ''', (task_id, day_number, is_allowed))
+            conn.commit()
+            return True
+            
+    def set_all_day_filters(self, task_id: int, is_allowed: bool):
+        """Set all day filters (select all/none)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for day_num in range(7):
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_day_filters 
+                    (task_id, day_number, is_allowed)
+                    VALUES (?, ?, ?)
+                ''', (task_id, day_num, is_allowed))
+            conn.commit()
+            return True
+            
+    # ===== Working Hours Management =====
+    
+    def get_working_hours(self, task_id: int) -> Optional[Dict]:
+        """Get working hours for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT start_hour, start_minute, end_hour, end_minute, timezone_offset
+                FROM task_working_hours WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'start_hour': result['start_hour'],
+                    'start_minute': result['start_minute'], 
+                    'end_hour': result['end_hour'],
+                    'end_minute': result['end_minute'],
+                    'timezone_offset': result['timezone_offset']
+                }
+            return None
+            
+    def set_working_hours(self, task_id: int, start_hour: int, start_minute: int, 
+                         end_hour: int, end_minute: int, timezone_offset: int = 0):
+        """Set working hours for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_working_hours 
+                (task_id, start_hour, start_minute, end_hour, end_minute, timezone_offset)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (task_id, start_hour, start_minute, end_hour, end_minute, timezone_offset))
+            conn.commit()
+            return True
+            
+    # ===== Language Filters Management =====
+    
+    def get_language_filters(self, task_id: int) -> List[Dict]:
+        """Get language filters for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT language_code, language_name, is_allowed
+                FROM task_language_filters WHERE task_id = ?
+                ORDER BY language_name
+            ''', (task_id,))
+            
+            filters = []
+            for row in cursor.fetchall():
+                filters.append({
+                    'language_code': row['language_code'],
+                    'language_name': row['language_name'],
+                    'is_allowed': bool(row['is_allowed'])
+                })
+            return filters
+            
+    def add_language_filter(self, task_id: int, language_code: str, language_name: str, is_allowed: bool = True):
+        """Add language filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_language_filters 
+                (task_id, language_code, language_name, is_allowed)
+                VALUES (?, ?, ?, ?)
+            ''', (task_id, language_code, language_name, is_allowed))
+            conn.commit()
+            return True
+            
+    def toggle_language_filter(self, task_id: int, language_code: str):
+        """Toggle language filter status"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE task_language_filters 
+                SET is_allowed = NOT is_allowed
+                WHERE task_id = ? AND language_code = ?
+            ''', (task_id, language_code))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    def remove_language_filter(self, task_id: int, language_code: str):
+        """Remove language filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM task_language_filters 
+                WHERE task_id = ? AND language_code = ?
+            ''', (task_id, language_code))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    # ===== Admin Filters Management =====
+    
+    def get_admin_filters(self, task_id: int) -> List[Dict]:
+        """Get admin filters for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT admin_user_id, admin_username, admin_first_name, is_allowed
+                FROM task_admin_filters WHERE task_id = ?
+                ORDER BY admin_first_name, admin_username
+            ''', (task_id,))
+            
+            filters = []
+            for row in cursor.fetchall():
+                filters.append({
+                    'admin_user_id': row['admin_user_id'],
+                    'admin_username': row['admin_username'],
+                    'admin_first_name': row['admin_first_name'],
+                    'is_allowed': bool(row['is_allowed'])
+                })
+            return filters
+            
+    def add_admin_filter(self, task_id: int, admin_user_id: int, admin_username: str = None, 
+                        admin_first_name: str = None, is_allowed: bool = True):
+        """Add admin filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_admin_filters 
+                (task_id, admin_user_id, admin_username, admin_first_name, is_allowed)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (task_id, admin_user_id, admin_username, admin_first_name, is_allowed))
+            conn.commit()
+            return True
+            
+    def toggle_admin_filter(self, task_id: int, admin_user_id: int):
+        """Toggle admin filter status"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE task_admin_filters 
+                SET is_allowed = NOT is_allowed, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = ? AND admin_user_id = ?
+            ''', (task_id, admin_user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    def remove_admin_filter(self, task_id: int, admin_user_id: int):
+        """Remove admin filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM task_admin_filters 
+                WHERE task_id = ? AND admin_user_id = ?
+            ''', (task_id, admin_user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    # ===== Duplicate Detection Management =====
+    
+    def get_duplicate_settings(self, task_id: int) -> Dict:
+        """Get duplicate detection settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT check_text_similarity, check_media_similarity, 
+                       similarity_threshold, time_window_hours
+                FROM task_duplicate_settings WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'check_text_similarity': bool(result['check_text_similarity']),
+                    'check_media_similarity': bool(result['check_media_similarity']),
+                    'similarity_threshold': float(result['similarity_threshold']),
+                    'time_window_hours': int(result['time_window_hours'])
+                }
+            else:
+                # Create default settings
+                self.create_default_duplicate_settings(task_id)
+                return {
+                    'check_text_similarity': True,
+                    'check_media_similarity': True,
+                    'similarity_threshold': 0.85,
+                    'time_window_hours': 24
+                }
+                
+    def create_default_duplicate_settings(self, task_id: int):
+        """Create default duplicate detection settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_duplicate_settings (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            conn.commit()
+            
+    def update_duplicate_settings(self, task_id: int, check_text: bool = True, 
+                                 check_media: bool = True, threshold: float = 0.85, 
+                                 time_window: int = 24):
+        """Update duplicate detection settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_duplicate_settings 
+                (task_id, check_text_similarity, check_media_similarity, similarity_threshold, time_window_hours)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (task_id, check_text, check_media, threshold, time_window))
+            conn.commit()
+            return True
+            
+    def log_forwarded_message(self, task_id: int, source_chat_id: str, source_message_id: int,
+                             message_text: str = None, message_hash: str = None, 
+                             media_type: str = None, media_hash: str = None):
+        """Log forwarded message for duplicate detection"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO forwarded_messages_log 
+                (task_id, source_chat_id, source_message_id, message_text, message_hash, media_type, media_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (task_id, source_chat_id, source_message_id, message_text, message_hash, media_type, media_hash))
+            conn.commit()
+            return cursor.lastrowid
+            
+    def check_duplicate_message(self, task_id: int, message_hash: str = None, media_hash: str = None,
+                               time_window_hours: int = 24) -> bool:
+        """Check if message is duplicate within time window"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check for duplicates within time window
+            if message_hash:
+                cursor.execute('''
+                    SELECT COUNT(*) as count FROM forwarded_messages_log
+                    WHERE task_id = ? AND message_hash = ?
+                    AND datetime(forwarded_at) > datetime('now', '-{} hours')
+                '''.format(time_window_hours), (task_id, message_hash))
+                
+                if cursor.fetchone()['count'] > 0:
+                    return True
+                    
+            if media_hash:
+                cursor.execute('''
+                    SELECT COUNT(*) as count FROM forwarded_messages_log
+                    WHERE task_id = ? AND media_hash = ?
+                    AND datetime(forwarded_at) > datetime('now', '-{} hours')
+                '''.format(time_window_hours), (task_id, media_hash))
+                
+                if cursor.fetchone()['count'] > 0:
+                    return True
+                    
+            return False
+            
+    # ===== Inline Button and Forwarded Message Filters =====
+    
+    def get_inline_button_filter_setting(self, task_id: int) -> bool:
+        """Get inline button filter setting"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT block_messages_with_buttons FROM task_inline_button_filters 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            return bool(result['block_messages_with_buttons']) if result else False
+            
+    def set_inline_button_filter(self, task_id: int, block_buttons: bool):
+        """Set inline button filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_inline_button_filters 
+                (task_id, block_messages_with_buttons)
+                VALUES (?, ?)
+            ''', (task_id, block_buttons))
+            conn.commit()
+            return True
+            
+    def get_forwarded_message_filter_setting(self, task_id: int) -> bool:
+        """Get forwarded message filter setting"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT block_forwarded_messages FROM task_forwarded_message_filters 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            return bool(result['block_forwarded_messages']) if result else False
+            
+    def set_forwarded_message_filter(self, task_id: int, block_forwarded: bool):
+        """Set forwarded message filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_forwarded_message_filters 
+                (task_id, block_forwarded_messages)
+                VALUES (?, ?)
+            ''', (task_id, block_forwarded))
+            conn.commit()
+            return True
+
+    # ===== Cleanup Functions =====
+    
+    def cleanup_old_forwarded_messages_log(self, days_old: int = 7):
+        """Clean up old forwarded messages log for duplicate detection"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM forwarded_messages_log 
+                WHERE forwarded_at < datetime('now', '-{} days')
+            '''.format(days_old))
+            deleted_count = cursor.rowcount
+            conn.commit()
+            if deleted_count > 0:
+                logger.info(f"🧹 تم حذف {deleted_count} سجل رسالة قديم من سجل التكرار (أكثر من {days_old} أيام)")
+            return deleted_count
