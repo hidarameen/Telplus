@@ -575,16 +575,46 @@ class SimpleTelegramBot:
             )
             return
 
-        # Build tasks list
+        # Build tasks list with full sources and targets info
         message = "📋 قائمة المهام:\n\n"
         buttons = []
 
         for i, task in enumerate(tasks[:10], 1):  # Show max 10 tasks
             status = "🟢 نشطة" if task['is_active'] else "🔴 متوقفة"
             task_name = task.get('task_name', 'مهمة بدون اسم')
+            
+            # Get all sources and targets for this task
+            task_with_details = self.db.get_task_with_sources_targets(task['id'], user_id)
+            
+            if task_with_details:
+                sources = task_with_details.get('sources', [])
+                targets = task_with_details.get('targets', [])
+                
+                # Build sources text
+                if not sources:
+                    sources_text = "لا توجد مصادر"
+                elif len(sources) == 1:
+                    source_name = sources[0].get('chat_name') or sources[0].get('chat_id')
+                    sources_text = str(source_name)
+                else:
+                    sources_text = f"{len(sources)} مصادر"
+                
+                # Build targets text
+                if not targets:
+                    targets_text = "لا توجد أهداف"
+                elif len(targets) == 1:
+                    target_name = targets[0].get('chat_name') or targets[0].get('chat_id')
+                    targets_text = str(target_name)
+                else:
+                    targets_text = f"{len(targets)} أهداف"
+            else:
+                # Fallback to old data
+                sources_text = task['source_chat_name'] or task['source_chat_id'] or "غير محدد"
+                targets_text = task['target_chat_name'] or task['target_chat_id'] or "غير محدد"
+            
             message += f"{i}. {status} - {task_name}\n"
-            message += f"   📥 من: {task['source_chat_name'] or task['source_chat_id']}\n"
-            message += f"   📤 إلى: {task['target_chat_name'] or task['target_chat_id']}\n\n"
+            message += f"   📥 من: {sources_text}\n"
+            message += f"   📤 إلى: {targets_text}\n\n"
 
             # Add task button
             buttons.append([
