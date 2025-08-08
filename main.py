@@ -48,6 +48,21 @@ class TelegramBotSystem:
                 # Start userbot service
                 await start_userbot_service()
                 
+                # Start background task processing
+                async def background_admin_processor():
+                    while self.running:
+                        try:
+                            await asyncio.sleep(10)  # Check every 10 seconds
+                            if userbot_instance:
+                                await userbot_instance.process_pending_admin_tasks()
+                        except Exception as e:
+                            logger.error(f"خطأ في معالج المشرفين الخلفي: {e}")
+                            await asyncio.sleep(30)  # Wait longer if error
+                
+                # Start background processor
+                asyncio.create_task(background_admin_processor())
+                logger.info("🔄 تم تشغيل معالج المشرفين الخلفي")
+                
                 # Keep running forever
                 logger.info("🚀 UserBot يعمل ويراقب الرسائل...")
                 while self.running:

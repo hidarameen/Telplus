@@ -4696,7 +4696,6 @@ class SimpleTelegramBot:
         
         # Control buttons
         control_buttons = [
-            [Button.inline("➕ إضافة مشرف يدوياً", f"add_manual_admin_{task_id}_{source_chat_id}")],
             [Button.inline("🔙 رجوع لفلتر المشرفين", f"admin_filters_{task_id}")]
         ]
         
@@ -4815,7 +4814,7 @@ class SimpleTelegramBot:
                 await asyncio.sleep(0.3)
                 await self.show_source_admins(event, task_id, source_chat_id)
             elif admin_count == -2:
-                await event.edit("⚠️ مشكلة تقنية في جلب المشرفين من تليجرام\n💡 يمكنك إضافة المشرفين يدوياً من الخيارات")
+                await event.edit("⚠️ مشكلة تقنية في جلب المشرفين من تليجرام\n💡 تم إضافة المالك كمشرف للاختبار")
             else:
                 await event.edit("❌ فشل في الحصول على المشرفين. تأكد من أن الحساب عضو في القناة")
                 
