@@ -291,10 +291,16 @@ class SimpleTelegramBot:
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_advanced_filter_"): # Handler for toggling advanced filters
                 parts = data.split("_")
-                if len(parts) >= 5:
+                logger.info(f"🔍 Processing toggle_advanced_filter: data='{data}', parts={parts}")
+                if len(parts) >= 4:
                     try:
-                        filter_type = parts[3]
-                        task_id = int(parts[4])
+                        # Extract task_id (always the last part)
+                        task_id = int(parts[-1])
+                        
+                        # Extract filter_type (everything between 'toggle_advanced_filter_' and task_id)
+                        filter_type = "_".join(parts[3:-1])
+                        
+                        logger.info(f"✅ Parsed task_id={task_id}, filter_type='{filter_type}'")
                         await self.toggle_advanced_filter(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الفلتر المتقدم: {e}, data='{data}', parts={parts}")
@@ -703,6 +709,24 @@ class SimpleTelegramBot:
                         await self.set_delete_time_direct(event, task_id, seconds)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة أو الوقت: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_inline_block_"): # Handler for toggling inline button block
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_inline_button_block(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الأزرار: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_forwarded_block_"): # Handler for toggling forwarded message block
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_forwarded_message_block(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الرسائل المعاد توجيهها: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
 
 
@@ -4710,6 +4734,42 @@ class SimpleTelegramBot:
                 await self.show_forwarded_message_filter(event, task_id)
         else:
             await event.answer("❌ فشل في تحديث الفلتر")
+    
+    async def toggle_inline_button_block(self, event, task_id):
+        """Toggle inline button block setting"""
+        user_id = event.sender_id
+        
+        # Get current setting
+        current_setting = self.db.get_inline_button_filter_setting(task_id)
+        new_setting = not current_setting
+        
+        # Update setting
+        success = self.db.set_inline_button_filter(task_id, new_setting)
+        
+        if success:
+            status_text = "تم تفعيل حظر" if new_setting else "تم إلغاء حظر"
+            await event.answer(f"✅ {status_text} الرسائل التي تحتوي على أزرار")
+            await self.show_inline_button_filter(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث الإعداد")
+    
+    async def toggle_forwarded_message_block(self, event, task_id):
+        """Toggle forwarded message block setting"""
+        user_id = event.sender_id
+        
+        # Get current setting
+        current_setting = self.db.get_forwarded_message_filter_setting(task_id)
+        new_setting = not current_setting
+        
+        # Update setting
+        success = self.db.set_forwarded_message_filter(task_id, new_setting)
+        
+        if success:
+            status_text = "تم تفعيل حظر" if new_setting else "تم إلغاء حظر"
+            await event.answer(f"✅ {status_text} الرسائل المعاد توجيهها")
+            await self.show_forwarded_message_filter(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث الإعداد")
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()

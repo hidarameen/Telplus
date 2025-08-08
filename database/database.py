@@ -1746,11 +1746,18 @@ class Database:
             'admin_filter': 'admin_filter_enabled',
             'duplicate_filter': 'duplicate_filter_enabled',
             'inline_button_filter': 'inline_button_filter_enabled',
-            'forwarded_message_filter': 'forwarded_message_filter_enabled'
+            'forwarded_message_filter': 'forwarded_message_filter_enabled',
+            # Additional variations for consistency
+            'day': 'day_filter_enabled',
+            'admin': 'admin_filter_enabled',
+            'language': 'language_filter_enabled',
+            'duplicate': 'duplicate_filter_enabled',
+            'inline_button': 'inline_button_filter_enabled',
+            'forwarded_message': 'forwarded_message_filter_enabled'
         }
         
         if filter_type not in valid_filters:
-            logger.error(f"نوع فلتر غير صالح: {filter_type}")
+            logger.error(f"نوع فلتر غير صالح: {filter_type}. الأنواع المتاحة: {list(valid_filters.keys())}")
             return False
             
         column_name = valid_filters[filter_type]
