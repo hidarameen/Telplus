@@ -788,7 +788,8 @@ class SimpleTelegramBot:
                 "استخدم أحد الأشكال التالية:\n"
                 "• @channelname\n"
                 "• https://t.me/channelname\n"
-                "• -1001234567890"
+                "• -1001234567890\n\n"
+                "لعدة معرفات، افصل بينها بفاصلة: @channel1, @channel2"
             )
             return
 
@@ -944,29 +945,11 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         # Parse target chat
-        target_chat_inputs = [t.strip() for t in chat_input.split(',') if t.strip()]
-        target_chat_ids = []
-        target_chat_names = []
-
-        for target_input in target_chat_inputs:
-            target_id, target_name = self.parse_chat_input(target_input.strip())
-            if target_id:
-                target_chat_ids.append(target_id)
-                target_chat_names.append(target_name)
-            else:
-                await event.respond(
-                    f"❌ تنسيق معرف غير صحيح: {target_input}\n\n"
-                    "استخدم أحد الأشكال التالية:\n"
-                    "• @channelname\n"
-                    "• https://t.me/channelname\n"
-                    "• -1001234567890\n\n"
-                    "لعدة أهداف، افصل بينها بفاصلة: @channel1, @channel2"
-                )
-                return
+        target_chat_ids, target_chat_names = self.parse_chat_input(chat_input)
 
         if not target_chat_ids:
             await event.respond(
-                "❌ يجب تحديد هدف واحد على الأقل\n\n"
+                "❌ تنسيق معرفات المجموعات/القنوات غير صحيح\n\n"
                 "استخدم أحد الأشكال التالية:\n"
                 "• @channelname\n"
                 "• https://t.me/channelname\n"
@@ -1072,27 +1055,53 @@ class SimpleTelegramBot:
         )
 
     def parse_chat_input(self, chat_input: str) -> tuple:
-        """Parse chat input and return chat_id and name"""
+        """Parse chat input and return chat_ids and names"""
         chat_input = chat_input.strip()
+        chat_ids = []
+        chat_names = []
 
-        if chat_input.startswith('@'):
-            # Username format
-            username = chat_input[1:]
-            return chat_input, username
-        elif chat_input.startswith('https://t.me/'):
-            # URL format
-            username = chat_input.split('/')[-1]
-            return f"@{username}", username
-        elif chat_input.startswith('-') and chat_input[1:].isdigit():
-            # Chat ID format
-            return chat_input, None
+        # Split by comma if multiple inputs
+        if ',' in chat_input:
+            inputs = [inp.strip() for inp in chat_input.split(',') if inp.strip()]
         else:
-            # Try to parse as numeric ID
-            try:
-                chat_id = int(chat_input)
-                return str(chat_id), None
-            except ValueError:
-                return None, None
+            inputs = [chat_input] if chat_input else []
+
+        for chat_input_item in inputs:
+            chat_input_item = chat_input_item.strip()
+            if not chat_input_item:
+                continue
+
+            if chat_input_item.startswith('@'):
+                # Username format
+                username = chat_input_item[1:] if len(chat_input_item) > 1 else None
+                if username:
+                    chat_ids.append(chat_input_item)
+                    chat_names.append(username)
+            elif chat_input_item.startswith('https://t.me/'):
+                # URL format
+                username = chat_input_item.split('/')[-1]
+                if username:
+                    chat_ids.append(f"@{username}")
+                    chat_names.append(username)
+            elif chat_input_item.startswith('-') and len(chat_input_item) > 1 and chat_input_item[1:].isdigit():
+                # Chat ID format (negative)
+                chat_ids.append(chat_input_item)
+                chat_names.append(None)
+            else:
+                # Try to parse as numeric ID
+                try:
+                    chat_id = int(chat_input_item)
+                    chat_ids.append(str(chat_id))
+                    chat_names.append(None)
+                except ValueError:
+                    # Invalid format, skip this item
+                    continue
+
+        # Return None if no valid inputs were found
+        if not chat_ids:
+            return None, None
+
+        return chat_ids, chat_names
 
     async def start_auth(self, event):
         """Start authentication process"""
