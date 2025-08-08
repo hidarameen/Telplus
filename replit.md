@@ -3,16 +3,16 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 8, 2025 (Latest Update)**: Added comprehensive text replacement/substitution feature:
-  - **NEW FEATURE**: Text replacement system with full CRUD operations
-  - **IMPLEMENTED**: Enable/disable toggle for text replacements per task
-  - **ADDED**: Advanced replacement options (case sensitivity, whole word matching)
-  - **CREATED**: Bulk input capability with format: `find_text >> replace_text`
-  - **INTEGRATED**: Real-time text modification in UserBot message processing
-  - **ENHANCED**: Auto-conversion to copy mode when text replacements are applied
-  - **UI COMPLETE**: Full management interface with add, view, clear, and toggle functions
-  - **DATABASE**: Extended schema with task_text_replacements and text_replacement_entries tables
-  - **VERIFIED**: All previous functionality (word filters) remains operational with 4 active tasks
+- **August 8, 2025 (Latest Update)**: Added comprehensive message formatting system:
+  - **NEW FEATURE**: Header/Footer system for adding text before/after messages
+  - **IMPLEMENTED**: Inline buttons feature supporting multiple buttons per row across multiple rows  
+  - **ADDED**: Auto-conversion to copy mode when any formatting is applied
+  - **CREATED**: Complete UI management for headers, footers, and inline buttons
+  - **INTEGRATED**: Full UserBot support for all new formatting features
+  - **ENHANCED**: Message processing with header, footer, and button application
+  - **UI COMPLETE**: Arabic interface with enable/disable toggles and content editing
+  - **DATABASE**: Added task_headers, task_footers, task_inline_buttons tables
+  - **VERIFIED**: All previous functionality (text replacements, word filters) remains operational
 
 # User Preferences
 

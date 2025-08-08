@@ -90,6 +90,35 @@ class Database:
                 )
             ''')
 
+            # Task Header/Footer Settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_message_settings (
+                    task_id INTEGER PRIMARY KEY,
+                    header_enabled BOOLEAN DEFAULT FALSE,
+                    header_text TEXT,
+                    footer_enabled BOOLEAN DEFAULT FALSE,
+                    footer_text TEXT,
+                    inline_buttons_enabled BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Task Inline Buttons table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_inline_buttons (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    button_text TEXT NOT NULL,
+                    button_url TEXT NOT NULL,
+                    row_position INTEGER DEFAULT 0,
+                    col_position INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
@@ -497,3 +526,151 @@ class Database:
             conn.commit()
             logger.info(f"✅ تم تهجير المهمة {task_id} بنجاح")
             return True
+
+    # Header/Footer/Buttons Settings Methods
+    def get_message_settings(self, task_id: int) -> Dict:
+        """Get task message settings (header, footer, buttons)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM task_message_settings 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'task_id': result['task_id'],
+                    'header_enabled': bool(result['header_enabled']),
+                    'header_text': result['header_text'] or '',
+                    'footer_enabled': bool(result['footer_enabled']),
+                    'footer_text': result['footer_text'] or '',
+                    'inline_buttons_enabled': bool(result['inline_buttons_enabled'])
+                }
+            else:
+                # Create default settings if not exist
+                cursor.execute('''
+                    INSERT INTO task_message_settings (task_id) VALUES (?)
+                ''', (task_id,))
+                conn.commit()
+                return {
+                    'task_id': task_id,
+                    'header_enabled': False,
+                    'header_text': '',
+                    'footer_enabled': False,
+                    'footer_text': '',
+                    'inline_buttons_enabled': False
+                }
+
+    def update_header_settings(self, task_id: int, enabled: bool, text: str = ''):
+        """Update header settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_message_settings 
+                (task_id, header_enabled, header_text, footer_enabled, footer_text, inline_buttons_enabled)
+                SELECT ?, ?, ?, 
+                       COALESCE(footer_enabled, FALSE),
+                       COALESCE(footer_text, ''),
+                       COALESCE(inline_buttons_enabled, FALSE)
+                FROM task_message_settings WHERE task_id = ?
+                UNION SELECT ?, ?, ?, FALSE, '', FALSE WHERE NOT EXISTS 
+                (SELECT 1 FROM task_message_settings WHERE task_id = ?)
+            ''', (task_id, enabled, text, task_id, task_id, enabled, text, task_id))
+            conn.commit()
+
+    def update_footer_settings(self, task_id: int, enabled: bool, text: str = ''):
+        """Update footer settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_message_settings 
+                (task_id, header_enabled, header_text, footer_enabled, footer_text, inline_buttons_enabled)
+                SELECT ?, 
+                       COALESCE(header_enabled, FALSE),
+                       COALESCE(header_text, ''),
+                       ?, ?, 
+                       COALESCE(inline_buttons_enabled, FALSE)
+                FROM task_message_settings WHERE task_id = ?
+                UNION SELECT ?, FALSE, '', ?, ?, FALSE WHERE NOT EXISTS 
+                (SELECT 1 FROM task_message_settings WHERE task_id = ?)
+            ''', (task_id, enabled, text, task_id, task_id, enabled, text, task_id))
+            conn.commit()
+
+    def update_inline_buttons_enabled(self, task_id: int, enabled: bool):
+        """Update inline buttons enabled status"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_message_settings 
+                (task_id, header_enabled, header_text, footer_enabled, footer_text, inline_buttons_enabled)
+                SELECT ?, 
+                       COALESCE(header_enabled, FALSE),
+                       COALESCE(header_text, ''),
+                       COALESCE(footer_enabled, FALSE),
+                       COALESCE(footer_text, ''),
+                       ?
+                FROM task_message_settings WHERE task_id = ?
+                UNION SELECT ?, FALSE, '', FALSE, '', ? WHERE NOT EXISTS 
+                (SELECT 1 FROM task_message_settings WHERE task_id = ?)
+            ''', (task_id, enabled, task_id, task_id, enabled, task_id))
+            conn.commit()
+
+    def get_inline_buttons(self, task_id: int) -> List[Dict]:
+        """Get inline buttons for task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM task_inline_buttons 
+                WHERE task_id = ? 
+                ORDER BY row_position, col_position
+            ''', (task_id,))
+            results = cursor.fetchall()
+            
+            return [{
+                'id': row['id'],
+                'task_id': row['task_id'],
+                'button_text': row['button_text'],
+                'button_url': row['button_url'],
+                'row_position': row['row_position'],
+                'col_position': row['col_position']
+            } for row in results]
+
+    def add_inline_button(self, task_id: int, button_text: str, button_url: str, row_pos: int = 0, col_pos: int = 0):
+        """Add inline button"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO task_inline_buttons 
+                (task_id, button_text, button_url, row_position, col_position)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (task_id, button_text, button_url, row_pos, col_pos))
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_inline_button(self, button_id: int, button_text: str, button_url: str, row_pos: int, col_pos: int):
+        """Update inline button"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE task_inline_buttons 
+                SET button_text = ?, button_url = ?, row_position = ?, col_position = ?
+                WHERE id = ?
+            ''', (button_text, button_url, row_pos, col_pos, button_id))
+            conn.commit()
+
+    def delete_inline_button(self, button_id: int):
+        """Delete inline button"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM task_inline_buttons WHERE id = ?', (button_id,))
+            conn.commit()
+
+    def clear_inline_buttons(self, task_id: int):
+        """Clear all inline buttons for task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM task_inline_buttons WHERE task_id = ?', (task_id,))
+            deleted_count = cursor.rowcount
+            conn.commit()
+            return deleted_count

@@ -199,55 +199,81 @@ class UserbotService:
                             logger.error(f"❌ لا يمكن الوصول للمحادثة الهدف {target_entity}: {entity_error}")
                             continue
 
+                        # Get message formatting settings for this task
+                        message_settings = self.get_message_settings(task['id'])
+                        
                         # Apply text replacements if enabled
                         original_text = event.message.text or ""
                         modified_text = self.apply_text_replacements(task['id'], original_text) if original_text else original_text
                         
-                        # Log replacement if text was modified
-                        if original_text != modified_text and original_text:
-                            logger.info(f"🔄 تم تطبيق استبدال نصي: '{original_text}' → '{modified_text}'")
+                        # Apply header and footer formatting
+                        final_text = self.apply_message_formatting(modified_text, message_settings)
+                        
+                        # Check if we need to use copy mode due to formatting
+                        requires_copy_mode = (
+                            original_text != modified_text or  # Text replacements applied
+                            message_settings['header_enabled'] or  # Header enabled
+                            message_settings['footer_enabled'] or  # Footer enabled
+                            message_settings['inline_buttons_enabled']  # Inline buttons enabled
+                        )
+                        
+                        # Log changes if text was modified
+                        if original_text != final_text and original_text:
+                            logger.info(f"🔄 تم تطبيق تنسيق الرسالة: '{original_text}' → '{final_text}'")
+
+                        # Prepare inline buttons if enabled
+                        inline_buttons = None
+                        if message_settings['inline_buttons_enabled']:
+                            inline_buttons = self.build_inline_buttons(task['id'])
 
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")
 
-                        if forward_mode == 'copy':
-                            # Copy mode: send as new message with replacements applied
+                        if forward_mode == 'copy' or requires_copy_mode:
+                            # Copy mode: send as new message with all formatting applied
+                            if requires_copy_mode:
+                                logger.info(f"🔄 استخدام وضع النسخ بسبب التنسيق المطبق")
+                            
                             if event.message.media:
-                                # Media message with or without caption (apply replacements to caption)
+                                # Media message with or without caption
                                 forwarded_msg = await client.send_file(
                                     target_entity,
                                     event.message.media,
-                                    caption=modified_text
+                                    caption=final_text,
+                                    buttons=inline_buttons
                                 )
-                            elif event.message.text:
-                                # Pure text message (apply replacements to text)
+                            elif event.message.text or final_text:
+                                # Pure text message
                                 forwarded_msg = await client.send_message(
                                     target_entity,
-                                    modified_text
+                                    final_text or "رسالة",
+                                    buttons=inline_buttons
                                 )
                             else:
-                                # Fallback to forward for other types
+                                # Fallback to forward for other types (no inline buttons support)
                                 forwarded_msg = await client.forward_messages(
                                     target_entity,
                                     event.message
                                 )
                         else:
-                            # Forward mode: if replacements were applied, use copy mode instead
-                            if original_text != modified_text and original_text:
-                                logger.info(f"🔄 تحويل إلى وضع النسخ بسبب الاستبدال النصي")
+                            # Forward mode: check if we need copy mode
+                            if requires_copy_mode:
+                                logger.info(f"🔄 تحويل إلى وضع النسخ بسبب التنسيق")
                                 if event.message.media:
                                     forwarded_msg = await client.send_file(
                                         target_entity,
                                         event.message.media,
-                                        caption=modified_text
+                                        caption=final_text,
+                                        buttons=inline_buttons
                                     )
                                 else:
                                     forwarded_msg = await client.send_message(
                                         target_entity,
-                                        modified_text
+                                        final_text or "رسالة",
+                                        buttons=inline_buttons
                                     )
                             else:
-                                # No replacements, forward normally
+                                # No formatting changes, forward normally
                                 forwarded_msg = await client.forward_messages(
                                     target_entity,
                                     event.message
@@ -380,6 +406,74 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في تطبيق الاستبدالات النصية: {e}")
             return message_text  # Return original text on error
+
+    def get_message_settings(self, task_id: int) -> dict:
+        """Get message formatting settings for a task"""
+        try:
+            from database.database import Database
+            db = Database()
+            settings = db.get_message_settings(task_id)
+            return settings
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على إعدادات الرسالة: {e}")
+            return {
+                'header_enabled': False,
+                'header_text': None,
+                'footer_enabled': False,
+                'footer_text': None,
+                'inline_buttons_enabled': False
+            }
+
+    def apply_message_formatting(self, text: str, settings: dict) -> str:
+        """Apply header and footer formatting to message text"""
+        if not text:
+            text = ""
+        
+        final_text = text
+        
+        # Add header if enabled
+        if settings['header_enabled'] and settings['header_text']:
+            final_text = settings['header_text'] + "\n\n" + final_text
+        
+        # Add footer if enabled
+        if settings['footer_enabled'] and settings['footer_text']:
+            final_text = final_text + "\n\n" + settings['footer_text']
+        
+        return final_text
+
+    def build_inline_buttons(self, task_id: int):
+        """Build inline buttons for a task"""
+        try:
+            from database.database import Database
+            from telethon import Button
+            
+            db = Database()
+            buttons_data = db.get_inline_buttons(task_id)
+            
+            if not buttons_data:
+                return None
+            
+            # Group buttons by row
+            rows = {}
+            for button in buttons_data:
+                row = button['row_position']
+                if row not in rows:
+                    rows[row] = []
+                rows[row].append(button)
+            
+            # Build button matrix
+            button_matrix = []
+            for row_num in sorted(rows.keys()):
+                row_buttons = sorted(rows[row_num], key=lambda x: x['col_position'])
+                button_row = []
+                for button in row_buttons:
+                    button_row.append(Button.url(button['button_text'], button['button_url']))
+                button_matrix.append(button_row)
+            
+            return button_matrix
+        except Exception as e:
+            logger.error(f"خطأ في بناء الأزرار الإنلاين: {e}")
+            return None
 
 
     async def stop_user(self, user_id: int):

@@ -400,6 +400,114 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الاستبدالات: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("header_settings_"): # Handler for header settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_header_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الرأس: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("footer_settings_"): # Handler for footer settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_footer_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الذيل: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("inline_buttons_"): # Handler for inline buttons
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_inline_buttons_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الأزرار: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_header_"): # Handler for toggling header
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.toggle_header(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الرأس: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_footer_"): # Handler for toggling footer
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.toggle_footer(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الذيل: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_header_"): # Handler for editing header
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.start_edit_header(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الرأس: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_footer_"): # Handler for editing footer
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.start_edit_footer(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الذيل: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_inline_buttons_"): # Handler for toggling inline buttons
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_inline_buttons(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الأزرار: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("add_inline_button_"): # Handler for adding inline button
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_add_inline_button(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة زر: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("view_inline_buttons_"): # Handler for viewing inline buttons
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.view_inline_buttons(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض الأزرار: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("clear_inline_buttons_"): # Handler for clearing inline buttons
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.clear_inline_buttons_confirm(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لحذف الأزرار: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("confirm_clear_inline_buttons_"): # Handler for confirming clear inline buttons
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
+                        await self.clear_inline_buttons_execute(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الأزرار: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
 
 
         except Exception as e:
@@ -460,6 +568,18 @@ class SimpleTelegramBot:
             elif state == 'waiting_text_replacements': # Handle adding text replacements
                 task_id = int(data)
                 await self.handle_add_replacements(event, task_id, event.text)
+                return
+            elif state == 'waiting_header_text': # Handle editing header text
+                task_id = int(data)
+                await self.handle_set_header_text(event, task_id, event.text)
+                return
+            elif state == 'waiting_footer_text': # Handle editing footer text
+                task_id = int(data)
+                await self.handle_set_footer_text(event, task_id, event.text)
+                return
+            elif state == 'waiting_button_data': # Handle adding inline button
+                task_id = int(data)
+                await self.handle_add_inline_button(event, task_id, event.text)
                 return
 
         # Check if this chat is a target chat for any active forwarding task
@@ -524,6 +644,12 @@ class SimpleTelegramBot:
         sources_count = len(task.get('sources', []))
         targets_count = len(task.get('targets', []))
 
+        # Get message settings for status display
+        message_settings = self.db.get_message_settings(task_id)
+        header_status = "🟢" if message_settings['header_enabled'] else "🔴"
+        footer_status = "🟢" if message_settings['footer_enabled'] else "🔴"
+        buttons_status = "🟢" if message_settings['inline_buttons_enabled'] else "🔴"
+
         buttons = [
             [Button.inline(f"🔄 تغيير وضع التوجيه ({forward_mode_text})", f"toggle_forward_mode_{task_id}")],
             [Button.inline(f"📥 إدارة المصادر ({sources_count})", f"manage_sources_{task_id}")],
@@ -531,6 +657,9 @@ class SimpleTelegramBot:
             [Button.inline("🎬 فلاتر الوسائط", f"media_filters_{task_id}")],
             [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")],
             [Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
+            [Button.inline(f"{header_status} رأس الرسالة", f"header_settings_{task_id}")],
+            [Button.inline(f"{footer_status} ذيل الرسالة", f"footer_settings_{task_id}")],
+            [Button.inline(f"{buttons_status} أزرار إنلاين", f"inline_buttons_{task_id}")],
             [Button.inline("🔙 رجوع لتفاصيل المهمة", f"task_manage_{task_id}")]
         ]
 
@@ -3177,6 +3306,391 @@ class SimpleTelegramBot:
         
         await event.answer(f"✅ تم حذف جميع الاستبدالات النصية")
         await self.show_text_replacements(event, task_id)
+
+    # Header Settings Methods
+    async def show_header_settings(self, event, task_id):
+        """Show header settings menu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_message_settings(task_id)
+        status = "🟢 مفعل" if settings['header_enabled'] else "🔴 معطل"
+        toggle_text = "⏸️ إلغاء التفعيل" if settings['header_enabled'] else "▶️ تفعيل"
+        
+        current_header = settings['header_text'] if settings['header_text'] else "غير محدد"
+
+        buttons = [
+            [Button.inline(toggle_text, f"toggle_header_{task_id}")],
+            [Button.inline("✏️ تعديل النص", f"edit_header_{task_id}")],
+            [Button.inline("🔙 عودة للإعدادات", f"task_settings_{task_id}")]
+        ]
+
+        await event.edit(
+            f"📝 رأس الرسالة - المهمة #{task_id}\n\n"
+            f"📊 **الحالة**: {status}\n"
+            f"💬 **النص الحالي**: {current_header}\n\n"
+            f"🔄 **الوظيفة**: إضافة نص في بداية كل رسالة قبل توجيهها\n\n"
+            f"💡 **مثال**: إضافة 'من قناة الأخبار:' في بداية كل رسالة\n\n"
+            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الرأس",
+            buttons=buttons
+        )
+
+    async def toggle_header(self, event, task_id):
+        """Toggle header status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_message_settings(task_id)
+        new_status = not settings['header_enabled']
+        
+        self.db.update_header_settings(task_id, new_status, settings['header_text'])
+        
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} رأس الرسالة")
+        await self.show_header_settings(event, task_id)
+
+    async def start_edit_header(self, event, task_id):
+        """Start editing header text"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_message_settings(task_id)
+        current_text = settings['header_text'] if settings['header_text'] else "غير محدد"
+        
+        self.db.set_conversation_state(user_id, 'waiting_header_text', str(task_id))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"header_settings_{task_id}")]
+        ]
+
+        await event.edit(
+            f"✏️ تعديل رأس الرسالة\n\n"
+            f"💬 **النص الحالي**: {current_text}\n\n"
+            f"📝 أرسل النص الجديد للرأس:\n\n"
+            f"💡 **أمثلة**:\n"
+            f"• من قناة الأخبار:\n"
+            f"• 🚨 عاجل:\n"
+            f"• تحديث مهم:\n\n"
+            f"⚠️ **ملاحظة**: يمكنك استخدام الرموز والإيموجي",
+            buttons=buttons
+        )
+
+    async def handle_set_header_text(self, event, task_id, text):
+        """Handle setting header text"""
+        user_id = event.sender_id
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        # Update header text and enable it
+        self.db.update_header_settings(task_id, True, text.strip())
+        
+        await event.respond(f"✅ تم تحديث رأس الرسالة بنجاح")
+        await self.show_header_settings(event, task_id)
+
+    # Footer Settings Methods
+    async def show_footer_settings(self, event, task_id):
+        """Show footer settings menu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_message_settings(task_id)
+        status = "🟢 مفعل" if settings['footer_enabled'] else "🔴 معطل"
+        toggle_text = "⏸️ إلغاء التفعيل" if settings['footer_enabled'] else "▶️ تفعيل"
+        
+        current_footer = settings['footer_text'] if settings['footer_text'] else "غير محدد"
+
+        buttons = [
+            [Button.inline(toggle_text, f"toggle_footer_{task_id}")],
+            [Button.inline("✏️ تعديل النص", f"edit_footer_{task_id}")],
+            [Button.inline("🔙 عودة للإعدادات", f"task_settings_{task_id}")]
+        ]
+
+        await event.edit(
+            f"📝 ذيل الرسالة - المهمة #{task_id}\n\n"
+            f"📊 **الحالة**: {status}\n"
+            f"💬 **النص الحالي**: {current_footer}\n\n"
+            f"🔄 **الوظيفة**: إضافة نص في نهاية كل رسالة قبل توجيهها\n\n"
+            f"💡 **مثال**: إضافة 'انضم لقناتنا: @channel' في نهاية كل رسالة\n\n"
+            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الذيل",
+            buttons=buttons
+        )
+
+    async def toggle_footer(self, event, task_id):
+        """Toggle footer status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_message_settings(task_id)
+        new_status = not settings['footer_enabled']
+        
+        self.db.update_footer_settings(task_id, new_status, settings['footer_text'])
+        
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} ذيل الرسالة")
+        await self.show_footer_settings(event, task_id)
+
+    async def start_edit_footer(self, event, task_id):
+        """Start editing footer text"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_message_settings(task_id)
+        current_text = settings['footer_text'] if settings['footer_text'] else "غير محدد"
+        
+        self.db.set_conversation_state(user_id, 'waiting_footer_text', str(task_id))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"footer_settings_{task_id}")]
+        ]
+
+        await event.edit(
+            f"✏️ تعديل ذيل الرسالة\n\n"
+            f"💬 **النص الحالي**: {current_text}\n\n"
+            f"📝 أرسل النص الجديد للذيل:\n\n"
+            f"💡 **أمثلة**:\n"
+            f"• انضم لقناتنا: @channel\n"
+            f"• 🔔 تابعنا للمزيد\n"
+            f"• www.example.com\n\n"
+            f"⚠️ **ملاحظة**: يمكنك استخدام الرموز والروابط",
+            buttons=buttons
+        )
+
+    async def handle_set_footer_text(self, event, task_id, text):
+        """Handle setting footer text"""
+        user_id = event.sender_id
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        # Update footer text and enable it
+        self.db.update_footer_settings(task_id, True, text.strip())
+        
+        await event.respond(f"✅ تم تحديث ذيل الرسالة بنجاح")
+        await self.show_footer_settings(event, task_id)
+
+    # Inline Buttons Methods
+    async def show_inline_buttons_settings(self, event, task_id):
+        """Show inline buttons settings menu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_message_settings(task_id)
+        buttons_list = self.db.get_inline_buttons(task_id)
+        
+        status = "🟢 مفعل" if settings['inline_buttons_enabled'] else "🔴 معطل"
+        toggle_text = "⏸️ إلغاء التفعيل" if settings['inline_buttons_enabled'] else "▶️ تفعيل"
+
+        buttons = [
+            [Button.inline(toggle_text, f"toggle_inline_buttons_{task_id}")],
+            [Button.inline(f"➕ إضافة أزرار ({len(buttons_list)})", f"add_inline_button_{task_id}")],
+            [Button.inline("👀 عرض الأزرار", f"view_inline_buttons_{task_id}")],
+            [Button.inline("🗑️ حذف جميع الأزرار", f"clear_inline_buttons_{task_id}")],
+            [Button.inline("🔙 عودة للإعدادات", f"task_settings_{task_id}")]
+        ]
+
+        await event.edit(
+            f"🔘 أزرار إنلاين - المهمة #{task_id}\n\n"
+            f"📊 **الحالة**: {status}\n"
+            f"🔢 **عدد الأزرار**: {len(buttons_list)}\n\n"
+            f"🔄 **الوظيفة**: إضافة أزرار قابلة للنقر أسفل الرسائل المُوجهة\n\n"
+            f"💡 **مثال**: زر 'زيارة الموقع' أو 'اشترك في القناة'\n\n"
+            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الأزرار",
+            buttons=buttons
+        )
+
+    async def toggle_inline_buttons(self, event, task_id):
+        """Toggle inline buttons status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_message_settings(task_id)
+        new_status = not settings['inline_buttons_enabled']
+        
+        self.db.update_inline_buttons_enabled(task_id, new_status)
+        
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} الأزرار الإنلاين")
+        await self.show_inline_buttons_settings(event, task_id)
+
+    async def start_add_inline_button(self, event, task_id):
+        """Start adding inline button"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        self.db.set_conversation_state(user_id, 'waiting_button_data', str(task_id))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"inline_buttons_{task_id}")]
+        ]
+
+        await event.edit(
+            f"➕ إضافة أزرار إنلاين\n\n"
+            f"📝 **تنسيق الإدخال**: كل زر في سطر منفصل بالتنسيق التالي:\n"
+            f"`نص_الزر || رابط_الزر || صف || عمود`\n\n"
+            f"💡 **أمثلة**:\n"
+            f"`زيارة الموقع || https://example.com || 0 || 0`\n"
+            f"`اشترك بالقناة || https://t.me/channel || 0 || 1`\n"
+            f"`تابعنا || https://twitter.com/us || 1 || 0`\n\n"
+            f"🔢 **ملاحظات**:\n"
+            f"• **الصف**: رقم الصف (0 = الصف الأول)\n"
+            f"• **العمود**: رقم العمود في الصف (0 = العمود الأول)\n"
+            f"• يمكن إضافة عدة أزرار في رسالة واحدة\n"
+            f"• الأزرار في نفس الصف ستظهر جنباً إلى جنب",
+            buttons=buttons
+        )
+
+    async def handle_add_inline_button(self, event, task_id, text):
+        """Handle adding inline buttons"""
+        user_id = event.sender_id
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        lines = text.strip().split('\n')
+        added_count = 0
+        errors = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            try:
+                parts = [p.strip() for p in line.split('||')]
+                if len(parts) < 2:
+                    errors.append(f"تنسيق خاطئ: {line}")
+                    continue
+                
+                button_text = parts[0]
+                button_url = parts[1]
+                row_pos = int(parts[2]) if len(parts) > 2 and parts[2] else 0
+                col_pos = int(parts[3]) if len(parts) > 3 and parts[3] else 0
+                
+                if not button_text or not button_url:
+                    errors.append(f"نص أو رابط فارغ: {line}")
+                    continue
+                
+                self.db.add_inline_button(task_id, button_text, button_url, row_pos, col_pos)
+                added_count += 1
+                
+            except Exception as e:
+                errors.append(f"خطأ في السطر: {line}")
+        
+        result_msg = f"✅ تم إضافة {added_count} زر"
+        if errors:
+            result_msg += f"\n❌ أخطاء ({len(errors)}):\n" + "\n".join(errors[:5])
+        
+        await event.respond(result_msg)
+        await self.show_inline_buttons_settings(event, task_id)
+
+    async def view_inline_buttons(self, event, task_id):
+        """View inline buttons"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        buttons_list = self.db.get_inline_buttons(task_id)
+
+        if not buttons_list:
+            message = f"🔘 أزرار إنلاين\n\n❌ لا توجد أزرار مضافة حالياً"
+        else:
+            message = f"🔘 أزرار إنلاين\n\n📋 الأزرار المضافة ({len(buttons_list)}):\n\n"
+            
+            # Group buttons by row
+            rows = {}
+            for button in buttons_list:
+                row = button['row_position']
+                if row not in rows:
+                    rows[row] = []
+                rows[row].append(button)
+            
+            for row_num in sorted(rows.keys()):
+                row_buttons = sorted(rows[row_num], key=lambda x: x['col_position'])
+                message += f"**الصف {row_num}:**\n"
+                for button in row_buttons:
+                    message += f"• `{button['button_text']}` → {button['button_url']}\n"
+                message += "\n"
+
+        buttons = [
+            [Button.inline("➕ إضافة المزيد", f"add_inline_button_{task_id}")],
+            [Button.inline("🔙 عودة للإدارة", f"inline_buttons_{task_id}")]
+        ]
+
+        await event.edit(message, buttons=buttons)
+
+    async def clear_inline_buttons_confirm(self, event, task_id):
+        """Confirm clearing inline buttons"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        buttons_list = self.db.get_inline_buttons(task_id)
+
+        buttons = [
+            [Button.inline("✅ نعم، احذف الكل", f"confirm_clear_inline_buttons_{task_id}")],
+            [Button.inline("❌ إلغاء", f"inline_buttons_{task_id}")]
+        ]
+
+        await event.edit(
+            f"⚠️ تأكيد حذف الأزرار الإنلاين\n\n"
+            f"🗑️ هل أنت متأكد من حذف جميع الأزرار ({len(buttons_list)} زر)؟\n\n"
+            f"❌ **تحذير**: هذا الإجراء لا يمكن التراجع عنه!\n\n"
+            f"سيتم حذف جميع الأزرار الإنلاين نهائياً.",
+            buttons=buttons
+        )
+
+    async def clear_inline_buttons_execute(self, event, task_id):
+        """Execute clearing inline buttons"""
+        user_id = event.sender_id
+        
+        # Clear all buttons
+        deleted_count = self.db.clear_inline_buttons(task_id)
+        
+        await event.answer(f"✅ تم حذف جميع الأزرار الإنلاين")
+        await self.show_inline_buttons_settings(event, task_id)
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()
