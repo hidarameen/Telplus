@@ -1247,7 +1247,9 @@ class Database:
 
     def update_inline_buttons_enabled(self, task_id: int, enabled: bool):
         """Update inline buttons enabled status - managed by presence of buttons"""
-        pass
+        if not enabled:
+            # If disabling, clear all buttons
+            self.clear_inline_buttons(task_id)
 
     def get_inline_buttons(self, task_id: int):
         """Get inline buttons for a task"""

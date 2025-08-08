@@ -3537,12 +3537,17 @@ class SimpleTelegramBot:
             return
 
         settings = self.db.get_message_settings(task_id)
-        new_status = not settings['inline_buttons_enabled']
+        current_status = settings['inline_buttons_enabled']
         
-        self.db.update_inline_buttons_enabled(task_id, new_status)
+        if current_status:
+            # Currently enabled, disable by clearing all buttons
+            self.db.clear_inline_buttons(task_id)
+            await event.answer("✅ تم إلغاء تفعيل الأزرار الإنلاين")
+        else:
+            # Currently disabled, enable by redirecting to add button
+            await self.start_add_inline_button(event, task_id)
+            return
         
-        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} الأزرار الإنلاين")
         await self.show_inline_buttons_settings(event, task_id)
 
     async def start_add_inline_button(self, event, task_id):
