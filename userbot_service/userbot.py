@@ -125,9 +125,9 @@ class UserbotService:
                         logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
                         # Check admin filter first (if enabled)
-                        logger.warning(f"🔍 بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id}")
+                        logger.error(f"🚨 === بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id} ===")
                         admin_allowed = self.is_admin_allowed(task_id, event.sender_id)
-                        logger.warning(f"🔍 نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed}")
+                        logger.error(f"🚨 === نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed} ===")
                         
                         # Check media filter
                         media_allowed = self.is_media_allowed(task_id, message_media_type)
@@ -143,6 +143,7 @@ class UserbotService:
                             # Pure text message - check admin, text filter and word filter
                             is_message_allowed = admin_allowed and self.is_media_allowed(task_id, 'text') and word_filter_allowed
                             filter_type = "النص"
+                            logger.error(f"🚨 === فحص رسالة نصية: admin={admin_allowed}, media={self.is_media_allowed(task_id, 'text')}, word={word_filter_allowed}, نتيجة نهائية={is_message_allowed} ===")
                         else:
                             # Media message (photo, video, etc.) - check admin, media filter and word filter for caption
                             is_message_allowed = admin_allowed and media_allowed and word_filter_allowed
@@ -586,20 +587,20 @@ class UserbotService:
             from database.database import Database
             db = Database()
             
-            logger.warning(f"🔍 [ADMIN FILTER DEBUG] المهمة: {task_id}, المرسل: {sender_id}")
+            logger.error(f"🚨 [ADMIN FILTER DEBUG] المهمة: {task_id}, المرسل: {sender_id}")
             
             # Check if admin filter is enabled for this task
             admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
-            logger.warning(f"🔍 [ADMIN FILTER DEBUG] فلتر المشرفين مُفعل: {admin_filter_enabled}")
+            logger.error(f"🚨 [ADMIN FILTER DEBUG] فلتر المشرفين مُفعل: {admin_filter_enabled}")
             
             if not admin_filter_enabled:
-                logger.warning(f"🔍 فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
+                logger.error(f"🚨 فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
                 return True
             
             # Check if sender is in allowed admin list
             is_allowed = db.is_admin_allowed(task_id, sender_id)
-            logger.warning(f"🔍 [ADMIN FILTER DEBUG] نتيجة فحص قاعدة البيانات: {is_allowed}")
-            logger.warning(f"🔍 فحص فلتر المشرفين: المهمة {task_id}, المرسل {sender_id}, مسموح: {is_allowed}")
+            logger.error(f"🚨 [ADMIN FILTER DEBUG] نتيجة فحص قاعدة البيانات: {is_allowed}")
+            logger.error(f"🚨 فحص فلتر المشرفين: المهمة {task_id}, المرسل {sender_id}, مسموح: {is_allowed}")
             return is_allowed
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
