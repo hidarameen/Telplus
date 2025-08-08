@@ -158,7 +158,33 @@ class SimpleTelegramBot:
                 await self.handle_task_message(event, state_data)
                 return
 
-        # Default response
+        # Check if this chat is a target chat for any active forwarding task
+        chat_id = event.chat_id
+        
+        # Get all active tasks from database
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT target_chat_id FROM tasks 
+                    WHERE is_active = 1 AND target_chat_id = ?
+                ''', (str(chat_id),))
+                target_tasks = cursor.fetchall()
+            
+            # If this chat is a target chat, don't respond
+            if target_tasks:
+                logger.info(f"🚫 تجاهل الرسالة في المحادثة الهدف {chat_id}")
+                return
+            
+            # Also ignore forwarded messages in any case
+            if hasattr(event.message, 'forward') and event.message.forward:
+                logger.info(f"🚫 تجاهل الرسالة المُوجهة في {chat_id}")
+                return
+                
+        except Exception as e:
+            logger.error(f"خطأ في فحص المحادثات الهدف: {e}")
+        
+        # Default response only if not a target chat and not forwarded
         await event.respond("👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
 
 
