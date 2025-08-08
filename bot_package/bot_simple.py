@@ -788,17 +788,29 @@ class SimpleTelegramBot:
             return
 
         # Create temporary Telegram client for authentication
+        temp_client = None
         try:
-            temp_client = TelegramClient(':memory:', int(API_ID), API_HASH)
-            await temp_client.connect()
+            # Create unique session for this authentication attempt
+            session_name = f'auth_{user_id}_{int(datetime.now().timestamp())}'
+            temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
+            
+            # Connect with timeout
+            await asyncio.wait_for(temp_client.connect(), timeout=10)
+            
+            if not temp_client.is_connected():
+                raise Exception("فشل في الاتصال بخوادم تليجرام")
 
-            # Send code request
-            sent_code = await temp_client.send_code_request(phone)
+            # Send code request with timeout
+            sent_code = await asyncio.wait_for(
+                temp_client.send_code_request(phone), 
+                timeout=15
+            )
 
             # Store data for next step
             auth_data = {
                 'phone': phone,
-                'phone_code_hash': sent_code.phone_code_hash
+                'phone_code_hash': sent_code.phone_code_hash,
+                'session_name': session_name
             }
             self.db.set_conversation_state(user_id, 'waiting_code', json.dumps(auth_data))
 
@@ -815,8 +827,13 @@ class SimpleTelegramBot:
                 buttons=buttons
             )
 
-            await temp_client.disconnect()
-
+        except asyncio.TimeoutError:
+            logger.error("مهلة زمنية في إرسال الرمز")
+            await event.respond(
+                "❌ مهلة زمنية في الاتصال\n\n"
+                "🌐 تأكد من اتصالك بالإنترنت وحاول مرة أخرى"
+            )
+            self.db.clear_conversation_state(user_id)
         except Exception as e:
             logger.error(f"خطأ في إرسال الرمز: {e}")
             error_message = str(e)
@@ -866,6 +883,13 @@ class SimpleTelegramBot:
                     "• لم تطلب رموز كثيرة مؤخراً\n\n"
                     "حاول مرة أخرى أو اضغط /start"
                 )
+        finally:
+            # Always disconnect the temporary client
+            if temp_client and temp_client.is_connected():
+                try:
+                    await temp_client.disconnect()
+                except:
+                    pass
 
     async def handle_code_input(self, event, code: str, data: str):
         """Handle verification code input"""
