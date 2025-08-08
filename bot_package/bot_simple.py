@@ -45,6 +45,11 @@ class SimpleTelegramBot:
 
     async def handle_start(self, event):
         """Handle /start command"""
+        # Only respond to /start in private chats
+        if not event.is_private:
+            logger.info(f"🚫 تجاهل أمر /start في محادثة غير خاصة: {event.chat_id}")
+            return
+        
         user_id = event.sender_id
 
         # Check if user is authenticated
@@ -184,8 +189,11 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"خطأ في فحص المحادثات الهدف: {e}")
         
-        # Default response only if not a target chat and not forwarded
-        await event.respond("👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
+        # Default response only if not a target chat and not forwarded and in private chat
+        if event.is_private:
+            await event.respond("👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
+        else:
+            logger.info(f"🚫 تجاهل الرد التلقائي في محادثة غير خاصة: {event.chat_id}")
 
 
     async def show_main_menu(self, event):
