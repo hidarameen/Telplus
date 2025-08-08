@@ -674,3 +674,103 @@ class Database:
             deleted_count = cursor.rowcount
             conn.commit()
             return deleted_count
+
+    def get_message_settings(self, task_id: int) -> dict:
+        """Get message formatting settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get header settings
+                cursor.execute('''
+                    SELECT enabled, header_text FROM task_headers 
+                    WHERE task_id = ?
+                ''', (task_id,))
+                header_result = cursor.fetchone()
+                
+                # Get footer settings
+                cursor.execute('''
+                    SELECT enabled, footer_text FROM task_footers 
+                    WHERE task_id = ?
+                ''', (task_id,))
+                footer_result = cursor.fetchone()
+                
+                # Get inline buttons enabled status
+                cursor.execute('''
+                    SELECT COUNT(*) as count FROM task_inline_buttons 
+                    WHERE task_id = ?
+                ''', (task_id,))
+                buttons_count = cursor.fetchone()['count']
+                
+                return {
+                    'header_enabled': header_result['enabled'] if header_result else False,
+                    'header_text': header_result['header_text'] if header_result else None,
+                    'footer_enabled': footer_result['enabled'] if footer_result else False,
+                    'footer_text': footer_result['footer_text'] if footer_result else None,
+                    'inline_buttons_enabled': buttons_count > 0
+                }
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على إعدادات الرسالة: {e}")
+            return {
+                'header_enabled': False,
+                'header_text': None,
+                'footer_enabled': False,
+                'footer_text': None,
+                'inline_buttons_enabled': False
+            }
+
+    def update_header_settings(self, task_id: int, enabled: bool, header_text: str = None):
+        """Update header settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check if header exists
+            cursor.execute('SELECT id FROM task_headers WHERE task_id = ?', (task_id,))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing
+                cursor.execute('''
+                    UPDATE task_headers 
+                    SET enabled = ?, header_text = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', (enabled, header_text, task_id))
+            else:
+                # Create new
+                cursor.execute('''
+                    INSERT INTO task_headers (task_id, enabled, header_text)
+                    VALUES (?, ?, ?)
+                ''', (task_id, enabled, header_text))
+            
+            conn.commit()
+
+    def update_footer_settings(self, task_id: int, enabled: bool, footer_text: str = None):
+        """Update footer settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check if footer exists
+            cursor.execute('SELECT id FROM task_footers WHERE task_id = ?', (task_id,))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing
+                cursor.execute('''
+                    UPDATE task_footers 
+                    SET enabled = ?, footer_text = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', (enabled, footer_text, task_id))
+            else:
+                # Create new
+                cursor.execute('''
+                    INSERT INTO task_footers (task_id, enabled, footer_text)
+                    VALUES (?, ?, ?)
+                ''', (task_id, enabled, footer_text))
+            
+            conn.commit()
+
+    def update_inline_buttons_enabled(self, task_id: int, enabled: bool):
+        """Update inline buttons enabled status - for now this is managed by presence of buttons"""
+        # This is handled by the presence/absence of buttons in task_inline_buttons table
+        # No separate enabled field needed as buttons are either there or not
+        pass
