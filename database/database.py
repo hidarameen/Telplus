@@ -351,10 +351,19 @@ class Database:
                     media_type TEXT,
                     media_hash TEXT,
                     forwarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
-                    INDEX(task_id, message_hash),
-                    INDEX(task_id, media_hash)
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
+            ''')
+
+            # Create indexes for better performance
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_forwarded_messages_task_message_hash 
+                ON forwarded_messages_log (task_id, message_hash)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_forwarded_messages_task_media_hash 
+                ON forwarded_messages_log (task_id, media_hash)
             ''')
 
             # Inline button filter settings
