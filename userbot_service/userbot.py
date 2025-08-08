@@ -194,18 +194,18 @@ class UserbotService:
 
                         if forward_mode == 'copy':
                             # Copy mode: send as new message
-                            if event.message.text:
-                                # Text message
-                                forwarded_msg = await client.send_message(
-                                    target_entity,
-                                    event.message.text
-                                )
-                            elif event.message.media:
-                                # Media message
+                            if event.message.media:
+                                # Media message with or without caption
                                 forwarded_msg = await client.send_file(
                                     target_entity,
                                     event.message.media,
                                     caption=event.message.text or ""
+                                )
+                            elif event.message.text:
+                                # Pure text message (no media)
+                                forwarded_msg = await client.send_message(
+                                    target_entity,
+                                    event.message.text
                                 )
                             else:
                                 # Fallback to forward for other types
