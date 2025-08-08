@@ -3571,22 +3571,22 @@ class SimpleTelegramBot:
 
         await event.edit(
             f"➕ إضافة أزرار إنلاين\n\n"
-            f"📝 **تنسيق الإدخال**: كل زر في سطر منفصل بالتنسيق التالي:\n"
-            f"`نص_الزر || رابط_الزر || صف || عمود`\n\n"
+            f"📝 **طريقتان للإضافة**:\n\n"
+            f"🔹 **للأزرار المنفصلة** (كل زر في سطر):\n"
+            f"`نص الزر الأول - رابط الزر الأول`\n"
+            f"`نص الزر الثاني - رابط الزر الثاني`\n\n"
+            f"🔹 **لعدة أزرار في صف واحد** (يفصل بينهم |):\n"
+            f"`نص الزر الأول - رابط الزر الأول | نص الزر الثاني - رابط الزر الثاني`\n\n"
             f"💡 **أمثلة**:\n"
-            f"`زيارة الموقع || https://example.com || 0 || 0`\n"
-            f"`اشترك بالقناة || https://t.me/channel || 0 || 1`\n"
-            f"`تابعنا || https://twitter.com/us || 1 || 0`\n\n"
-            f"🔢 **ملاحظات**:\n"
-            f"• **الصف**: رقم الصف (0 = الصف الأول)\n"
-            f"• **العمود**: رقم العمود في الصف (0 = العمود الأول)\n"
-            f"• يمكن إضافة عدة أزرار في رسالة واحدة\n"
-            f"• الأزرار في نفس الصف ستظهر جنباً إلى جنب",
+            f"`زيارة الموقع - https://example.com`\n"
+            f"`اشترك بالقناة - https://t.me/channel`\n"
+            f"`تابعنا - https://twitter.com/us | دعمنا - https://paypal.com`\n\n"
+            f"⚠️ **ملاحظة**: استخدم الشرطة (-) لفصل النص عن الرابط",
             buttons=buttons
         )
 
     async def handle_add_inline_button(self, event, task_id, text):
-        """Handle adding inline buttons"""
+        """Handle adding inline buttons with new format"""
         user_id = event.sender_id
         
         # Clear conversation state
@@ -3595,6 +3595,7 @@ class SimpleTelegramBot:
         lines = text.strip().split('\n')
         added_count = 0
         errors = []
+        current_row = 0
         
         for line in lines:
             line = line.strip()
@@ -3602,29 +3603,49 @@ class SimpleTelegramBot:
                 continue
                 
             try:
-                parts = [p.strip() for p in line.split('||')]
-                if len(parts) < 2:
-                    errors.append(f"تنسيق خاطئ: {line}")
-                    continue
-                
-                button_text = parts[0]
-                button_url = parts[1]
-                row_pos = int(parts[2]) if len(parts) > 2 and parts[2] else 0
-                col_pos = int(parts[3]) if len(parts) > 3 and parts[3] else 0
-                
-                if not button_text or not button_url:
-                    errors.append(f"نص أو رابط فارغ: {line}")
-                    continue
-                
-                self.db.add_inline_button(task_id, button_text, button_url, row_pos, col_pos)
-                added_count += 1
-                
+                # Check if line contains multiple buttons (separated by |)
+                if '|' in line:
+                    # Multiple buttons in one row
+                    button_parts = line.split('|')
+                    col_pos = 0
+                    for button_part in button_parts:
+                        button_part = button_part.strip()
+                        if ' - ' in button_part:
+                            text_url = button_part.split(' - ', 1)
+                            button_text = text_url[0].strip()
+                            button_url = text_url[1].strip()
+                            
+                            if button_text and button_url:
+                                self.db.add_inline_button(task_id, button_text, button_url, current_row, col_pos)
+                                added_count += 1
+                                col_pos += 1
+                            else:
+                                errors.append(f"نص أو رابط فارغ: {button_part}")
+                        else:
+                            errors.append(f"تنسيق خاطئ (استخدم -): {button_part}")
+                    current_row += 1
+                else:
+                    # Single button
+                    if ' - ' in line:
+                        text_url = line.split(' - ', 1)
+                        button_text = text_url[0].strip()
+                        button_url = text_url[1].strip()
+                        
+                        if button_text and button_url:
+                            self.db.add_inline_button(task_id, button_text, button_url, current_row, 0)
+                            added_count += 1
+                            current_row += 1
+                        else:
+                            errors.append(f"نص أو رابط فارغ: {line}")
+                    else:
+                        errors.append(f"تنسيق خاطئ (استخدم -): {line}")
+                        
             except Exception as e:
                 errors.append(f"خطأ في السطر: {line}")
         
         result_msg = f"✅ تم إضافة {added_count} زر"
         if errors:
-            result_msg += f"\n❌ أخطاء ({len(errors)}):\n" + "\n".join(errors[:5])
+            result_msg += f"\n❌ أخطاء ({len(errors)}):\n" + "\n".join(errors[:3])
         
         await event.respond(result_msg)
         await self.show_inline_buttons_settings(event, task_id)
