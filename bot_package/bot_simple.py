@@ -40,6 +40,9 @@ class SimpleTelegramBot:
         self.bot.add_event_handler(self.handle_callback, events.CallbackQuery())
         self.bot.add_event_handler(self.handle_message, events.NewMessage())
 
+        # Start notification monitoring task
+        asyncio.create_task(self.monitor_notifications())
+
         logger.info("✅ Bot started successfully!")
         return True
 
@@ -3006,6 +3009,119 @@ class SimpleTelegramBot:
             "💻 تطوير: نظام بوت تليجرام",
             buttons=buttons
         )
+
+    async def monitor_notifications(self):
+        """Monitor for notifications from UserBot to add inline buttons"""
+        import os
+        import time
+        import json
+        import glob
+        
+        logger.info("🔔 بدء مراقبة إشعارات الأزرار الإنلاين...")
+        
+        while True:
+            try:
+                # Check for notification files
+                notification_files = glob.glob("/tmp/bot_notification_*.json")
+                
+                for notification_file in notification_files:
+                    try:
+                        # Read notification
+                        with open(notification_file, 'r', encoding='utf-8') as f:
+                            notification_data = json.load(f)
+                        
+                        # Process notification
+                        if notification_data.get('action') == 'add_inline_buttons':
+                            chat_id = notification_data['chat_id']
+                            message_id = notification_data['message_id']
+                            task_id = notification_data['task_id']
+                            
+                            logger.info(f"🔔 معالجة إشعار إضافة أزرار إنلاين: قناة={chat_id}, رسالة={message_id}, مهمة={task_id}")
+                            
+                            # Add inline buttons to the message
+                            await self.add_inline_buttons_to_message(chat_id, message_id, task_id)
+                        
+                        # Remove processed notification file
+                        os.remove(notification_file)
+                        
+                    except Exception as e:
+                        logger.error(f"❌ خطأ في معالجة إشعار {notification_file}: {e}")
+                        # Remove problematic file
+                        try:
+                            os.remove(notification_file)
+                        except:
+                            pass
+                
+                # Wait before next check
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                logger.error(f"❌ خطأ في مراقبة الإشعارات: {e}")
+                await asyncio.sleep(5)
+
+    async def add_inline_buttons_to_message(self, chat_id: int, message_id: int, task_id: int):
+        """Add inline buttons to a specific message"""
+        try:
+            # Get inline buttons for the task
+            buttons_data = self.db.get_inline_buttons(task_id)
+            
+            if not buttons_data:
+                logger.warning(f"❌ لا توجد أزرار إنلاين للمهمة {task_id}")
+                return
+            
+            # Build inline buttons
+            inline_buttons = self.build_inline_buttons_from_data(buttons_data)
+            
+            if not inline_buttons:
+                logger.warning(f"❌ فشل في بناء الأزرار الإنلاين للمهمة {task_id}")
+                return
+            
+            # Edit the message to add buttons
+            await self.bot.edit_message(
+                chat_id,
+                message_id,
+                buttons=inline_buttons
+            )
+            
+            logger.info(f"✅ تم إضافة الأزرار الإنلاين للرسالة {message_id} في القناة {chat_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار الإنلاين للرسالة {message_id}: {e}")
+
+    def build_inline_buttons_from_data(self, buttons_data):
+        """Build inline buttons from database data"""
+        try:
+            if not buttons_data:
+                return None
+            
+            # Group buttons by row
+            rows = {}
+            for button in buttons_data:
+                row_num = button['row_num']
+                if row_num not in rows:
+                    rows[row_num] = []
+                rows[row_num].append(button)
+            
+            # Sort rows and build buttons
+            inline_buttons = []
+            for row_num in sorted(rows.keys()):
+                row_buttons = []
+                for button in sorted(rows[row_num], key=lambda x: x['col_num']):
+                    if button['button_type'] == 'url':
+                        row_buttons.append(Button.url(button['button_text'], button['button_url']))
+                    elif button['button_type'] == 'callback':
+                        row_buttons.append(Button.inline(button['button_text'], button['button_data']))
+                    # Add other button types as needed
+                
+                if row_buttons:
+                    inline_buttons.append(row_buttons)
+            
+            logger.info(f"🔘 تم بناء {len(inline_buttons)} صف من الأزرار الإنلاين")
+            return inline_buttons
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في بناء الأزرار الإنلاين: {e}")
+            return None
 
     async def run(self):
         """Run the bot"""

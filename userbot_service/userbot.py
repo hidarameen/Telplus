@@ -243,18 +243,16 @@ class UserbotService:
                                 forwarded_msg = await client.send_file(
                                     target_entity,
                                     event.message.media,
-                                    caption=final_text,
-                                    buttons=inline_buttons
+                                    caption=final_text
                                 )
                             elif event.message.text or final_text:
                                 # Pure text message
                                 forwarded_msg = await client.send_message(
                                     target_entity,
-                                    final_text or "رسالة",
-                                    buttons=inline_buttons
+                                    final_text or "رسالة"
                                 )
                             else:
-                                # Fallback to forward for other types (no inline buttons support)
+                                # Fallback to forward for other types
                                 forwarded_msg = await client.forward_messages(
                                     target_entity,
                                     event.message
@@ -267,14 +265,12 @@ class UserbotService:
                                     forwarded_msg = await client.send_file(
                                         target_entity,
                                         event.message.media,
-                                        caption=final_text,
-                                        buttons=inline_buttons
+                                        caption=final_text
                                     )
                                 else:
                                     forwarded_msg = await client.send_message(
                                         target_entity,
-                                        final_text or "رسالة",
-                                        buttons=inline_buttons
+                                        final_text or "رسالة"
                                     )
                             else:
                                 # No formatting changes, forward normally
@@ -287,6 +283,10 @@ class UserbotService:
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                             logger.info(f"✅ تم توجيه الرسالة بنجاح من {source_chat_id} إلى {target_chat_id}")
                             logger.info(f"📝 معرف الرسالة المُوجهة: {msg_id} (المهمة: {task_name})")
+                            
+                            # If inline buttons are enabled, notify bot to add them
+                            if inline_buttons and message_settings['inline_buttons_enabled']:
+                                await self.notify_bot_to_add_buttons(target_chat_id, msg_id, task['id'])
                         else:
                             logger.warning(f"⚠️ تم التوجيه لكن لم يتم الحصول على معرف الرسالة")
 
@@ -343,6 +343,33 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في refresh_user_tasks للمستخدم {user_id}: {e}")
             return []
+
+    async def notify_bot_to_add_buttons(self, chat_id: int, message_id: int, task_id: int):
+        """Notify the bot to add inline buttons to a message"""
+        try:
+            import asyncio
+            import json
+            
+            # Store the message info for the bot to process
+            notification_data = {
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'task_id': task_id,
+                'action': 'add_inline_buttons'
+            }
+            
+            # Use a simple file-based notification system
+            import tempfile
+            import os
+            
+            notification_file = f"/tmp/bot_notification_{chat_id}_{message_id}.json"
+            with open(notification_file, 'w', encoding='utf-8') as f:
+                json.dump(notification_data, f, ensure_ascii=False)
+            
+            logger.info(f"🔔 تم إرسال إشعار للبوت لإضافة أزرار إنلاين: قناة={chat_id}, رسالة={message_id}, مهمة={task_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في إشعار البوت لإضافة الأزرار: {e}")
 
     def get_message_media_type(self, message):
         """Determine the media type of a message"""
