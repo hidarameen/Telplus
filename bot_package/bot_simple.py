@@ -2563,10 +2563,18 @@ class SimpleTelegramBot:
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
             
-            await self.show_word_filters(event, task_id)
+            # Send new message instead of trying to edit
+            if filter_type == 'whitelist':
+                await self.show_whitelist_management_new(event, task_id)
+            else:
+                await self.show_blacklist_management_new(event, task_id)
         else:
             await event.respond("⚠️ لم يتم إضافة أي كلمات جديدة (قد تكون موجودة مسبقاً)")
-            await self.show_word_filters(event, task_id)
+            # Send new message instead of trying to edit
+            if filter_type == 'whitelist':
+                await self.show_whitelist_management_new(event, task_id)
+            else:
+                await self.show_blacklist_management_new(event, task_id)
 
     async def toggle_word_filter(self, event, task_id, filter_type):
         """Toggle word filter on/off"""
@@ -2819,6 +2827,80 @@ class SimpleTelegramBot:
             await self.bot.run_until_disconnected()
         else:
             logger.error("❌ فشل في تشغيل البوت")
+
+    async def show_whitelist_management_new(self, event, task_id):
+        """Show whitelist management interface with new message"""
+        task = self.db.get_task(task_id, event.sender_id)
+        if not task:
+            await event.respond("❌ لم يتم العثور على المهمة")
+            return
+        
+        whitelist_enabled = self.db.is_word_filter_enabled(task_id, 'whitelist')
+        whitelist_words = self.db.get_filter_words(task_id, 'whitelist')
+        whitelist_count = len(whitelist_words)
+        
+        message = f"⚪ **إدارة القائمة البيضاء**\n"
+        message += f"📝 المهمة: {task['task_name']}\n\n"
+        message += f"📊 **حالة القائمة:**\n"
+        message += f"• الحالة: {'✅ مفعلة' if whitelist_enabled else '❌ معطلة'}\n"
+        message += f"• عدد الكلمات: {whitelist_count}\n\n"
+        message += "💡 **وصف القائمة البيضاء:**\n"
+        message += "• تمرير الرسائل التي تحتوي على هذه الكلمات فقط\n"
+        message += "• حظر جميع الرسائل الأخرى\n\n"
+        message += "اختر العملية المطلوبة:"
+
+        buttons = [
+            [
+                Button.inline(f"{'❌ تعطيل' if whitelist_enabled else '✅ تفعيل'} القائمة", f"toggle_word_filter_{task_id}_whitelist")
+            ],
+            [
+                Button.inline(f"📋 عرض الكلمات ({whitelist_count})", f"view_filter_{task_id}_whitelist"),
+                Button.inline(f"➕ إضافة كلمات", f"add_multiple_words_{task_id}_whitelist")
+            ],
+            [
+                Button.inline(f"🗑️ إفراغ القائمة", f"clear_filter_{task_id}_whitelist")
+            ],
+            [Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]
+        ]
+
+        await event.respond(message, buttons=buttons)
+
+    async def show_blacklist_management_new(self, event, task_id):
+        """Show blacklist management interface with new message"""
+        task = self.db.get_task(task_id, event.sender_id)
+        if not task:
+            await event.respond("❌ لم يتم العثور على المهمة")
+            return
+        
+        blacklist_enabled = self.db.is_word_filter_enabled(task_id, 'blacklist')
+        blacklist_words = self.db.get_filter_words(task_id, 'blacklist')
+        blacklist_count = len(blacklist_words)
+        
+        message = f"⚫ **إدارة القائمة السوداء**\n"
+        message += f"📝 المهمة: {task['task_name']}\n\n"
+        message += f"📊 **حالة القائمة:**\n"
+        message += f"• الحالة: {'✅ مفعلة' if blacklist_enabled else '❌ معطلة'}\n"
+        message += f"• عدد الكلمات: {blacklist_count}\n\n"
+        message += "💡 **وصف القائمة السوداء:**\n"
+        message += "• حظر الرسائل التي تحتوي على هذه الكلمات\n"
+        message += "• تمرير جميع الرسائل الأخرى\n\n"
+        message += "اختر العملية المطلوبة:"
+
+        buttons = [
+            [
+                Button.inline(f"{'❌ تعطيل' if blacklist_enabled else '✅ تفعيل'} القائمة", f"toggle_word_filter_{task_id}_blacklist")
+            ],
+            [
+                Button.inline(f"📋 عرض الكلمات ({blacklist_count})", f"view_filter_{task_id}_blacklist"),
+                Button.inline(f"➕ إضافة كلمات", f"add_multiple_words_{task_id}_blacklist")
+            ],
+            [
+                Button.inline(f"🗑️ إفراغ القائمة", f"clear_filter_{task_id}_blacklist")
+            ],
+            [Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]
+        ]
+
+        await event.respond(message, buttons=buttons)
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()

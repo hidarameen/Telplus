@@ -698,10 +698,10 @@ class Database:
             if result:
                 return result['id']
             
-            # Create new filter
+            # Create new filter (enabled by default)
             cursor.execute('''
                 INSERT INTO task_word_filters (task_id, filter_type, is_enabled)
-                VALUES (?, ?, FALSE)
+                VALUES (?, ?, TRUE)
             ''', (task_id, filter_type))
             conn.commit()
             return cursor.lastrowid
