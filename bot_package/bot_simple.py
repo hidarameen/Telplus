@@ -87,20 +87,23 @@ class SimpleTelegramBot:
             data = event.data.decode('utf-8')
             user_id = event.sender_id
 
-            if data == "login":
-                await self.show_login_menu(event)
+            if data == "auth_phone":
+                await self.start_auth(event)
             elif data == "manage_tasks":
                 await self.show_tasks_menu(event)
             elif data == "create_task":
-                await self.start_task_creation(event)
+                await self.start_create_task(event)
             elif data == "list_tasks":
-                await self.list_user_tasks(event)
+                await self.list_tasks(event)
             elif data.startswith("task_toggle_"):
                 task_id = int(data.split("_")[2])
                 await self.toggle_task(event, task_id)
             elif data.startswith("task_delete_"):
                 task_id = int(data.split("_")[2])
                 await self.delete_task(event, task_id)
+            elif data.startswith("task_manage_"):
+                task_id = int(data.split("_")[2])
+                await self.show_task_details(event, task_id)
             elif data == "settings":
                 await self.show_settings(event)
             elif data == "check_userbot":
@@ -109,6 +112,10 @@ class SimpleTelegramBot:
                 await self.show_about(event)
             elif data == "main_menu":
                 await self.show_main_menu(event)
+            elif data == "back_main":
+                await self.show_main_menu(event)
+            elif data == "cancel_auth":
+                await self.cancel_auth(event)
 
         except Exception as e:
             logger.error(f"خطأ في معالج الأزرار: {e}")
