@@ -158,8 +158,12 @@ class UserbotService:
                         target_chat_id = str(task['target_chat_id']).strip()
                         task_name = task.get('task_name', f"مهمة {task['id']}")
                         
-                        logger.info(f"🔄 بدء توجيه رسالة من {source_chat_id} إلى {target_chat_id} (المهمة: {task_name})")
-                        logger.info(f"📤 تفاصيل التوجيه: مصدر='{source_chat_id}', هدف='{target_chat_id}', مستخدم={user_id}")
+                        # Get task forward mode
+                        forward_mode = task.get('forward_mode', 'forward')
+                        mode_text = "نسخ" if forward_mode == 'copy' else "توجيه"
+                        
+                        logger.info(f"🔄 بدء {mode_text} رسالة من {source_chat_id} إلى {target_chat_id} (المهمة: {task_name})")
+                        logger.info(f"📤 تفاصيل الإرسال: مصدر='{source_chat_id}', هدف='{target_chat_id}', وضع={mode_text}, مستخدم={user_id}")
                         
                         # Parse target chat ID
                         if target_chat_id.startswith('@'):

@@ -23,7 +23,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Tasks table
+            # Tasks table - Updated to support new features
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,17 +33,46 @@ class Database:
                     source_chat_name TEXT,
                     target_chat_id TEXT NOT NULL,
                     target_chat_name TEXT,
+                    forward_mode TEXT DEFAULT 'forward',
                     is_active BOOLEAN DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
 
-            # Add task_name column if it doesn't exist (for existing databases)
+            # Task Sources table - For supporting multiple sources per task
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    chat_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Task Targets table - For supporting multiple targets per task
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_targets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    chat_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Add new columns for existing databases
             try:
                 cursor.execute('ALTER TABLE tasks ADD COLUMN task_name TEXT DEFAULT "مهمة توجيه"')
             except sqlite3.OperationalError:
-                # Column already exists
+                pass
+            
+            try:
+                cursor.execute('ALTER TABLE tasks ADD COLUMN forward_mode TEXT DEFAULT "forward"')
+            except sqlite3.OperationalError:
                 pass
 
             # User sessions table
@@ -157,7 +186,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, 
-                       target_chat_name, is_active, created_at
+                       target_chat_name, forward_mode, is_active, created_at
                 FROM tasks 
                 WHERE user_id = ?
                 ORDER BY created_at DESC
@@ -172,8 +201,9 @@ class Database:
                     'source_chat_name': row[3],
                     'target_chat_id': row[4],
                     'target_chat_name': row[5],
-                    'is_active': bool(row[6]),
-                    'created_at': row[7]
+                    'forward_mode': row[6] or 'forward',
+                    'is_active': bool(row[7]),
+                    'created_at': row[8]
                 })
             return tasks
 
@@ -184,14 +214,14 @@ class Database:
             if user_id:
                 cursor.execute("""
                     SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, 
-                           target_chat_name, is_active, created_at
+                           target_chat_name, forward_mode, is_active, created_at
                     FROM tasks 
                     WHERE id = ? AND user_id = ?
                 """, (task_id, user_id))
             else:
                 cursor.execute("""
                     SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, 
-                           target_chat_name, is_active, created_at
+                           target_chat_name, forward_mode, is_active, created_at
                     FROM tasks 
                     WHERE id = ?
                 """, (task_id,))
@@ -205,8 +235,9 @@ class Database:
                     'source_chat_name': row[3],
                     'target_chat_id': row[4],
                     'target_chat_name': row[5],
-                    'is_active': bool(row[6]),
-                    'created_at': row[7]
+                    'forward_mode': row[6] or 'forward',
+                    'is_active': bool(row[7]),
+                    'created_at': row[8]
                 }
             return None
 
@@ -309,6 +340,161 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM conversation_states WHERE user_id = ?', (user_id,))
             conn.commit()
+
+    # Advanced Task Management Functions
+    def update_task_forward_mode(self, task_id: int, user_id: int, forward_mode: str):
+        """Update task forward mode (copy/forward)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE tasks SET forward_mode = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND user_id = ?
+            ''', (forward_mode, task_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def add_task_source(self, task_id: int, chat_id: str, chat_name: str = None):
+        """Add source to task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO task_sources (task_id, chat_id, chat_name)
+                VALUES (?, ?, ?)
+            ''', (task_id, chat_id, chat_name))
+            conn.commit()
+            return cursor.lastrowid
+
+    def add_task_target(self, task_id: int, chat_id: str, chat_name: str = None):
+        """Add target to task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO task_targets (task_id, chat_id, chat_name)
+                VALUES (?, ?, ?)
+            ''', (task_id, chat_id, chat_name))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_task_sources(self, task_id: int):
+        """Get all sources for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, chat_id, chat_name FROM task_sources
+                WHERE task_id = ?
+                ORDER BY created_at
+            ''', (task_id,))
+            
+            sources = []
+            for row in cursor.fetchall():
+                sources.append({
+                    'id': row[0],
+                    'chat_id': row[1], 
+                    'chat_name': row[2]
+                })
+            return sources
+
+    def get_task_targets(self, task_id: int):
+        """Get all targets for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, chat_id, chat_name FROM task_targets
+                WHERE task_id = ?
+                ORDER BY created_at
+            ''', (task_id,))
+            
+            targets = []
+            for row in cursor.fetchall():
+                targets.append({
+                    'id': row[0],
+                    'chat_id': row[1],
+                    'chat_name': row[2]
+                })
+            return targets
+
+    def remove_task_source(self, source_id: int, task_id: int):
+        """Remove source from task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM task_sources 
+                WHERE id = ? AND task_id = ?
+            ''', (source_id, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def remove_task_target(self, target_id: int, task_id: int):
+        """Remove target from task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM task_targets 
+                WHERE id = ? AND task_id = ?
+            ''', (target_id, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_task_with_sources_targets(self, task_id: int, user_id: int = None):
+        """Get task with all sources and targets"""
+        task = self.get_task(task_id, user_id)
+        if not task:
+            return None
+            
+        # Get sources and targets from new tables if they exist
+        sources = self.get_task_sources(task_id)
+        targets = self.get_task_targets(task_id)
+        
+        # If no sources/targets in new tables, use legacy data
+        if not sources and task.get('source_chat_id'):
+            sources = [{
+                'id': 0,
+                'chat_id': task['source_chat_id'],
+                'chat_name': task['source_chat_name']
+            }]
+            
+        if not targets and task.get('target_chat_id'):
+            targets = [{
+                'id': 0,
+                'chat_id': task['target_chat_id'],
+                'chat_name': task['target_chat_name']
+            }]
+        
+        task['sources'] = sources
+        task['targets'] = targets
+        
+        return task
+
+    def migrate_task_to_new_structure(self, task_id: int):
+        """Migrate existing task to new structure"""
+        task = self.get_task(task_id)
+        if not task:
+            return False
+            
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check if already migrated
+            cursor.execute('SELECT COUNT(*) FROM task_sources WHERE task_id = ?', (task_id,))
+            if cursor.fetchone()[0] > 0:
+                return True  # Already migrated
+            
+            # Migrate source
+            if task.get('source_chat_id'):
+                cursor.execute('''
+                    INSERT INTO task_sources (task_id, chat_id, chat_name)
+                    VALUES (?, ?, ?)
+                ''', (task_id, task['source_chat_id'], task['source_chat_name']))
+            
+            # Migrate target  
+            if task.get('target_chat_id'):
+                cursor.execute('''
+                    INSERT INTO task_targets (task_id, chat_id, chat_name)
+                    VALUES (?, ?, ?)
+                ''', (task_id, task['target_chat_id'], task['target_chat_name']))
+            
+            conn.commit()
+            return True
 
     # Cleanup and maintenance
     def cleanup_old_states(self, hours: int = 24):

@@ -114,6 +114,48 @@ class SimpleTelegramBot:
                 if len(parts) >= 3:
                     task_id = int(parts[2])
                     await self.show_task_details(event, task_id)
+            elif data.startswith("task_settings_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.show_task_settings(event, task_id)
+            elif data.startswith("toggle_forward_mode_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    task_id = int(parts[3])
+                    await self.toggle_forward_mode(event, task_id)
+            elif data.startswith("manage_sources_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.manage_task_sources(event, task_id)
+            elif data.startswith("manage_targets_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.manage_task_targets(event, task_id)
+            elif data.startswith("add_source_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.start_add_source(event, task_id)
+            elif data.startswith("add_target_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.start_add_target(event, task_id)
+            elif data.startswith("remove_source_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    source_id = int(parts[2])
+                    task_id = int(parts[3])
+                    await self.remove_source(event, source_id, task_id)
+            elif data.startswith("remove_target_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    target_id = int(parts[2])
+                    task_id = int(parts[3])
+                    await self.remove_target(event, target_id, task_id)
             elif data == "settings":
                 await self.show_settings(event)
             elif data == "check_userbot":
@@ -162,6 +204,9 @@ class SimpleTelegramBot:
             elif state in ['waiting_task_name', 'waiting_source_chat', 'waiting_target_chat']:
                 await self.handle_task_message(event, state_data)
                 return
+            elif state in ['adding_source', 'adding_target']:
+                await self.handle_add_source_target(event, state_data)
+                return
 
         # Check if this chat is a target chat for any active forwarding task
         chat_id = event.chat_id
@@ -194,6 +239,211 @@ class SimpleTelegramBot:
             await event.respond("👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
         else:
             logger.info(f"🚫 تجاهل الرد التلقائي في محادثة غير خاصة: {event.chat_id}")
+
+    async def show_task_settings(self, event, task_id):
+        """Show task settings menu"""
+        user_id = event.sender_id
+        task = self.db.get_task_with_sources_targets(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        forward_mode = task.get('forward_mode', 'forward')
+        forward_mode_text = "📨 نسخ" if forward_mode == 'copy' else "📩 توجيه"
+        
+        # Count sources and targets
+        sources_count = len(task.get('sources', []))
+        targets_count = len(task.get('targets', []))
+
+        buttons = [
+            [Button.inline(f"🔄 تغيير وضع التوجيه ({forward_mode_text})", f"toggle_forward_mode_{task_id}")],
+            [Button.inline(f"📥 إدارة المصادر ({sources_count})", f"manage_sources_{task_id}")],
+            [Button.inline(f"📤 إدارة الأهداف ({targets_count})", f"manage_targets_{task_id}")],
+            [Button.inline("🔙 رجوع لتفاصيل المهمة", f"task_manage_{task_id}")]
+        ]
+
+        await event.edit(
+            f"⚙️ إعدادات المهمة: {task_name}\n\n"
+            f"📋 الإعدادات الحالية:\n"
+            f"• وضع التوجيه: {forward_mode_text}\n"
+            f"• عدد المصادر: {sources_count}\n"
+            f"• عدد الأهداف: {targets_count}\n\n"
+            f"اختر الإعداد الذي تريد تعديله:",
+            buttons=buttons
+        )
+
+    async def toggle_forward_mode(self, event, task_id):
+        """Toggle forward mode between copy and forward"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        current_mode = task.get('forward_mode', 'forward')
+        new_mode = 'copy' if current_mode == 'forward' else 'forward'
+        
+        success = self.db.update_task_forward_mode(task_id, user_id, new_mode)
+        
+        if success:
+            mode_text = "نسخ" if new_mode == 'copy' else "توجيه"
+            await event.answer(f"✅ تم تغيير وضع التوجيه إلى {mode_text}")
+            await self.show_task_settings(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير وضع التوجيه")
+
+    async def manage_task_sources(self, event, task_id):
+        """Manage task sources"""
+        user_id = event.sender_id
+        task = self.db.get_task_with_sources_targets(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        sources = task.get('sources', [])
+        
+        message = f"📥 إدارة مصادر المهمة: {task.get('task_name', 'مهمة بدون اسم')}\n\n"
+        
+        if not sources:
+            message += "❌ لا توجد مصادر حالياً\n\n"
+        else:
+            message += f"📋 المصادر الحالية ({len(sources)}):""\n\n"
+            for i, source in enumerate(sources[:10], 1):  # Show max 10
+                name = source.get('chat_name') or source.get('chat_id')
+                message += f"{i}. {name}\n"
+                message += f"   📍 `{source.get('chat_id')}`\n\n"
+
+        buttons = [
+            [Button.inline("➕ إضافة مصدر", f"add_source_{task_id}")]
+        ]
+        
+        # Add remove buttons for each source (max 8 buttons per row due to Telegram limits)
+        for source in sources[:8]:  # Limit to avoid too many buttons
+            name = source.get('chat_name') or source.get('chat_id')[:15]
+            if len(name) > 12:
+                name = name[:12] + "..."
+            buttons.append([
+                Button.inline(f"🗑️ حذف {name}", f"remove_source_{source['id']}_{task_id}")
+            ])
+        
+        buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    async def manage_task_targets(self, event, task_id):
+        """Manage task targets"""
+        user_id = event.sender_id
+        task = self.db.get_task_with_sources_targets(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        targets = task.get('targets', [])
+        
+        message = f"📤 إدارة أهداف المهمة: {task.get('task_name', 'مهمة بدون اسم')}\n\n"
+        
+        if not targets:
+            message += "❌ لا توجد أهداف حالياً\n\n"
+        else:
+            message += f"📋 الأهداف الحالية ({len(targets)}):""\n\n"
+            for i, target in enumerate(targets[:10], 1):  # Show max 10
+                name = target.get('chat_name') or target.get('chat_id')
+                message += f"{i}. {name}\n"
+                message += f"   📍 `{target.get('chat_id')}`\n\n"
+
+        buttons = [
+            [Button.inline("➕ إضافة هدف", f"add_target_{task_id}")]
+        ]
+        
+        # Add remove buttons for each target (max 8 buttons per row due to Telegram limits)
+        for target in targets[:8]:  # Limit to avoid too many buttons
+            name = target.get('chat_name') or target.get('chat_id')[:15]
+            if len(name) > 12:
+                name = name[:12] + "..."
+            buttons.append([
+                Button.inline(f"🗑️ حذف {name}", f"remove_target_{target['id']}_{task_id}")
+            ])
+        
+        buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    async def start_add_source(self, event, task_id):
+        """Start adding source to task"""
+        user_id = event.sender_id
+        
+        # Set conversation state
+        import json
+        data = {'task_id': task_id, 'action': 'add_source'}
+        self.db.set_conversation_state(user_id, 'adding_source', json.dumps(data))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"manage_sources_{task_id}")]
+        ]
+
+        await event.edit(
+            "➕ إضافة مصدر جديد\n\n"
+            "أرسل معرف أو رابط المجموعة/القناة المراد إضافتها كمصدر:\n\n"
+            "أمثلة:\n"
+            "• @channelname\n"
+            "• https://t.me/channelname\n"
+            "• -1001234567890\n\n"
+            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات قراءة الرسائل",
+            buttons=buttons
+        )
+
+    async def start_add_target(self, event, task_id):
+        """Start adding target to task"""
+        user_id = event.sender_id
+        
+        # Set conversation state
+        import json
+        data = {'task_id': task_id, 'action': 'add_target'}
+        self.db.set_conversation_state(user_id, 'adding_target', json.dumps(data))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"manage_targets_{task_id}")]
+        ]
+
+        await event.edit(
+            "➕ إضافة هدف جديد\n\n"
+            "أرسل معرف أو رابط المجموعة/القناة المراد إضافتها كهدف:\n\n"
+            "أمثلة:\n"
+            "• @channelname\n"
+            "• https://t.me/channelname\n"
+            "• -1001234567890\n\n"
+            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات إرسال الرسائل",
+            buttons=buttons
+        )
+
+    async def remove_source(self, event, source_id, task_id):
+        """Remove source from task"""
+        user_id = event.sender_id
+        
+        success = self.db.remove_task_source(source_id, task_id)
+        
+        if success:
+            await event.answer("✅ تم حذف المصدر بنجاح")
+            await self.manage_task_sources(event, task_id)
+        else:
+            await event.answer("❌ فشل في حذف المصدر")
+
+    async def remove_target(self, event, target_id, task_id):
+        """Remove target from task"""
+        user_id = event.sender_id
+        
+        success = self.db.remove_task_target(target_id, task_id)
+        
+        if success:
+            await event.answer("✅ تم حذف الهدف بنجاح")
+            await self.manage_task_targets(event, task_id)
+        else:
+            await event.answer("❌ فشل في حذف الهدف")
 
 
     async def show_main_menu(self, event):
@@ -317,8 +567,11 @@ class SimpleTelegramBot:
         toggle_text = "⏸️ إيقاف" if task['is_active'] else "▶️ تشغيل"
         task_name = task.get('task_name', 'مهمة بدون اسم')
 
+        forward_mode_text = "📨 نسخ" if task.get('forward_mode', 'forward') == 'copy' else "📩 توجيه"
+        
         buttons = [
             [Button.inline(toggle_text, f"task_toggle_{task_id}")],
+            [Button.inline("⚙️ إعدادات المهمة", f"task_settings_{task_id}")],
             [Button.inline("🗑️ حذف المهمة", f"task_delete_{task_id}")],
             [Button.inline("📋 عرض المهام", b"list_tasks")]
         ]
@@ -326,7 +579,8 @@ class SimpleTelegramBot:
         await event.edit(
             f"⚙️ تفاصيل المهمة #{task['id']}\n\n"
             f"🏷️ اسم المهمة: {task_name}\n"
-            f"📊 الحالة: {status}\n\n"
+            f"📊 الحالة: {status}\n"
+            f"📋 وضع التوجيه: {forward_mode_text}\n\n"
             f"📥 **المصدر:**\n"
             f"• اسم: {task['source_chat_name'] or 'غير محدد'}\n"
             f"• معرف: `{task['source_chat_id']}`\n\n"
@@ -457,6 +711,78 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في معالجة رسالة المحادثة: {e}")
             await event.respond("❌ حدث خطأ، حاول مرة أخرى")
             self.db.clear_conversation_state(user_id)
+
+    async def handle_add_source_target(self, event, state_data):
+        """Handle adding source or target to task"""
+        user_id = event.sender_id
+        state, data_str = state_data
+        
+        try:
+            import json
+            data = json.loads(data_str) if data_str else {}
+        except:
+            data = {}
+        
+        task_id = data.get('task_id')
+        action = data.get('action')
+        chat_input = event.raw_text.strip()
+        
+        if not task_id or not action:
+            await event.respond("❌ خطأ في البيانات، حاول مرة أخرى")
+            self.db.clear_conversation_state(user_id)
+            return
+        
+        # Parse chat input
+        chat_ids, chat_names = self.parse_chat_input(chat_input)
+        
+        if not chat_ids:
+            await event.respond(
+                "❌ تنسيق معرف المجموعة/القناة غير صحيح\n\n"
+                "استخدم أحد الأشكال التالية:\n"
+                "• @channelname\n"
+                "• https://t.me/channelname\n"
+                "• -1001234567890"
+            )
+            return
+        
+        # Add each chat
+        added_count = 0
+        for i, chat_id in enumerate(chat_ids):
+            chat_name = chat_names[i] if chat_names and i < len(chat_names) else None
+            
+            try:
+                if action == 'add_source':
+                    # Migrate task to new structure if needed
+                    self.db.migrate_task_to_new_structure(task_id)
+                    source_id = self.db.add_task_source(task_id, chat_id, chat_name)
+                    if source_id:
+                        added_count += 1
+                elif action == 'add_target':
+                    # Migrate task to new structure if needed
+                    self.db.migrate_task_to_new_structure(task_id)
+                    target_id = self.db.add_task_target(task_id, chat_id, chat_name)
+                    if target_id:
+                        added_count += 1
+            except Exception as e:
+                logger.error(f"خطأ في إضافة {action}: {e}")
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        # Show success message and return to appropriate menu
+        if added_count > 0:
+            item_name = "مصدر" if action == 'add_source' else "هدف"
+            plural = "مصادر" if action == 'add_source' and added_count > 1 else "أهداف" if action == 'add_target' and added_count > 1 else item_name
+            
+            await event.respond(f"✅ تم إضافة {added_count} {plural} بنجاح!")
+            
+            # Return to appropriate management menu
+            if action == 'add_source':
+                await self.manage_task_sources(event, task_id)
+            else:
+                await self.manage_task_targets(event, task_id)
+        else:
+            await event.respond("❌ فشل في إضافة المدخلات")
 
     async def handle_task_name(self, event, task_name):
         """Handle task name input"""
