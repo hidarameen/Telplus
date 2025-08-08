@@ -4730,7 +4730,7 @@ class SimpleTelegramBot:
                 name = admin['admin_first_name'] or admin['admin_username'] or f"المستخدم {admin['admin_user_id']}"
                 admin_buttons.append([Button.inline(f"{status} {name}", f"toggle_admin_{task_id}_{admin['admin_user_id']}")])
         else:
-            admin_buttons.append([Button.inline("👥 لا يوجد مشرفون لهذه القناة", "none")])
+            admin_buttons.append([Button.inline("🔄 تحديث وجلب المشرفين", f"refresh_source_admins_{task_id}_{source_chat_id}")])
         
         # Control buttons
         control_buttons = [
@@ -4740,12 +4740,13 @@ class SimpleTelegramBot:
         
         buttons = admin_buttons + control_buttons
         
+        status_text = f"👥 قائمة المشرفين:\n✅ = مسموح | ❌ = محظور" if admin_filters else f"📋 لم يتم جلب المشرفين بعد\n🔄 اضغط 'تحديث وجلب المشرفين' للحصول على قائمة المشرفين من تليجرام"
+        
         await event.edit(
             f"👨‍💼 مشرفو القناة: {source_chat_id}\n"
             f"🔗 المهمة: {task_name}\n\n"
-            f"👥 قائمة المشرفين:\n"
-            f"✅ = مسموح | ❌ = محظور\n\n"
-            f"💡 اضغط على اسم مشرف لتغيير حالته",
+            f"{status_text}\n\n"
+            f"💡 بعد جلب المشرفين، يمكنك اختيار من يُسمح له بإرسال الرسائل",
             buttons=buttons
         )
     
@@ -4801,22 +4802,31 @@ class SimpleTelegramBot:
             if user_id in userbot_instance.clients:
                 userbot_client = userbot_instance.clients[user_id]
                 
-                # Get admin list from userbot service
-                participants = await userbot_client.get_participants(int(source_chat_id), filter='admin')
-                
-                # Clear existing admins for this task
-                self.db.clear_admin_filters_for_source(task_id, source_chat_id)
-                
-                # Add new admins
-                admin_count = 0
-                for participant in participants:
-                    self.db.add_admin_filter(task_id, participant.id, 
-                                           participant.username or "", 
-                                           participant.first_name or "", True)
-                    admin_count += 1
-                
-                await event.edit(f"✅ تم تحديث {admin_count} مشرف للقناة")
-                await self.show_source_admins(event, task_id, source_chat_id)
+                # Get admin list from userbot service - ensure we're connected
+                if userbot_client and userbot_client.is_connected():
+                    try:
+                        participants = await userbot_client.get_participants(int(source_chat_id), filter='admin')
+                        
+                        # Clear existing admins for this task
+                        self.db.clear_admin_filters_for_source(task_id, source_chat_id)
+                        
+                        # Add new admins
+                        admin_count = 0
+                        for participant in participants:
+                            self.db.add_admin_filter(task_id, participant.id, 
+                                                   participant.username or "", 
+                                                   participant.first_name or "", True)
+                            admin_count += 1
+                        
+                        await event.edit(f"✅ تم تحديث {admin_count} مشرف للقناة")
+                        await self.show_source_admins(event, task_id, source_chat_id)
+                    except Exception as e:
+                        logger.error(f"❌ خطأ في الحصول على مشرفي القناة {source_chat_id}: {e}")
+                        await event.edit("❌ خطأ في الاتصال بتليجرام. يرجى المحاولة مرة أخرى")
+                else:
+                    await event.edit("❌ غير متصل بتليجرام. يرجى إعادة تسجيل الدخول")
+            else:
+                await event.edit("❌ لم يتم العثور على جلسة تليجرام. يرجى تسجيل الدخول أولاً")
                 
         except Exception as e:
             logger.error(f"❌ خطأ في تحديث مشرفي القناة {source_chat_id}: {e}")
@@ -5106,17 +5116,22 @@ class SimpleTelegramBot:
                     from userbot_service.userbot import userbot_instance
                     if user_id in userbot_instance.clients:
                         userbot_client = userbot_instance.clients[user_id]
-                        participants = await userbot_client.get_participants(int(source_id), filter='admin')
                         
-                        # Clear existing admins for this task
-                        self.db.clear_admin_filters_for_source(task_id, source_id)
-                        
-                        # Add new admins
-                        for participant in participants:
-                            self.db.add_admin_filter(task_id, participant.id, 
-                                                   participant.username or "", 
-                                                   participant.first_name or "", True)
-                        updated_count += 1
+                        # Check if client is connected
+                        if userbot_client and userbot_client.is_connected():
+                            participants = await userbot_client.get_participants(int(source_id), filter='admin')
+                            
+                            # Clear existing admins for this task
+                            self.db.clear_admin_filters_for_source(task_id, source_id)
+                            
+                            # Add new admins
+                            for participant in participants:
+                                self.db.add_admin_filter(task_id, participant.id, 
+                                                       participant.username or "", 
+                                                       participant.first_name or "", True)
+                            updated_count += 1
+                        else:
+                            logger.error(f"❌ عميل UserBot غير متصل للمستخدم {user_id}")
                         
                 except Exception as e:
                     logger.error(f"❌ فشل في تحديث مشرفي {source_id}: {e}")
