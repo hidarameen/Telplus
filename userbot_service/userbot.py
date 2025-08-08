@@ -910,8 +910,10 @@ class UserbotService:
                 logger.error(f"عميل UserBot غير متصل للمستخدم {user_id}")
                 return -1
             
-            # Get channel admins
-            participants = await client.get_participants(int(channel_id), filter='admin')
+            # Try a simpler approach - use iter_participants instead
+            participants = []
+            async for participant in client.iter_participants(int(channel_id), filter='admin'):
+                participants.append(participant)
             
             # Clear existing admins for this source
             self.db.clear_admin_filters_for_source(task_id, channel_id)
