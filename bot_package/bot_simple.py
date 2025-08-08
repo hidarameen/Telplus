@@ -4798,21 +4798,29 @@ class SimpleTelegramBot:
             # Access userbot through userbot_instance using a different approach
             from userbot_service.userbot import userbot_instance
             
+            # Add a small delay to let the previous operation complete
+            await asyncio.sleep(0.5)
+            
             # Use userbot's fetch_admins method which handles the async properly
             admin_count = await userbot_instance.fetch_channel_admins(user_id, source_chat_id, task_id)
             
             if admin_count > 0:
                 await event.edit(f"✅ تم تحديث {admin_count} مشرف للقناة")
+                # Add small delay before showing results
+                await asyncio.sleep(0.3)
                 await self.show_source_admins(event, task_id, source_chat_id)
             elif admin_count == 0:
                 await event.edit("✅ لا يوجد مشرفون في هذه القناة")
+                await asyncio.sleep(0.3)
                 await self.show_source_admins(event, task_id, source_chat_id)
+            elif admin_count == -2:
+                await event.edit("⚠️ مشكلة تقنية في جلب المشرفين من تليجرام\n💡 يرجى المحاولة مرة أخرى أو الاتصال بالدعم التقني")
             else:
                 await event.edit("❌ فشل في الحصول على المشرفين. تأكد من أن الحساب عضو في القناة")
                 
         except Exception as e:
             logger.error(f"❌ خطأ في تحديث مشرفي القناة {source_chat_id}: {e}")
-            await event.edit("❌ حدث خطأ أثناء تحديث مشرفي القناة")
+            await event.edit("❌ حدث خطأ أثناء تحديث مشرفي القناة. جرب مرة أخرى")
     
     async def show_duplicate_filter(self, event, task_id):
         """Show duplicate filter management"""

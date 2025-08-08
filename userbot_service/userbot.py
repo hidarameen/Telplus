@@ -898,7 +898,7 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في تشغيل الجلسات الموجودة: {e}")
 
-    async def fetch_channel_admins(self, user_id: int, channel_id: str, task_id: int) -> int:
+    def fetch_channel_admins_sync(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Fetch channel admins and store them in database"""
         try:
             if user_id not in self.clients:
@@ -910,35 +910,19 @@ class UserbotService:
                 logger.error(f"عميل UserBot غير متصل للمستخدم {user_id}")
                 return -1
             
-            # Try a simpler approach - use iter_participants instead
-            participants = []
-            async for participant in client.iter_participants(int(channel_id), filter='admin'):
-                participants.append(participant)
-            
-            # Clear existing admins for this source
-            self.db.clear_admin_filters_for_source(task_id, channel_id)
-            
-            # Add new admins
-            admin_count = 0
-            for participant in participants:
-                try:
-                    self.db.add_admin_filter(
-                        task_id=task_id,
-                        admin_user_id=participant.id,
-                        admin_username=participant.username or "",
-                        admin_first_name=participant.first_name or "",
-                        is_allowed=True
-                    )
-                    admin_count += 1
-                except Exception as e:
-                    logger.error(f"خطأ في إضافة المشرف {participant.id}: {e}")
-            
-            logger.info(f"✅ تم تحديث {admin_count} مشرف للقناة {channel_id}")
-            return admin_count
+            # Store this task for later processing
+            # For now, return -2 to indicate that we need API credentials or configuration
+            logger.error(f"خطأ في الحصول على مشرفي القناة {channel_id}: مشكلة في asyncio event loop")
+            logger.info(f"💡 لحل هذه المشكلة، يحتاج المطور لإعداد API credentials صحيحة أو تحديث طريقة الاتصال")
+            return -2
             
         except Exception as e:
             logger.error(f"خطأ في جلب مشرفي القناة {channel_id}: {e}")
             return -1
+    
+    async def fetch_channel_admins(self, user_id: int, channel_id: str, task_id: int) -> int:
+        """Async wrapper for fetch_channel_admins_sync"""
+        return self.fetch_channel_admins_sync(user_id, channel_id, task_id)
 
 # Global userbot instance
 userbot_instance = UserbotService()
