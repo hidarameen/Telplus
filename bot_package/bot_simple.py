@@ -3077,8 +3077,10 @@ class SimpleTelegramBot:
                 return
             
             # Edit the message to add buttons
+            # Convert chat_id to proper entity format for bot
+            entity = int(chat_id) if isinstance(chat_id, str) else chat_id
             await self.bot.edit_message(
-                chat_id,
+                entity,
                 message_id,
                 buttons=inline_buttons
             )
