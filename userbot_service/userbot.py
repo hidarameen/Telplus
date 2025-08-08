@@ -182,12 +182,36 @@ class UserbotService:
                             logger.error(f"❌ لا يمكن الوصول للمحادثة الهدف {target_entity}: {entity_error}")
                             continue
                         
-                        # Forward the message
+                        # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")
-                        forwarded_msg = await client.forward_messages(
-                            target_entity,
-                            event.message
-                        )
+                        
+                        if forward_mode == 'copy':
+                            # Copy mode: send as new message
+                            if event.message.text:
+                                # Text message
+                                forwarded_msg = await client.send_message(
+                                    target_entity,
+                                    event.message.text
+                                )
+                            elif event.message.media:
+                                # Media message
+                                forwarded_msg = await client.send_file(
+                                    target_entity,
+                                    event.message.media,
+                                    caption=event.message.text or ""
+                                )
+                            else:
+                                # Fallback to forward for other types
+                                forwarded_msg = await client.forward_messages(
+                                    target_entity,
+                                    event.message
+                                )
+                        else:
+                            # Forward mode: forward message normally
+                            forwarded_msg = await client.forward_messages(
+                                target_entity,
+                                event.message
+                            )
                         
                         if forwarded_msg:
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
