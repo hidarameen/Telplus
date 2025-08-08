@@ -118,9 +118,10 @@ class UserbotService:
 
                     logger.info(f"🔍 فحص المهمة '{task_name}': مصدر='{task_source_id}' ضد '{source_chat_id}', هدف='{task['target_chat_id']}'")
 
-                    # Direct ID comparison (string to string)
-                    if task_source_id == source_chat_id:
-                        logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id}'")
+                    # Convert both IDs to string and compare
+                    source_chat_id_str = str(source_chat_id)
+                    if task_source_id == source_chat_id_str:
+                        logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
                         # Check media filter
                         if self.is_media_allowed(task_id, message_media_type):
@@ -129,7 +130,7 @@ class UserbotService:
                         else:
                             logger.info(f"🚫 الوسائط محظورة لهذه المهمة: {message_media_type}")
                     else:
-                        logger.info(f"❌ لا يوجد تطابق للمهمة '{task_name}': '{task_source_id}' != '{source_chat_id}'")
+                        logger.info(f"❌ لا يوجد تطابق للمهمة '{task_name}': '{task_source_id}' != '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
                 if not matching_tasks:
                     logger.debug(f"لا توجد مهام مطابقة للمحادثة {source_chat_id} للمستخدم {user_id}")
