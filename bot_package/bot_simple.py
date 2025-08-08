@@ -24,7 +24,6 @@ class SimpleTelegramBot:
     def __init__(self):
         self.db = Database()
         self.bot = None
-        self.conversation_states = {}
 
     async def start(self):
         """Start the bot"""
@@ -392,28 +391,28 @@ class SimpleTelegramBot:
         """Handle conversation messages for task creation"""
         user_id = event.sender_id
 
-        if user_id not in self.conversation_states:
+        state_data = self.db.get_conversation_state(user_id)
+        if not state_data:
             return
 
-        state_info = self.conversation_states[user_id]
+        state, data = state_data
         message_text = event.raw_text.strip()
 
         try:
-            if state_info['state'] == 'waiting_source_chat':
+            if state == 'waiting_source_chat':
                 await self.handle_source_chat(event, message_text)
-            elif state_info['state'] == 'waiting_target_chat':
+            elif state == 'waiting_target_chat':
                 await self.handle_target_chat(event, message_text)
-            elif state_info['state'] == 'waiting_phone':
+            elif state == 'waiting_phone':
                 await self.handle_phone_input(event, message_text)
-            elif state_info['state'] == 'waiting_code':
-                await self.handle_code_input(event, message_text, state_info['data'])
-            elif state_info['state'] == 'waiting_password':
-                await self.handle_password_input(event, message_text, state_info['data'])
+            elif state == 'waiting_code':
+                await self.handle_code_input(event, message_text, data)
+            elif state == 'waiting_password':
+                await self.handle_password_input(event, message_text, data)
         except Exception as e:
             logger.error(f"خطأ في معالجة رسالة المحادثة: {e}")
             await event.respond("❌ حدث خطأ، حاول مرة أخرى")
-            if user_id in self.conversation_states:
-                del self.conversation_states[user_id]
+            self.db.clear_conversation_state(user_id)
 
     async def handle_task_name(self, event, task_name):
         """Handle task name input"""
@@ -685,10 +684,8 @@ class SimpleTelegramBot:
         """Start authentication process"""
         user_id = event.sender_id
 
-        self.conversation_states[user_id] = {
-            'state': 'waiting_phone',
-            'data': {}
-        }
+        # Save conversation state in database
+        self.db.set_conversation_state(user_id, 'waiting_phone', {})
 
         buttons = [
             [Button.inline("❌ إلغاء", b"cancel_auth")]
