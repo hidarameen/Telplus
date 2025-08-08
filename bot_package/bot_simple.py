@@ -346,6 +346,60 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد المسح: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("text_replacements_"): # Handler for text replacements
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_text_replacements(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لاستبدال النصوص: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_replacement_"): # Handler for toggling text replacements
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.toggle_text_replacement(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الاستبدال: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("add_replacement_"): # Handler for adding replacements
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.start_add_replacement(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة الاستبدال: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("view_replacements_"): # Handler for viewing replacements
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.view_replacements(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض الاستبدالات: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("clear_replacements_"): # Handler for clearing replacements
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.clear_replacements_confirm(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لحذف الاستبدالات: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("confirm_clear_replacements_"): # Handler for confirming clear replacements
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.clear_replacements_execute(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الاستبدالات: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
 
 
         except Exception as e:
@@ -402,6 +456,10 @@ class SimpleTelegramBot:
                 return
             elif state == 'adding_multiple_words': # Handle adding multiple words state
                 await self.handle_adding_multiple_words(event, state_data)
+                return
+            elif state == 'waiting_text_replacements': # Handle adding text replacements
+                task_id = int(data)
+                await self.handle_add_replacements(event, task_id, event.text)
                 return
 
         # Check if this chat is a target chat for any active forwarding task
@@ -2901,6 +2959,223 @@ class SimpleTelegramBot:
         ]
 
         await event.respond(message, buttons=buttons)
+
+    # Text Replacement Management Functions
+    async def show_text_replacements(self, event, task_id):
+        """Show text replacement management interface"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get replacement settings and count
+        is_enabled = self.db.is_text_replacement_enabled(task_id)
+        replacements = self.db.get_text_replacements(task_id)
+        
+        status = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        toggle_text = "⏸️ إلغاء التفعيل" if is_enabled else "▶️ تفعيل"
+
+        buttons = [
+            [Button.inline(toggle_text, f"toggle_replacement_{task_id}")],
+            [Button.inline(f"➕ إضافة استبدالات", f"add_replacement_{task_id}")],
+            [Button.inline(f"👀 عرض الاستبدالات ({len(replacements)})", f"view_replacements_{task_id}")],
+            [Button.inline("🗑️ إفراغ الاستبدالات", f"clear_replacements_{task_id}")],
+            [Button.inline("🔙 عودة للمهمة", f"task_manage_{task_id}")]
+        ]
+
+        await event.edit(
+            f"🔄 استبدال النصوص - المهمة #{task_id}\n\n"
+            f"📊 **الحالة**: {status}\n"
+            f"📝 **عدد الاستبدالات**: {len(replacements)}\n\n"
+            f"🔄 **الوظيفة**: استبدال كلمات أو عبارات محددة في الرسائل قبل توجيهها إلى الهدف\n\n"
+            f"💡 **مثال**: استبدال 'مرحبا' بـ 'أهلا وسهلا' في جميع الرسائل\n\n"
+            f"⚠️ **ملاحظة**: عند تفعيل الاستبدال، سيتم تحويل وضع التوجيه تلقائياً إلى 'نسخ' للرسائل المعدلة",
+            buttons=buttons
+        )
+
+    async def toggle_text_replacement(self, event, task_id):
+        """Toggle text replacement status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        current_status = self.db.is_text_replacement_enabled(task_id)
+        new_status = not current_status
+        
+        # Update replacement status
+        self.db.set_text_replacement_enabled(task_id, new_status)
+        
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        
+        await event.answer(f"✅ {status_text} استبدال النصوص")
+        await self.show_text_replacements(event, task_id)
+
+    async def start_add_replacement(self, event, task_id):
+        """Start adding text replacements"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Set conversation state
+        self.db.set_conversation_state(user_id, 'waiting_text_replacements', str(task_id))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"text_replacements_{task_id}")]
+        ]
+
+        await event.edit(
+            f"➕ إضافة استبدالات نصية\n\n"
+            f"📝 **تنسيق الإدخال**: كل استبدال في سطر منفصل بالتنسيق التالي:\n"
+            f"`النص_الأصلي >> النص_الجديد`\n\n"
+            f"💡 **أمثلة:**\n"
+            f"`مرحبا >> أهلا وسهلا`\n"
+            f"`عاجل >> 🚨 عاجل 🚨`\n"
+            f"`تليجرام >> تلغرام`\n\n"
+            f"🔧 **ميزات متقدمة** (اختيارية):\n"
+            f"• إضافة `#حساس` في نهاية السطر للحساسية للحروف الكبيرة/الصغيرة\n"
+            f"• إضافة `#كلمة` في نهاية السطر للاستبدال ككلمة كاملة فقط\n\n"
+            f"**مثال متقدم:**\n"
+            f"`Hello >> مرحبا #حساس #كلمة`\n\n"
+            f"⚠️ **ملاحظة**: يمكنك إدخال عدة استبدالات في رسالة واحدة",
+            buttons=buttons
+        )
+
+    async def handle_add_replacements(self, event, task_id, message_text):
+        """Handle adding text replacements"""
+        user_id = event.sender_id
+        
+        # Parse replacements from message
+        replacements_to_add = []
+        
+        lines = message_text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and '>>' in line:
+                # Split by '>>' to get find and replace parts
+                parts = line.split('>>', 1)
+                if len(parts) == 2:
+                    find_text = parts[0].strip()
+                    replace_part = parts[1].strip()
+                    
+                    # Check for advanced options
+                    is_case_sensitive = '#حساس' in replace_part
+                    is_whole_word = '#كلمة' in replace_part
+                    
+                    # Clean replace text from options
+                    replace_text = replace_part.replace('#حساس', '').replace('#كلمة', '').strip()
+                    
+                    if find_text and replace_text:
+                        replacements_to_add.append((find_text, replace_text, is_case_sensitive, is_whole_word))
+        
+        if not replacements_to_add:
+            await event.respond(
+                "❌ لم يتم العثور على استبدالات صحيحة. تأكد من استخدام التنسيق:\n"
+                "`النص_الأصلي >> النص_الجديد`"
+            )
+            return
+
+        # Add replacements to database
+        added_count = self.db.add_multiple_text_replacements(task_id, replacements_to_add)
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        buttons = [
+            [Button.inline("👀 عرض الاستبدالات", f"view_replacements_{task_id}")],
+            [Button.inline("➕ إضافة المزيد", f"add_replacement_{task_id}")],
+            [Button.inline("🔙 عودة للإدارة", f"text_replacements_{task_id}")]
+        ]
+
+        await event.respond(
+            f"✅ تم إضافة {added_count} استبدال نصي\n\n"
+            f"📊 إجمالي الاستبدالات المرسلة: {len(replacements_to_add)}\n"
+            f"📝 الاستبدالات المضافة: {added_count}\n"
+            f"🔄 الاستبدالات المكررة: {len(replacements_to_add) - added_count}\n\n"
+            f"✅ استبدال النصوص جاهز للاستخدام!",
+            buttons=buttons
+        )
+
+    async def view_replacements(self, event, task_id):
+        """View text replacements"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        replacements = self.db.get_text_replacements(task_id)
+
+        if not replacements:
+            message = f"🔄 استبدالات النصوص\n\n❌ لا توجد استبدالات مضافة حالياً"
+        else:
+            message = f"🔄 استبدالات النصوص\n\n📋 الاستبدالات المضافة ({len(replacements)}):\n\n"
+            
+            for i, replacement in enumerate(replacements[:15], 1):  # Show max 15 replacements
+                find_text = replacement['find_text']
+                replace_text = replacement['replace_text']
+                options = []
+                
+                if replacement['is_case_sensitive']:
+                    options.append("حساس للأحرف")
+                if replacement['is_whole_word']:
+                    options.append("كلمة كاملة")
+                
+                options_text = f" ({', '.join(options)})" if options else ""
+                
+                message += f"{i}. `{find_text}` → `{replace_text}`{options_text}\n"
+            
+            if len(replacements) > 15:
+                message += f"\n... و {len(replacements) - 15} استبدال آخر"
+
+        buttons = [
+            [Button.inline("➕ إضافة استبدالات", f"add_replacement_{task_id}")],
+            [Button.inline("🔙 عودة للإدارة", f"text_replacements_{task_id}")]
+        ]
+
+        await event.edit(message, buttons=buttons)
+
+    async def clear_replacements_confirm(self, event, task_id):
+        """Confirm clearing text replacements"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        replacements = self.db.get_text_replacements(task_id)
+
+        buttons = [
+            [Button.inline("✅ نعم، احذف الكل", f"confirm_clear_replacements_{task_id}")],
+            [Button.inline("❌ إلغاء", f"text_replacements_{task_id}")]
+        ]
+
+        await event.edit(
+            f"⚠️ تأكيد حذف الاستبدالات النصية\n\n"
+            f"🗑️ هل أنت متأكد من حذف جميع الاستبدالات ({len(replacements)} استبدال)؟\n\n"
+            f"❌ **تحذير**: هذا الإجراء لا يمكن التراجع عنه!\n\n"
+            f"سيتم حذف جميع استبدالات النصوص نهائياً.",
+            buttons=buttons
+        )
+
+    async def clear_replacements_execute(self, event, task_id):
+        """Execute clearing text replacements"""
+        user_id = event.sender_id
+        
+        # Clear all replacements
+        deleted_count = self.db.clear_text_replacements(task_id)
+        
+        await event.answer(f"✅ تم حذف جميع الاستبدالات النصية")
+        await self.show_text_replacements(event, task_id)
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()
