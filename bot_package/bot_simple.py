@@ -49,7 +49,7 @@ class SimpleTelegramBot:
         if not event.is_private:
             logger.info(f"🚫 تجاهل أمر /start في محادثة غير خاصة: {event.chat_id}")
             return
-        
+
         user_id = event.sender_id
 
         # Check if user is authenticated
@@ -192,7 +192,7 @@ class SimpleTelegramBot:
                 data = json.loads(data_str) if data_str else {}
             except:
                 data = {}
-            
+
             state_data = (state, data)
 
             # Handle authentication states
@@ -210,7 +210,7 @@ class SimpleTelegramBot:
 
         # Check if this chat is a target chat for any active forwarding task
         chat_id = event.chat_id
-        
+
         # Get all active tasks from database
         try:
             with self.db.get_connection() as conn:
@@ -220,20 +220,20 @@ class SimpleTelegramBot:
                     WHERE is_active = 1 AND target_chat_id = ?
                 ''', (str(chat_id),))
                 target_tasks = cursor.fetchall()
-            
+
             # If this chat is a target chat, don't respond
             if target_tasks:
                 logger.info(f"🚫 تجاهل الرسالة في المحادثة الهدف {chat_id}")
                 return
-            
+
             # Also ignore forwarded messages in any case
             if hasattr(event.message, 'forward') and event.message.forward:
                 logger.info(f"🚫 تجاهل الرسالة المُوجهة في {chat_id}")
                 return
-                
+
         except Exception as e:
             logger.error(f"خطأ في فحص المحادثات الهدف: {e}")
-        
+
         # Default response only if not a target chat and not forwarded and in private chat
         if event.is_private:
             await event.respond("👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
@@ -252,7 +252,7 @@ class SimpleTelegramBot:
         task_name = task.get('task_name', 'مهمة بدون اسم')
         forward_mode = task.get('forward_mode', 'forward')
         forward_mode_text = "📨 نسخ" if forward_mode == 'copy' else "📩 توجيه"
-        
+
         # Count sources and targets
         sources_count = len(task.get('sources', []))
         targets_count = len(task.get('targets', []))
@@ -285,13 +285,13 @@ class SimpleTelegramBot:
 
         current_mode = task.get('forward_mode', 'forward')
         new_mode = 'copy' if current_mode == 'forward' else 'forward'
-        
+
         success = self.db.update_task_forward_mode(task_id, user_id, new_mode)
-        
+
         if success:
             mode_text = "نسخ" if new_mode == 'copy' else "توجيه"
             await event.answer(f"✅ تم تغيير وضع التوجيه إلى {mode_text}")
-            
+
             # Force refresh UserBot tasks
             try:
                 from userbot_service.userbot import userbot_instance
@@ -300,7 +300,7 @@ class SimpleTelegramBot:
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير وضع التوجيه للمهمة {task_id}")
             except Exception as e:
                 logger.error(f"خطأ في تحديث مهام UserBot: {e}")
-                
+
             await self.show_task_settings(event, task_id)
         else:
             await event.answer("❌ فشل في تغيير وضع التوجيه")
@@ -308,10 +308,10 @@ class SimpleTelegramBot:
     async def manage_task_sources(self, event, task_id):
         """Manage task sources"""
         user_id = event.sender_id
-        
+
         # First migrate task to new structure if needed
         self.db.migrate_task_to_new_structure(task_id)
-        
+
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
@@ -319,9 +319,9 @@ class SimpleTelegramBot:
             return
 
         sources = task.get('sources', [])
-        
+
         message = f"📥 إدارة مصادر المهمة: {task.get('task_name', 'مهمة بدون اسم')}\n\n"
-        
+
         if not sources:
             message += "❌ لا توجد مصادر حالياً\n\n"
         else:
@@ -334,7 +334,7 @@ class SimpleTelegramBot:
         buttons = [
             [Button.inline("➕ إضافة مصدر", f"add_source_{task_id}")]
         ]
-        
+
         # Add remove buttons for each source (max 8 buttons per row due to Telegram limits)
         for source in sources[:8]:  # Limit to avoid too many buttons
             name = source.get('chat_name') or source.get('chat_id')[:15]
@@ -343,7 +343,7 @@ class SimpleTelegramBot:
             buttons.append([
                 Button.inline(f"🗑️ حذف {name}", f"remove_source_{source['id']}_{task_id}")
             ])
-        
+
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
         await event.edit(message, buttons=buttons)
@@ -351,10 +351,10 @@ class SimpleTelegramBot:
     async def manage_task_targets(self, event, task_id):
         """Manage task targets"""
         user_id = event.sender_id
-        
+
         # First migrate task to new structure if needed
         self.db.migrate_task_to_new_structure(task_id)
-        
+
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
@@ -362,9 +362,9 @@ class SimpleTelegramBot:
             return
 
         targets = task.get('targets', [])
-        
+
         message = f"📤 إدارة أهداف المهمة: {task.get('task_name', 'مهمة بدون اسم')}\n\n"
-        
+
         if not targets:
             message += "❌ لا توجد أهداف حالياً\n\n"
         else:
@@ -377,7 +377,7 @@ class SimpleTelegramBot:
         buttons = [
             [Button.inline("➕ إضافة هدف", f"add_target_{task_id}")]
         ]
-        
+
         # Add remove buttons for each target (max 8 buttons per row due to Telegram limits)
         for target in targets[:8]:  # Limit to avoid too many buttons
             name = target.get('chat_name') or target.get('chat_id')[:15]
@@ -386,7 +386,7 @@ class SimpleTelegramBot:
             buttons.append([
                 Button.inline(f"🗑️ حذف {name}", f"remove_target_{target['id']}_{task_id}")
             ])
-        
+
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
         await event.edit(message, buttons=buttons)
@@ -394,7 +394,7 @@ class SimpleTelegramBot:
     async def start_add_source(self, event, task_id):
         """Start adding source to task"""
         user_id = event.sender_id
-        
+
         # Set conversation state
         import json
         data = {'task_id': task_id, 'action': 'add_source'}
@@ -418,7 +418,7 @@ class SimpleTelegramBot:
     async def start_add_target(self, event, task_id):
         """Start adding target to task"""
         user_id = event.sender_id
-        
+
         # Set conversation state
         import json
         data = {'task_id': task_id, 'action': 'add_target'}
@@ -442,12 +442,12 @@ class SimpleTelegramBot:
     async def remove_source(self, event, source_id, task_id):
         """Remove source from task"""
         user_id = event.sender_id
-        
+
         # First migrate task to new structure if needed
         self.db.migrate_task_to_new_structure(task_id)
-        
+
         success = self.db.remove_task_source(source_id, task_id)
-        
+
         if success:
             # Force refresh UserBot tasks
             try:
@@ -457,7 +457,7 @@ class SimpleTelegramBot:
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف مصدر من المهمة {task_id}")
             except Exception as e:
                 logger.error(f"خطأ في تحديث مهام UserBot: {e}")
-                
+
             await event.answer("✅ تم حذف المصدر بنجاح")
             await self.manage_task_sources(event, task_id)
         else:
@@ -466,12 +466,12 @@ class SimpleTelegramBot:
     async def remove_target(self, event, target_id, task_id):
         """Remove target from task"""
         user_id = event.sender_id
-        
+
         # First migrate task to new structure if needed
         self.db.migrate_task_to_new_structure(task_id)
-        
+
         success = self.db.remove_task_target(target_id, task_id)
-        
+
         if success:
             # Force refresh UserBot tasks
             try:
@@ -481,7 +481,7 @@ class SimpleTelegramBot:
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف هدف من المهمة {task_id}")
             except Exception as e:
                 logger.error(f"خطأ في تحديث مهام UserBot: {e}")
-                
+
             await event.answer("✅ تم حذف الهدف بنجاح")
             await self.manage_task_targets(event, task_id)
         else:
@@ -610,7 +610,7 @@ class SimpleTelegramBot:
         task_name = task.get('task_name', 'مهمة بدون اسم')
 
         forward_mode_text = "📨 نسخ" if task.get('forward_mode', 'forward') == 'copy' else "📩 توجيه"
-        
+
         buttons = [
             [Button.inline(toggle_text, f"task_toggle_{task_id}")],
             [Button.inline("⚙️ إعدادات المهمة", f"task_settings_{task_id}")],
@@ -758,30 +758,30 @@ class SimpleTelegramBot:
         """Handle adding source or target to task"""
         user_id = event.sender_id
         state, data_str = state_data
-        
+
         try:
             import json
             data = json.loads(data_str) if data_str else {}
         except:
             data = {}
-        
+
         task_id = data.get('task_id')
         action = data.get('action')
         chat_input = event.raw_text.strip()
-        
+
         if not task_id or not action:
             await event.respond("❌ خطأ في البيانات، حاول مرة أخرى")
             self.db.clear_conversation_state(user_id)
             return
-        
+
         # Debug: log received data
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"🔍 إضافة مصدر/هدف: task_id={task_id}, action={action}, input='{chat_input}'")
-        
+
         # Parse chat input
         chat_ids, chat_names = self.parse_chat_input(chat_input)
-        
+
         if not chat_ids:
             await event.respond(
                 "❌ تنسيق معرف المجموعة/القناة غير صحيح\n\n"
@@ -791,12 +791,12 @@ class SimpleTelegramBot:
                 "• -1001234567890"
             )
             return
-        
+
         # Add each chat
         added_count = 0
         for i, chat_id in enumerate(chat_ids):
             chat_name = chat_names[i] if chat_names and i < len(chat_names) else None
-            
+
             try:
                 if action == 'add_source':
                     # Migrate task to new structure if needed
@@ -812,15 +812,15 @@ class SimpleTelegramBot:
                         added_count += 1
             except Exception as e:
                 logger.error(f"خطأ في إضافة {action}: {e}")
-        
+
         # Clear conversation state
         self.db.clear_conversation_state(user_id)
-        
+
         # Show success message and return to appropriate menu
         if added_count > 0:
             item_name = "مصدر" if action == 'add_source' else "هدف"
             plural = "مصادر" if action == 'add_source' and added_count > 1 else "أهداف" if action == 'add_target' and added_count > 1 else item_name
-            
+
             # Force refresh UserBot tasks
             try:
                 from userbot_service.userbot import userbot_instance
@@ -829,9 +829,9 @@ class SimpleTelegramBot:
                     logger.info(f"🔄 تم تحديث مهام UserBot بعد إضافة {plural} للمهمة {task_id}")
             except Exception as e:
                 logger.error(f"خطأ في تحديث مهام UserBot: {e}")
-            
+
             await event.respond(f"✅ تم إضافة {added_count} {plural} بنجاح!")
-            
+
             # Return to appropriate management menu
             if action == 'add_source':
                 await self.manage_task_sources(event, task_id)
@@ -944,23 +944,34 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         # Parse target chat
-        target_chat_ids, target_chat_names = self.parse_chat_input(chat_input)
+        target_chat_inputs = [t.strip() for t in chat_input.split(',') if t.strip()]
+        target_chat_ids = []
+        target_chat_names = []
+
+        for target_input in target_chat_inputs:
+            target_id, target_name = await self.parse_chat_input(target_input.strip())
+            if target_id:
+                target_chat_ids.append(target_id)
+                target_chat_names.append(target_name)
+            else:
+                await event.respond(
+                    f"❌ تنسيق معرف غير صحيح: {target_input}\n\n"
+                    "استخدم أحد الأشكال التالية:\n"
+                    "• @channelname\n"
+                    "• https://t.me/channelname\n"
+                    "• -1001234567890\n\n"
+                    "لعدة أهداف، افصل بينها بفاصلة: @channel1, @channel2"
+                )
+                return
 
         if not target_chat_ids:
-            target_chat_id = None
-            target_chat_name = None
-        else:
-            # Take the first one for target (only one target allowed)
-            target_chat_id = target_chat_ids[0]
-            target_chat_name = target_chat_names[0] if target_chat_names else None
-
-        if not target_chat_id:
             await event.respond(
-                "❌ تنسيق معرف المجموعة/القناة غير صحيح\n\n"
+                "❌ يجب تحديد هدف واحد على الأقل\n\n"
                 "استخدم أحد الأشكال التالية:\n"
                 "• @channelname\n"
                 "• https://t.me/channelname\n"
-                "• -1001234567890"
+                "• -1001234567890\n\n"
+                "لعدة أهداف، افصل بينها بفاصلة: @channel1, @channel2"
             )
             return
 
@@ -998,14 +1009,14 @@ class SimpleTelegramBot:
             await event.respond("❌ لم يتم تحديد المصدر، يرجى البدء من جديد")
             return
 
-        # Create task in database
-        task_id = self.db.create_task(
+        # Create task in database with multiple sources and targets
+        task_id = self.db.create_task_with_multiple_sources_targets(
             user_id,
             task_name,
             source_chat_ids,
             source_chat_names,
-            target_chat_id,
-            target_chat_name
+            target_chat_ids,
+            target_chat_names
         )
 
         # Clear conversation state
@@ -1143,23 +1154,23 @@ class SimpleTelegramBot:
     async def handle_relogin(self, event):
         """Handle re-login request - clear session and start fresh authentication"""
         user_id = event.sender_id
-        
+
         # Clear existing session data
         self.db.delete_user_session(user_id)
-        
+
         # Clear conversation state if any
         self.db.clear_conversation_state(user_id)
-        
+
         # Start fresh authentication
         await event.edit(
             "🔄 تم تسجيل الخروج من الجلسة السابقة\n\n"
             "📱 سيتم بدء عملية تسجيل دخول جديدة..."
         )
-        
+
         # Small delay for better UX
         import asyncio
         await asyncio.sleep(1)
-        
+
         # Start authentication process
         await self.start_auth(event)
 
@@ -1209,16 +1220,16 @@ class SimpleTelegramBot:
             # Create unique session for this authentication attempt
             session_name = f'auth_{user_id}_{int(datetime.now().timestamp())}'
             temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
-            
+
             # Connect with timeout
             await asyncio.wait_for(temp_client.connect(), timeout=10)
-            
+
             if not temp_client.is_connected():
                 raise Exception("فشل في الاتصال بخوادم تليجرام")
 
             # Send code request with timeout
             sent_code = await asyncio.wait_for(
-                temp_client.send_code_request(phone), 
+                temp_client.send_code_request(phone),
                 timeout=15
             )
 
@@ -1269,7 +1280,7 @@ class SimpleTelegramBot:
                         time_str = f"{wait_seconds} ثانية"
 
                     await event.respond(
-                        f"⏰ تم طلب رموز كثيرة من تليجرام\n\n"
+                        "⏰ تم طلب رموز كثيرة من تليجرام\n\n"
                         f"🚫 يجب الانتظار: {time_str}\n\n"
                         f"💡 نصائح لتجنب هذه المشكلة:\n"
                         f"• لا تطلب رمز جديد إلا بعد انتهاء الرمز السابق\n"

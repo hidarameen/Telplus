@@ -148,30 +148,60 @@ class Database:
             return cursor.fetchall()
 
     # Task Management
-    def create_task(self, user_id: int, task_name: str, source_chat_ids: list, 
-                   source_chat_names: list, target_chat_id: str, target_chat_name: str) -> int:
-        """Create new forwarding task"""
+    def create_task(self, user_id: int, source_chat_id: str, source_chat_name: str,
+                   target_chat_id: str, target_chat_name: str) -> int:
+        """Create new forwarding task - simplified version for single source/target"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            task_ids = []
+            cursor.execute('''
+                INSERT INTO tasks 
+                (user_id, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
             
-            for i, source_chat_id in enumerate(source_chat_ids):
-                source_chat_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else source_chat_id
-                
-                if source_chat_name is None or source_chat_name == '':
-                    source_chat_name = source_chat_id
-                
+            task_id = cursor.lastrowid
+            conn.commit()
+            return task_id
+
+    def create_task_with_multiple_sources_targets(self, user_id: int, task_name: str, 
+                                                 source_chat_ids: list, source_chat_names: list,
+                                                 target_chat_ids: list, target_chat_names: list) -> int:
+        """Create new forwarding task with multiple sources and targets"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Create main task with the first source and target
+            first_source_id = source_chat_ids[0] if source_chat_ids else ''
+            first_source_name = source_chat_names[0] if source_chat_names else first_source_id
+            first_target_id = target_chat_ids[0] if target_chat_ids else ''
+            first_target_name = target_chat_names[0] if target_chat_names else first_target_id
+            
+            cursor.execute('''
+                INSERT INTO tasks 
+                (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, task_name, first_source_id, first_source_name, first_target_id, first_target_name))
+            
+            task_id = cursor.lastrowid
+            
+            # Add all sources to task_sources table
+            for i, source_id in enumerate(source_chat_ids):
+                source_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else source_id
                 cursor.execute('''
-                    INSERT INTO tasks 
-                    (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
-                
-                task_id = cursor.lastrowid
-                task_ids.append(task_id)
+                    INSERT INTO task_sources (task_id, chat_id, chat_name)
+                    VALUES (?, ?, ?)
+                ''', (task_id, source_id, source_name))
+            
+            # Add all targets to task_targets table
+            for i, target_id in enumerate(target_chat_ids):
+                target_name = target_chat_names[i] if target_chat_names and i < len(target_chat_names) else target_id
+                cursor.execute('''
+                    INSERT INTO task_targets (task_id, chat_id, chat_name)
+                    VALUES (?, ?, ?)
+                ''', (task_id, target_id, target_name))
             
             conn.commit()
-            return task_ids[0] if task_ids else None
+            return task_id
 
     def get_user_tasks(self, user_id: int):
         """Get all tasks for a user"""
@@ -255,7 +285,7 @@ class Database:
             return cursor.rowcount > 0
 
     def get_active_tasks(self, user_id: int) -> List[Dict]:
-        """Get active tasks for user"""
+        """Get active tasks for user with all sources and targets"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -266,15 +296,40 @@ class Database:
 
             tasks = []
             for row in cursor.fetchall():
-                tasks.append({
-                    'id': row['id'],
-                    'task_name': row['task_name'],
-                    'source_chat_id': row['source_chat_id'],
-                    'source_chat_name': row['source_chat_name'],
-                    'target_chat_id': row['target_chat_id'],
-                    'target_chat_name': row['target_chat_name'],
-                    'forward_mode': row['forward_mode'] or 'forward'
-                })
+                task_id = row['id']
+                
+                # Get all sources for this task
+                sources = self.get_task_sources(task_id)
+                if not sources:
+                    # Fallback to legacy data
+                    sources = [{
+                        'id': 0,
+                        'chat_id': row['source_chat_id'],
+                        'chat_name': row['source_chat_name']
+                    }] if row['source_chat_id'] else []
+                
+                # Get all targets for this task  
+                targets = self.get_task_targets(task_id)
+                if not targets:
+                    # Fallback to legacy data
+                    targets = [{
+                        'id': 0,
+                        'chat_id': row['target_chat_id'],
+                        'chat_name': row['target_chat_name']
+                    }] if row['target_chat_id'] else []
+                
+                # Create individual task entries for each source-target combination
+                for source in sources:
+                    for target in targets:
+                        tasks.append({
+                            'id': row['id'],
+                            'task_name': row['task_name'],
+                            'source_chat_id': source['chat_id'],
+                            'source_chat_name': source['chat_name'],
+                            'target_chat_id': target['chat_id'],
+                            'target_chat_name': target['chat_name'],
+                            'forward_mode': row['forward_mode'] or 'forward'
+                        })
             return tasks
 
     def get_all_active_tasks(self):
