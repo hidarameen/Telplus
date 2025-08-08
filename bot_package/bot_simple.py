@@ -608,9 +608,6 @@ class SimpleTelegramBot:
             "• واجهة عربية سهلة الاستخدام",
             buttons=buttons
         )
-
-                buttons=buttons
-            )
     
     async def handle_callback(self, event):
         """Handle button callbacks"""
