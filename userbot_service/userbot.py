@@ -898,6 +898,46 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في تشغيل الجلسات الموجودة: {e}")
 
+    async def fetch_channel_admins(self, user_id: int, channel_id: str, task_id: int) -> int:
+        """Fetch channel admins and store them in database"""
+        try:
+            if user_id not in self.clients:
+                logger.error(f"لا توجد جلسة للمستخدم {user_id}")
+                return -1
+                
+            client = self.clients[user_id]
+            if not client or not client.is_connected():
+                logger.error(f"عميل UserBot غير متصل للمستخدم {user_id}")
+                return -1
+            
+            # Get channel admins
+            participants = await client.get_participants(int(channel_id), filter='admin')
+            
+            # Clear existing admins for this source
+            self.db.clear_admin_filters_for_source(task_id, channel_id)
+            
+            # Add new admins
+            admin_count = 0
+            for participant in participants:
+                try:
+                    self.db.add_admin_filter(
+                        task_id=task_id,
+                        admin_user_id=participant.id,
+                        admin_username=participant.username or "",
+                        admin_first_name=participant.first_name or "",
+                        is_allowed=True
+                    )
+                    admin_count += 1
+                except Exception as e:
+                    logger.error(f"خطأ في إضافة المشرف {participant.id}: {e}")
+            
+            logger.info(f"✅ تم تحديث {admin_count} مشرف للقناة {channel_id}")
+            return admin_count
+            
+        except Exception as e:
+            logger.error(f"خطأ في جلب مشرفي القناة {channel_id}: {e}")
+            return -1
+
 # Global userbot instance
 userbot_instance = UserbotService()
 

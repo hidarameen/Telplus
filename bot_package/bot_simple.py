@@ -4729,18 +4729,16 @@ class SimpleTelegramBot:
                 status = "✅" if admin['is_allowed'] else "❌"
                 name = admin['admin_first_name'] or admin['admin_username'] or f"المستخدم {admin['admin_user_id']}"
                 admin_buttons.append([Button.inline(f"{status} {name}", f"toggle_admin_{task_id}_{admin['admin_user_id']}")])
-        else:
-            admin_buttons.append([Button.inline("🔄 تحديث وجلب المشرفين", f"refresh_source_admins_{task_id}_{source_chat_id}")])
         
-        # Control buttons
+        # Control buttons - only one refresh button
         control_buttons = [
-            [Button.inline("🔄 تحديث مشرفي هذه القناة", f"refresh_source_admins_{task_id}_{source_chat_id}")],
+            [Button.inline("🔄 تحديث قائمة المشرفين", f"refresh_source_admins_{task_id}_{source_chat_id}")],
             [Button.inline("🔙 رجوع لقائمة القنوات", f"admin_list_{task_id}")]
         ]
         
         buttons = admin_buttons + control_buttons
         
-        status_text = f"👥 قائمة المشرفين:\n✅ = مسموح | ❌ = محظور" if admin_filters else f"📋 لم يتم جلب المشرفين بعد\n🔄 اضغط 'تحديث وجلب المشرفين' للحصول على قائمة المشرفين من تليجرام"
+        status_text = f"👥 قائمة المشرفين:\n✅ = مسموح | ❌ = محظور" if admin_filters else f"📋 لم يتم جلب المشرفين بعد\n🔄 اضغط 'تحديث قائمة المشرفين' للحصول على قائمة المشرفين من تليجرام"
         
         await event.edit(
             f"👨‍💼 مشرفو القناة: {source_chat_id}\n"
@@ -4797,36 +4795,20 @@ class SimpleTelegramBot:
         await event.answer("🔄 جاري تحديث مشرفي هذه القناة...")
         
         try:
-            # Access userbot through userbot_instance
+            # Access userbot through userbot_instance using a different approach
             from userbot_service.userbot import userbot_instance
-            if user_id in userbot_instance.clients:
-                userbot_client = userbot_instance.clients[user_id]
-                
-                # Get admin list from userbot service - ensure we're connected
-                if userbot_client and userbot_client.is_connected():
-                    try:
-                        participants = await userbot_client.get_participants(int(source_chat_id), filter='admin')
-                        
-                        # Clear existing admins for this task
-                        self.db.clear_admin_filters_for_source(task_id, source_chat_id)
-                        
-                        # Add new admins
-                        admin_count = 0
-                        for participant in participants:
-                            self.db.add_admin_filter(task_id, participant.id, 
-                                                   participant.username or "", 
-                                                   participant.first_name or "", True)
-                            admin_count += 1
-                        
-                        await event.edit(f"✅ تم تحديث {admin_count} مشرف للقناة")
-                        await self.show_source_admins(event, task_id, source_chat_id)
-                    except Exception as e:
-                        logger.error(f"❌ خطأ في الحصول على مشرفي القناة {source_chat_id}: {e}")
-                        await event.edit("❌ خطأ في الاتصال بتليجرام. يرجى المحاولة مرة أخرى")
-                else:
-                    await event.edit("❌ غير متصل بتليجرام. يرجى إعادة تسجيل الدخول")
+            
+            # Use userbot's fetch_admins method which handles the async properly
+            admin_count = await userbot_instance.fetch_channel_admins(user_id, source_chat_id, task_id)
+            
+            if admin_count > 0:
+                await event.edit(f"✅ تم تحديث {admin_count} مشرف للقناة")
+                await self.show_source_admins(event, task_id, source_chat_id)
+            elif admin_count == 0:
+                await event.edit("✅ لا يوجد مشرفون في هذه القناة")
+                await self.show_source_admins(event, task_id, source_chat_id)
             else:
-                await event.edit("❌ لم يتم العثور على جلسة تليجرام. يرجى تسجيل الدخول أولاً")
+                await event.edit("❌ فشل في الحصول على المشرفين. تأكد من أن الحساب عضو في القناة")
                 
         except Exception as e:
             logger.error(f"❌ خطأ في تحديث مشرفي القناة {source_chat_id}: {e}")
