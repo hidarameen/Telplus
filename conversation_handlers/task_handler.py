@@ -124,6 +124,39 @@ class TaskHandler:
         elif data.startswith("task_delete_"):
             task_id = int(data.split("_")[2])
             await self._delete_task(update, context, task_id)
+        elif data.startswith("word_filters_"):
+            task_id = int(data.split("_")[2])
+            await self._show_word_filters(update, context, task_id)
+        elif data.startswith("toggle_word_filter_"):
+            parts = data.split("_")
+            task_id = int(parts[3])
+            filter_type = parts[4]
+            await self._toggle_word_filter(update, context, task_id, filter_type)
+        elif data.startswith("manage_filter_"):
+            parts = data.split("_")
+            task_id = int(parts[2])
+            filter_type = parts[3]
+            await self._manage_filter_words(update, context, task_id, filter_type)
+        elif data.startswith("view_filter_"):
+            parts = data.split("_")
+            task_id = int(parts[2])
+            filter_type = parts[3]
+            await self._view_filter_words(update, context, task_id, filter_type)
+        elif data.startswith("add_filter_"):
+            parts = data.split("_")
+            task_id = int(parts[2])
+            filter_type = parts[3]
+            await self._start_add_words(update, context, task_id, filter_type)
+        elif data.startswith("clear_filter_"):
+            parts = data.split("_")
+            task_id = int(parts[2])
+            filter_type = parts[3]
+            await self._clear_filter_confirm(update, context, task_id, filter_type)
+        elif data.startswith("confirm_clear_"):
+            parts = data.split("_")
+            task_id = int(parts[2])
+            filter_type = parts[3]
+            await self._clear_filter_execute(update, context, task_id, filter_type)
 
     async def _show_task_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
         """Show task details"""
@@ -140,6 +173,7 @@ class TaskHandler:
 
         keyboard = [
             [InlineKeyboardButton(toggle_text, callback_data=toggle_action)],
+            [InlineKeyboardButton("🔍 فلاتر الكلمات", callback_data=f"word_filters_{task_id}")],
             [InlineKeyboardButton("🗑️ حذف المهمة", callback_data=f"task_delete_{task_id}")],
             [InlineKeyboardButton("📋 عرض المهام", callback_data="list_tasks")]
         ]
@@ -213,6 +247,11 @@ class TaskHandler:
                 await self._handle_source_chat(update, context, message_text)
             elif state == 'waiting_target_chat':
                 await self._handle_target_chat(update, context, message_text, data)
+            elif state.startswith('waiting_filter_words_'):
+                # Handle adding words to filters
+                task_id = int(data.split('_')[0])
+                filter_type = data.split('_')[1]
+                await self._handle_add_words(update, context, task_id, filter_type, message_text)
             else:
                 return False
         except Exception as e:
@@ -349,3 +388,271 @@ class TaskHandler:
                 return str(chat_id), None
             except ValueError:
                 return None, None
+
+    # Word Filter Methods
+    async def _show_word_filters(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Show word filter management interface"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get filter settings and word counts
+        settings = self.db.get_task_word_filter_settings(task_id)
+        whitelist_words = self.db.get_filter_words(task_id, 'whitelist')
+        blacklist_words = self.db.get_filter_words(task_id, 'blacklist')
+
+        whitelist_status = "🟢 مفعل" if settings['whitelist']['enabled'] else "🔴 معطل"
+        blacklist_status = "🟢 مفعل" if settings['blacklist']['enabled'] else "🔴 معطل"
+
+        keyboard = [
+            [InlineKeyboardButton(f"📝 القائمة البيضاء ({len(whitelist_words)} كلمة)", 
+                                callback_data=f"manage_filter_{task_id}_whitelist")],
+            [InlineKeyboardButton(f"🚫 القائمة السوداء ({len(blacklist_words)} كلمة)", 
+                                callback_data=f"manage_filter_{task_id}_blacklist")],
+            [InlineKeyboardButton("🔙 عودة للمهمة", callback_data=f"task_manage_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            f"🔍 فلاتر الكلمات - المهمة #{task_id}\n\n"
+            f"📝 **القائمة البيضاء**: {whitelist_status}\n"
+            f"   • عدد الكلمات: {len(whitelist_words)}\n"
+            f"   • الوظيفة: السماح بالرسائل التي تحتوي على هذه الكلمات فقط\n\n"
+            f"🚫 **القائمة السوداء**: {blacklist_status}\n"
+            f"   • عدد الكلمات: {len(blacklist_words)}\n"
+            f"   • الوظيفة: منع الرسائل التي تحتوي على هذه الكلمات\n\n"
+            f"💡 **ملاحظة**: يمكن تفعيل أو إلغاء تفعيل أي فلتر حسب حاجتك",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def _manage_filter_words(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int, filter_type: str):
+        """Manage words for specific filter type"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get filter settings and words
+        settings = self.db.get_task_word_filter_settings(task_id)
+        filter_words = self.db.get_filter_words(task_id, filter_type)
+        is_enabled = settings[filter_type]['enabled']
+
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+        filter_emoji = "📝" if filter_type == 'whitelist' else "🚫"
+        status = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        toggle_text = "⏸️ إلغاء التفعيل" if is_enabled else "▶️ تفعيل"
+
+        keyboard = [
+            [InlineKeyboardButton(toggle_text, callback_data=f"toggle_word_filter_{task_id}_{filter_type}")],
+            [InlineKeyboardButton(f"👀 عرض الكلمات ({len(filter_words)})", 
+                                callback_data=f"view_filter_{task_id}_{filter_type}")],
+            [InlineKeyboardButton("➕ إضافة كلمات", callback_data=f"add_filter_{task_id}_{filter_type}")],
+        ]
+        
+        if len(filter_words) > 0:
+            keyboard.append([InlineKeyboardButton("🗑️ مسح جميع الكلمات", 
+                                                callback_data=f"clear_filter_{task_id}_{filter_type}")])
+        
+        keyboard.append([InlineKeyboardButton("🔙 عودة للفلاتر", callback_data=f"word_filters_{task_id}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        description = ("السماح بالرسائل التي تحتوي على الكلمات المدرجة فقط" 
+                      if filter_type == 'whitelist' 
+                      else "منع الرسائل التي تحتوي على الكلمات المدرجة")
+
+        await update.callback_query.edit_message_text(
+            f"{filter_emoji} إدارة {filter_name}\n\n"
+            f"📊 الحالة: {status}\n"
+            f"📝 عدد الكلمات: {len(filter_words)}\n"
+            f"🔧 الوظيفة: {description}\n\n"
+            f"اختر إجراء:",
+            reply_markup=reply_markup
+        )
+
+    async def _toggle_word_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int, filter_type: str):
+        """Toggle word filter status"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_task_word_filter_settings(task_id)
+        current_status = settings[filter_type]['enabled']
+        new_status = not current_status
+        
+        # Update filter status
+        self.db.set_word_filter_status(task_id, filter_type, new_status)
+        
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        
+        await update.callback_query.answer(f"✅ {status_text} {filter_name}")
+        await self._manage_filter_words(update, context, task_id, filter_type)
+
+    async def _view_filter_words(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int, filter_type: str):
+        """View words in a filter"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        filter_words = self.db.get_filter_words(task_id, filter_type)
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+        filter_emoji = "📝" if filter_type == 'whitelist' else "🚫"
+
+        if not filter_words:
+            message = f"{filter_emoji} {filter_name}\n\n❌ لا توجد كلمات مدرجة حالياً"
+        else:
+            message = f"{filter_emoji} {filter_name}\n\n📋 الكلمات المدرجة ({len(filter_words)}):\n\n"
+            for i, word_data in enumerate(filter_words[:20], 1):  # Show max 20 words
+                word = word_data[2]  # word_or_phrase from tuple
+                message += f"{i}. {word}\n"
+            
+            if len(filter_words) > 20:
+                message += f"\n... و {len(filter_words) - 20} كلمة أخرى"
+
+        keyboard = [
+            [InlineKeyboardButton("➕ إضافة كلمات", callback_data=f"add_filter_{task_id}_{filter_type}")],
+            [InlineKeyboardButton("🔙 عودة للإدارة", callback_data=f"manage_filter_{task_id}_{filter_type}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(message, reply_markup=reply_markup)
+
+    async def _start_add_words(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int, filter_type: str):
+        """Start adding words to filter"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+        
+        # Set conversation state
+        state_data = f"{task_id}_{filter_type}"
+        self.db.set_conversation_state(user_id, f'waiting_filter_words_{filter_type}', state_data)
+
+        keyboard = [
+            [InlineKeyboardButton("❌ إلغاء", callback_data=f"manage_filter_{task_id}_{filter_type}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            f"➕ إضافة كلمات إلى {filter_name}\n\n"
+            f"📝 أرسل الكلمات أو العبارات التي تريد إضافتها:\n\n"
+            f"💡 **طرق الإدخال المتاحة:**\n"
+            f"• كل كلمة في سطر منفصل\n"
+            f"• فصل بين الكلمات بفواصل (،)\n"
+            f"• يمكن إدخال عبارات متكاملة\n\n"
+            f"**مثال:**\n"
+            f"كلمة واحدة\n"
+            f"كلمة ثانية، كلمة ثالثة\n"
+            f"عبارة متكاملة\n\n"
+            f"⚠️ **ملاحظة**: الكلمات المكررة لن تتم إضافتها مرة أخرى",
+            reply_markup=reply_markup
+        )
+
+    async def _handle_add_words(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                               task_id: int, filter_type: str, message_text: str):
+        """Handle adding words to filter"""
+        user_id = update.effective_user.id
+        
+        # Parse words from message
+        words_to_add = []
+        
+        # Split by lines first, then by commas
+        lines = message_text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line:
+                # Split by comma and clean up
+                words_in_line = [word.strip() for word in line.split('،')]
+                words_to_add.extend([word for word in words_in_line if word])
+        
+        if not words_to_add:
+            await update.message.reply_text(
+                "❌ لم يتم العثور على كلمات للإضافة. حاول مرة أخرى."
+            )
+            return
+
+        # Add words to filter
+        added_count = self.db.add_multiple_filter_words(task_id, filter_type, words_to_add)
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+        
+        keyboard = [
+            [InlineKeyboardButton("👀 عرض الكلمات", callback_data=f"view_filter_{task_id}_{filter_type}")],
+            [InlineKeyboardButton("➕ إضافة المزيد", callback_data=f"add_filter_{task_id}_{filter_type}")],
+            [InlineKeyboardButton("🔙 عودة للإدارة", callback_data=f"manage_filter_{task_id}_{filter_type}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(
+            f"✅ تم إضافة {added_count} كلمة إلى {filter_name}\n\n"
+            f"📊 إجمالي الكلمات المرسلة: {len(words_to_add)}\n"
+            f"📝 الكلمات المضافة: {added_count}\n"
+            f"🔄 الكلمات المكررة: {len(words_to_add) - added_count}\n\n"
+            f"✅ الفلتر جاهز للاستخدام!",
+            reply_markup=reply_markup
+        )
+
+    async def _clear_filter_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                   task_id: int, filter_type: str):
+        """Confirm clearing filter"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        filter_words = self.db.get_filter_words(task_id, filter_type)
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+
+        keyboard = [
+            [InlineKeyboardButton("✅ نعم، احذف الكل", callback_data=f"confirm_clear_{task_id}_{filter_type}")],
+            [InlineKeyboardButton("❌ إلغاء", callback_data=f"manage_filter_{task_id}_{filter_type}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            f"⚠️ تأكيد حذف {filter_name}\n\n"
+            f"🗑️ هل أنت متأكد من حذف جميع الكلمات ({len(filter_words)} كلمة)؟\n\n"
+            f"❌ **تحذير**: هذا الإجراء لا يمكن التراجع عنه!\n\n"
+            f"سيتم حذف جميع الكلمات من {filter_name} نهائياً.",
+            reply_markup=reply_markup
+        )
+
+    async def _clear_filter_execute(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                   task_id: int, filter_type: str):
+        """Execute filter clearing"""
+        user_id = update.effective_user.id
+        
+        # Clear all words from filter
+        filter_id = self.db.get_word_filter_id(task_id, filter_type)
+        
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM word_filter_entries WHERE filter_id = ?', (filter_id,))
+            deleted_count = cursor.rowcount
+            conn.commit()
+        
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+        
+        await update.callback_query.answer(f"✅ تم حذف {deleted_count} كلمة من {filter_name}")
+        await self._manage_filter_words(update, context, task_id, filter_type)

@@ -102,60 +102,104 @@ class SimpleTelegramBot:
             elif data.startswith("task_toggle_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.toggle_task(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.toggle_task(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للتبديل: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("task_delete_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.delete_task(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.delete_task(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للحذف: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("task_manage_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.show_task_details(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_task_details(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإدارة: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("task_settings_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.show_task_settings(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_task_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإعدادات: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_forward_mode_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
-                    task_id = int(parts[3])
-                    await self.toggle_forward_mode(event, task_id)
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_forward_mode(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع التوجيه: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_sources_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.manage_task_sources(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.manage_task_sources(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة المصادر: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_targets_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.manage_task_targets(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.manage_task_targets(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة الأهداف: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("add_source_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.start_add_source(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.start_add_source(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة مصدر: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("add_target_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.start_add_target(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.start_add_target(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة هدف: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("remove_source_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
-                    source_id = int(parts[2])
-                    task_id = int(parts[3])
-                    await self.remove_source(event, source_id, task_id)
+                    try:
+                        source_id = int(parts[2])
+                        task_id = int(parts[3])
+                        await self.remove_source(event, source_id, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المصدر/المهمة لحذف المصدر: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("remove_target_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
-                    target_id = int(parts[2])
-                    task_id = int(parts[3])
-                    await self.remove_target(event, target_id, task_id)
+                    try:
+                        target_id = int(parts[2])
+                        task_id = int(parts[3])
+                        await self.remove_target(event, target_id, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف الهدف/المهمة لحذف الهدف: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data == "settings":
                 await self.show_settings(event)
             elif data == "check_userbot":
@@ -173,14 +217,22 @@ class SimpleTelegramBot:
             elif data.startswith("media_filters_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
-                    task_id = int(parts[2])
-                    await self.show_media_filters(event, task_id)
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_media_filters(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر الوسائط: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_media_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
-                    task_id = int(parts[2])
-                    media_type = parts[3]
-                    await self.toggle_media_filter(event, task_id, media_type)
+                    try:
+                        task_id = int(parts[2])
+                        media_type = parts[3]
+                        await self.toggle_media_filter(event, task_id, media_type)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فلتر الوسائط: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("allow_all_media_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -229,16 +281,24 @@ class SimpleTelegramBot:
             elif data.startswith("add_word_"): # Handler for adding a word to a filter
                 parts = data.split("_")
                 if len(parts) >= 5:
-                    task_id = int(parts[2])
-                    filter_type = parts[3]
-                    await self.start_add_word(event, task_id, filter_type)
+                    try:
+                        task_id = int(parts[2])
+                        filter_type = parts[3]
+                        await self.start_add_word(event, task_id, filter_type)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة كلمة: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("remove_word_"): # Handler for removing a word from a filter
                 parts = data.split("_")
                 if len(parts) >= 5:
-                    word_id = int(parts[2])
-                    task_id = int(parts[3])
-                    filter_type = parts[4]
-                    await self.remove_word(event, word_id, task_id, filter_type)
+                    try:
+                        word_id = int(parts[2])
+                        task_id = int(parts[3])
+                        filter_type = parts[4]
+                        await self.remove_word(event, word_id, task_id, filter_type)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف الكلمة/المهمة لحذف الكلمة: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("view_filter_"): # Handler for viewing filter words
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -257,9 +317,12 @@ class SimpleTelegramBot:
                 parts = data.split("_")
                 if len(parts) >= 5:
                     try:
-                        task_id = int(parts[3])
-                        filter_type = parts[4]
-                        await self.start_adding_multiple_words(event, task_id, filter_type)
+                        logger.info(f"🔍 Processing add_multiple_words: data='{data}', parts={parts}")
+                        # add_multiple_words_6_whitelist -> ['add', 'multiple', 'words', '6', 'whitelist']
+                        task_id = int(parts[3])  # parts[3] = '6'
+                        filter_type = parts[4]   # parts[4] = 'whitelist'
+                        logger.info(f"✅ Parsed task_id={task_id}, filter_type={filter_type}")
+                        await self.start_add_multiple_words(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة كلمات متعددة: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -286,8 +349,13 @@ class SimpleTelegramBot:
 
 
         except Exception as e:
-            logger.error(f"خطأ في معالج الأزرار: {e}")
-            await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            import traceback
+            logger.error(f"خطأ في معالج الأزرار: {e}, data='{data}', user_id={user_id}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            try:
+                await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            except:
+                pass  # Sometimes event.answer fails if callback is already processed
 
     async def handle_message(self, event):
         """Handle text messages"""

@@ -753,11 +753,11 @@ class Database:
                 ORDER BY word_or_phrase
             ''', (filter_id,))
             
-            # Return tuples in format (id, filter_id, word_or_phrase)
-            # This matches the expected format used in view_filter_words function
+            # Return tuples in format (id, filter_id, word_or_phrase, is_case_sensitive)
+            # This includes case sensitivity info to avoid separate queries
             words = []
             for row in cursor.fetchall():
-                words.append((row['id'], filter_id, row['word_or_phrase']))
+                words.append((row['id'], filter_id, row['word_or_phrase'], row['is_case_sensitive']))
             return words
 
     def get_word_id(self, task_id: int, filter_type: str, word: str):
@@ -838,8 +838,10 @@ class Database:
                 found_match = False
                 
                 for word_data in whitelist_words:
-                    word = word_data['word']
-                    if word_data['case_sensitive']:
+                    word = word_data[2]  # word_or_phrase from tuple
+                    is_case_sensitive = word_data[3]  # is_case_sensitive from tuple
+                    
+                    if is_case_sensitive:
                         if word in message_text:
                             found_match = True
                             break
@@ -858,8 +860,10 @@ class Database:
             message_lower = message_text.lower()
             
             for word_data in blacklist_words:
-                word = word_data['word']
-                if word_data['case_sensitive']:
+                word = word_data[2]  # word_or_phrase from tuple
+                is_case_sensitive = word_data[3]  # is_case_sensitive from tuple
+                
+                if is_case_sensitive:
                     if word in message_text:
                         logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
                         return False
