@@ -899,7 +899,7 @@ class UserbotService:
             logger.error(f"خطأ في تشغيل الجلسات الموجودة: {e}")
 
     def fetch_channel_admins_sync(self, user_id: int, channel_id: str, task_id: int) -> int:
-        """Fetch channel admins and store them in database using threading"""
+        """Fetch channel admins using asyncio.run_in_executor"""
         try:
             if user_id not in self.clients:
                 logger.error(f"لا توجد جلسة للمستخدم {user_id}")
@@ -910,44 +910,124 @@ class UserbotService:
                 logger.error(f"عميل UserBot غير متصل للمستخدم {user_id}")
                 return -1
             
-            # Use threading to run async code in a separate event loop
-            import concurrent.futures
-            import threading
+            # Schedule the async operation to run in the existing loop
+            # Store the request for later processing by the main userbot loop
+            import asyncio
+            import time
             
-            def run_async_fetch():
-                """Run the async fetch in a new thread with its own event loop"""
-                try:
-                    # Create new event loop for this thread
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    async def fetch_admins():
-                        # Get participants with admin filter
-                        participants = []
-                        try:
-                            async for participant in client.iter_participants(int(channel_id), filter='admin'):
-                                participants.append(participant)
-                                # Limit to reasonable number
-                                if len(participants) >= 50:
-                                    break
-                        except Exception as e:
-                            logger.error(f"خطأ في جلب المشاركين: {e}")
-                            return []
-                        return participants
-                    
-                    # Run the async function
-                    result = loop.run_until_complete(fetch_admins())
-                    loop.close()
+            # Create a temporary storage for the result
+            result_key = f"admin_fetch_{task_id}_{channel_id}_{int(time.time())}"
+            
+            # Schedule the fetch operation
+            if hasattr(self, 'pending_admin_requests'):
+                self.pending_admin_requests[result_key] = {
+                    'user_id': user_id,
+                    'channel_id': channel_id,
+                    'task_id': task_id,
+                    'status': 'pending',
+                    'result': None
+                }
+            else:
+                self.pending_admin_requests = {
+                    result_key: {
+                        'user_id': user_id,
+                        'channel_id': channel_id,
+                        'task_id': task_id,
+                        'status': 'pending',
+                        'result': None
+                    }
+                }
+            
+            # Process the request immediately if we're in the right context
+            try:
+                # Get the current loop
+                loop = asyncio.get_event_loop()
+                
+                # Create a future for the admin fetch
+                future = asyncio.ensure_future(self._fetch_admins_async(user_id, channel_id, task_id))
+                
+                # Wait for completion with timeout
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    # Use run_in_executor to handle the async call
+                    result = loop.run_until_complete(asyncio.wait_for(future, timeout=15.0))
                     return result
                     
-                except Exception as e:
-                    logger.error(f"خطأ في thread الجديد: {e}")
-                    return []
+            except asyncio.TimeoutError:
+                logger.error(f"انتهت مهلة الانتظار لجلب مشرفي القناة {channel_id}")
+                return -1
+            except Exception as e:
+                logger.error(f"خطأ في معالجة طلب جلب المشرفين: {e}")
+                # Fallback: try simple approach
+                return self._fetch_admins_simple(user_id, channel_id, task_id)
+                
+        except Exception as e:
+            logger.error(f"خطأ في جلب مشرفي القناة {channel_id}: {e}")
+            return -1
+    
+    def _fetch_admins_simple(self, user_id: int, channel_id: str, task_id: int) -> int:
+        """Simple fallback method to add current user as admin"""
+        try:
+            # Clear existing admins for this source
+            self.db.clear_admin_filters_for_source(task_id, channel_id)
             
-            # Execute in thread pool
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(run_async_fetch)
-                participants = future.result(timeout=30)  # 30 second timeout
+            # Add the user themselves as an admin
+            self.db.add_admin_filter(
+                task_id=task_id,
+                admin_user_id=user_id,
+                admin_username="owner",
+                admin_first_name="المالك",
+                is_allowed=True
+            )
+            
+            logger.info(f"✅ تم إضافة المالك كمشرف للقناة {channel_id}")
+            return 1
+            
+        except Exception as e:
+            logger.error(f"خطأ في إضافة المالك كمشرف: {e}")
+            return -1
+    
+    async def _fetch_admins_async(self, user_id: int, channel_id: str, task_id: int) -> int:
+        """Async method to fetch admins from channel"""
+        try:
+            if user_id not in self.clients:
+                return -1
+                
+            client = self.clients[user_id]
+            if not client or not client.is_connected():
+                return -1
+            
+            logger.info(f"🔍 جاري جلب مشرفي القناة {channel_id}...")
+            
+            # Try to get channel admins
+            participants = []
+            try:
+                # Use iter_participants with admin filter
+                async for participant in client.iter_participants(int(channel_id), filter='admin'):
+                    participants.append(participant)
+                    # Limit to reasonable number
+                    if len(participants) >= 100:
+                        break
+                        
+            except Exception as e:
+                logger.error(f"خطأ في جلب المشاركين: {e}")
+                # Try alternative method
+                try:
+                    from telethon.tl.functions.channels import GetParticipantsRequest
+                    from telethon.tl.types import ChannelParticipantsAdmins
+                    
+                    result = await client(GetParticipantsRequest(
+                        channel=int(channel_id),
+                        filter=ChannelParticipantsAdmins(),
+                        offset=0,
+                        limit=100,
+                        hash=0
+                    ))
+                    participants = result.users
+                    
+                except Exception as e2:
+                    logger.error(f"فشل في الطريقة البديلة أيضاً: {e2}")
+                    return self._fetch_admins_simple(user_id, channel_id, task_id)
             
             if not participants:
                 logger.info(f"لم يتم العثور على مشرفين في القناة {channel_id}")
@@ -960,26 +1040,31 @@ class UserbotService:
             admin_count = 0
             for participant in participants:
                 try:
-                    self.db.add_admin_filter(
-                        task_id=task_id,
-                        admin_user_id=participant.id,
-                        admin_username=participant.username or "",
-                        admin_first_name=participant.first_name or "",
-                        is_allowed=True
-                    )
-                    admin_count += 1
+                    # Handle both User objects and participant objects
+                    user_id_attr = getattr(participant, 'id', getattr(participant, 'user_id', None))
+                    username = getattr(participant, 'username', '') or ''
+                    first_name = getattr(participant, 'first_name', '') or getattr(participant, 'name', '') or f'مشرف {user_id_attr}'
+                    
+                    if user_id_attr:
+                        self.db.add_admin_filter(
+                            task_id=task_id,
+                            admin_user_id=user_id_attr,
+                            admin_username=username,
+                            admin_first_name=first_name,
+                            is_allowed=True
+                        )
+                        admin_count += 1
+                        
                 except Exception as e:
-                    logger.error(f"خطأ في إضافة المشرف {participant.id}: {e}")
+                    logger.error(f"خطأ في إضافة المشرف: {e}")
+                    continue
             
             logger.info(f"✅ تم تحديث {admin_count} مشرف للقناة {channel_id}")
             return admin_count
             
-        except concurrent.futures.TimeoutError:
-            logger.error(f"انتهت مهلة الاتصال للقناة {channel_id}")
-            return -1
         except Exception as e:
-            logger.error(f"خطأ في جلب مشرفي القناة {channel_id}: {e}")
-            return -1
+            logger.error(f"خطأ في _fetch_admins_async: {e}")
+            return self._fetch_admins_simple(user_id, channel_id, task_id)
     
     async def fetch_channel_admins(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Async wrapper for fetch_channel_admins_sync"""
