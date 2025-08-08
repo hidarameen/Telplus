@@ -119,6 +119,40 @@ class Database:
                 )
             ''')
 
+            # Task forwarding settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_forwarding_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    link_preview_enabled INTEGER DEFAULT 1,
+                    pin_message_enabled INTEGER DEFAULT 0,
+                    silent_notifications INTEGER DEFAULT 0,
+                    auto_delete_enabled INTEGER DEFAULT 0,
+                    auto_delete_time INTEGER DEFAULT 3600,
+                    sync_edit_enabled INTEGER DEFAULT 0,
+                    sync_delete_enabled INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Message mapping table for sync operations
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS message_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    source_chat_id TEXT NOT NULL,
+                    source_message_id INTEGER NOT NULL,
+                    target_chat_id TEXT NOT NULL,
+                    target_message_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, source_chat_id, source_message_id, target_chat_id)
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
