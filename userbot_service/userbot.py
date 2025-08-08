@@ -125,7 +125,9 @@ class UserbotService:
                         logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
                         # Check admin filter first (if enabled)
+                        logger.warning(f"🔍 بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id}")
                         admin_allowed = self.is_admin_allowed(task_id, event.sender_id)
+                        logger.warning(f"🔍 نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed}")
                         
                         # Check media filter
                         media_allowed = self.is_media_allowed(task_id, message_media_type)
@@ -584,18 +586,25 @@ class UserbotService:
             from database.database import Database
             db = Database()
             
+            logger.warning(f"🔍 [ADMIN FILTER DEBUG] المهمة: {task_id}, المرسل: {sender_id}")
+            
             # Check if admin filter is enabled for this task
             admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
+            logger.warning(f"🔍 [ADMIN FILTER DEBUG] فلتر المشرفين مُفعل: {admin_filter_enabled}")
+            
             if not admin_filter_enabled:
-                logger.info(f"🔍 فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
+                logger.warning(f"🔍 فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
                 return True
             
             # Check if sender is in allowed admin list
             is_allowed = db.is_admin_allowed(task_id, sender_id)
-            logger.info(f"🔍 فحص فلتر المشرفين: المهمة {task_id}, المرسل {sender_id}, مسموح: {is_allowed}")
+            logger.warning(f"🔍 [ADMIN FILTER DEBUG] نتيجة فحص قاعدة البيانات: {is_allowed}")
+            logger.warning(f"🔍 فحص فلتر المشرفين: المهمة {task_id}, المرسل {sender_id}, مسموح: {is_allowed}")
             return is_allowed
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
+            import traceback
+            logger.error(f"تفاصيل الخطأ: {traceback.format_exc()}")
             return True  # Default to allowed on error
 
     def is_message_allowed_by_word_filter(self, task_id, message_text):
