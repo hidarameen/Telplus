@@ -103,6 +103,32 @@ class Database:
                 )
             ''')
 
+            # Task word filters table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_word_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    filter_type TEXT NOT NULL CHECK (filter_type IN ('whitelist', 'blacklist')),
+                    is_enabled BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, filter_type)
+                )
+            ''')
+
+            # Word filter entries table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS word_filter_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    filter_id INTEGER NOT NULL,
+                    word_or_phrase TEXT NOT NULL,
+                    is_case_sensitive BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (filter_id) REFERENCES task_word_filters (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
@@ -622,3 +648,173 @@ class Database:
             cursor.execute('DELETE FROM task_media_filters WHERE task_id = ?', (task_id,))
             conn.commit()
             return cursor.rowcount >= 0
+
+    # Word Filters Management
+    def get_task_word_filter_settings(self, task_id: int):
+        """Get word filter settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT filter_type, is_enabled FROM task_word_filters
+                WHERE task_id = ?
+            ''', (task_id,))
+            
+            settings = {}
+            for row in cursor.fetchall():
+                settings[row['filter_type']] = {
+                    'enabled': bool(row['is_enabled'])
+                }
+            
+            # Set defaults if not exist
+            if 'whitelist' not in settings:
+                settings['whitelist'] = {'enabled': False}
+            if 'blacklist' not in settings:
+                settings['blacklist'] = {'enabled': False}
+                
+            return settings
+
+    def set_word_filter_status(self, task_id: int, filter_type: str, is_enabled: bool):
+        """Enable/disable word filter for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_word_filters 
+                (task_id, filter_type, is_enabled, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (task_id, filter_type, is_enabled))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_word_filter_id(self, task_id: int, filter_type: str):
+        """Get word filter ID, create if doesn't exist"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id FROM task_word_filters
+                WHERE task_id = ? AND filter_type = ?
+            ''', (task_id, filter_type))
+            
+            result = cursor.fetchone()
+            if result:
+                return result['id']
+            
+            # Create new filter
+            cursor.execute('''
+                INSERT INTO task_word_filters (task_id, filter_type, is_enabled)
+                VALUES (?, ?, FALSE)
+            ''', (task_id, filter_type))
+            conn.commit()
+            return cursor.lastrowid
+
+    def add_word_to_filter(self, task_id: int, filter_type: str, word_or_phrase: str, is_case_sensitive: bool = False):
+        """Add word/phrase to filter list"""
+        filter_id = self.get_word_filter_id(task_id, filter_type)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Check if word already exists
+            cursor.execute('''
+                SELECT id FROM word_filter_entries
+                WHERE filter_id = ? AND word_or_phrase = ?
+            ''', (filter_id, word_or_phrase))
+            
+            if cursor.fetchone():
+                return False  # Word already exists
+            
+            cursor.execute('''
+                INSERT INTO word_filter_entries (filter_id, word_or_phrase, is_case_sensitive)
+                VALUES (?, ?, ?)
+            ''', (filter_id, word_or_phrase, is_case_sensitive))
+            conn.commit()
+            return cursor.lastrowid
+
+    def remove_word_from_filter(self, task_id: int, filter_type: str, word_or_phrase: str):
+        """Remove word/phrase from filter list"""
+        filter_id = self.get_word_filter_id(task_id, filter_type)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM word_filter_entries
+                WHERE filter_id = ? AND word_or_phrase = ?
+            ''', (filter_id, word_or_phrase))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_filter_words(self, task_id: int, filter_type: str):
+        """Get all words/phrases for a filter"""
+        filter_id = self.get_word_filter_id(task_id, filter_type)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT word_or_phrase, is_case_sensitive FROM word_filter_entries
+                WHERE filter_id = ?
+                ORDER BY word_or_phrase
+            ''', (filter_id,))
+            
+            words = []
+            for row in cursor.fetchall():
+                words.append({
+                    'word': row['word_or_phrase'],
+                    'case_sensitive': bool(row['is_case_sensitive'])
+                })
+            return words
+
+    def clear_filter_words(self, task_id: int, filter_type: str):
+        """Clear all words from filter"""
+        filter_id = self.get_word_filter_id(task_id, filter_type)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM word_filter_entries WHERE filter_id = ?', (filter_id,))
+            conn.commit()
+            return cursor.rowcount >= 0
+
+    def is_message_allowed_by_word_filter(self, task_id: int, message_text: str):
+        """Check if message is allowed by word filters"""
+        if not message_text:
+            return True  # No text to filter
+        
+        settings = self.get_task_word_filter_settings(task_id)
+        
+        # Check whitelist first (if enabled)
+        if settings['whitelist']['enabled']:
+            whitelist_words = self.get_filter_words(task_id, 'whitelist')
+            if whitelist_words:  # If whitelist has words
+                # Message must contain at least one whitelisted word/phrase
+                message_lower = message_text.lower()
+                found_match = False
+                
+                for word_data in whitelist_words:
+                    word = word_data['word']
+                    if word_data['case_sensitive']:
+                        if word in message_text:
+                            found_match = True
+                            break
+                    else:
+                        if word.lower() in message_lower:
+                            found_match = True
+                            break
+                
+                if not found_match:
+                    logger.info(f"🚫 الرسالة محظورة: لا تحتوي على كلمات من القائمة البيضاء")
+                    return False
+        
+        # Check blacklist (if enabled)
+        if settings['blacklist']['enabled']:
+            blacklist_words = self.get_filter_words(task_id, 'blacklist')
+            message_lower = message_text.lower()
+            
+            for word_data in blacklist_words:
+                word = word_data['word']
+                if word_data['case_sensitive']:
+                    if word in message_text:
+                        logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
+                        return False
+                else:
+                    if word.lower() in message_lower:
+                        logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
+                        return False
+        
+        return True  # Message is allowed

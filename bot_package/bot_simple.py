@@ -196,6 +196,43 @@ class SimpleTelegramBot:
                 if len(parts) >= 4:
                     task_id = int(parts[3])
                     await self.reset_media_filters(event, task_id)
+            elif data.startswith("word_filters_"): # Handler for word filters
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.show_word_filters(event, task_id)
+            elif data.startswith("toggle_word_filter_"): # Handler for toggling word filter
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    task_id = int(parts[2])
+                    filter_type = parts[3] # 'whitelist' or 'blacklist'
+                    await self.toggle_word_filter(event, task_id, filter_type)
+            elif data.startswith("manage_words_"): # Handler for managing words in a filter
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    task_id = int(parts[2])
+                    filter_type = parts[3] # 'whitelist' or 'blacklist'
+                    await self.manage_words(event, task_id, filter_type)
+            elif data.startswith("add_word_"): # Handler for adding a word to a filter
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    task_id = int(parts[2])
+                    filter_type = parts[3]
+                    await self.start_add_word(event, task_id, filter_type)
+            elif data.startswith("remove_word_"): # Handler for removing a word from a filter
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    word_id = int(parts[2])
+                    task_id = int(parts[3])
+                    filter_type = parts[4]
+                    await self.remove_word(event, word_id, task_id, filter_type)
+            elif data.startswith("clear_filter_"): # Handler for clearing a filter
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    task_id = int(parts[2])
+                    filter_type = parts[3]
+                    await self.clear_filter(event, task_id, filter_type)
+
 
         except Exception as e:
             logger.error(f"خطأ في معالج الأزرار: {e}")
@@ -244,6 +281,9 @@ class SimpleTelegramBot:
                     )
                     self.db.clear_conversation_state(user_id)
                 return
+            elif state == 'adding_words': # Handle adding words state
+                await self.handle_adding_words(event, state_data)
+                return
 
         # Check if this chat is a target chat for any active forwarding task
         chat_id = event.chat_id
@@ -258,9 +298,22 @@ class SimpleTelegramBot:
                 ''', (str(chat_id),))
                 target_tasks = cursor.fetchall()
 
-            # If this chat is a target chat, don't respond
+            # If this chat is a target chat, then filter based on word filters
             if target_tasks:
-                logger.info(f"🚫 تجاهل الرسالة في المحادثة الهدف {chat_id}")
+                # Get the user_id associated with this task (assuming one user per target for simplicity here)
+                # A more robust solution would involve mapping target_chat_id back to user_id if needed
+                # For now, we'll assume a general check if any task targets this chat
+                # In a real scenario, you might want to check which user's task is active for this target
+
+                # Fetching words filters for all tasks targeting this chat could be complex.
+                # For simplicity, we'll check if ANY active task targets this chat.
+                # A more advanced implementation would fetch specific user's task filters.
+                
+                # For now, let's just log and return if it's a target chat, as the core logic
+                # for filtering based on words happens within the UserBot itself when forwarding.
+                # The Bot's role here is to receive messages and potentially trigger actions,
+                # but the message filtering logic is primarily in UserBot.
+                logger.info(f"🤖 الرسالة مستلمة في المحادثة الهدف {chat_id}, سيتم معالجتها بواسطة UserBot.")
                 return
 
             # Also ignore forwarded messages in any case
@@ -299,6 +352,7 @@ class SimpleTelegramBot:
             [Button.inline(f"📥 إدارة المصادر ({sources_count})", f"manage_sources_{task_id}")],
             [Button.inline(f"📤 إدارة الأهداف ({targets_count})", f"manage_targets_{task_id}")],
             [Button.inline("🎬 فلاتر الوسائط", f"media_filters_{task_id}")],
+            [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")], # Added button for word filters
             [Button.inline("🔙 رجوع لتفاصيل المهمة", f"task_manage_{task_id}")]
         ]
 
@@ -329,7 +383,7 @@ class SimpleTelegramBot:
 
         if success:
             mode_text = "نسخ" if new_mode == 'copy' else "توجيه"
-            await event.answer("✅ تم تغيير وضع التوجيه إلى {mode_text}")
+            await event.answer(f"✅ تم تغيير وضع التوجيه إلى {mode_text}")
 
             # Force refresh UserBot tasks
             try:
@@ -1889,9 +1943,9 @@ class SimpleTelegramBot:
             status_icon = "✅" if is_allowed else "❌"
             if is_allowed:
                 allowed_count += 1
-            
+
             message += f"{status_icon} {arabic_name}\n"
-            
+
             # Add toggle button
             toggle_text = "❌ منع" if is_allowed else "✅ سماح"
             buttons.append([
@@ -1935,12 +1989,12 @@ class SimpleTelegramBot:
                 'location': 'المواقع', 'contact': 'جهات الاتصال', 'poll': 'الاستطلاعات'
             }
             media_name = media_names.get(media_type, media_type)
-            
+
             await event.answer(f"✅ تم تغيير حالة {media_name} إلى: {status_text}")
-            
+
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
-            
+
             await self.show_media_filters(event, task_id)
         else:
             await event.answer("❌ فشل في تغيير الفلتر")
@@ -1959,10 +2013,10 @@ class SimpleTelegramBot:
         if success:
             action_text = "السماح لجميع" if is_allowed else "منع جميع"
             await event.answer(f"✅ تم {action_text} أنواع الوسائط")
-            
+
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
-            
+
             await self.show_media_filters(event, task_id)
         else:
             await event.answer("❌ فشل في تطبيق الفلاتر")
@@ -1980,10 +2034,10 @@ class SimpleTelegramBot:
 
         if success:
             await event.answer("✅ تم إعادة تعيين الفلاتر إلى الوضع الافتراضي (السماح للكل)")
-            
+
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
-            
+
             await self.show_media_filters(event, task_id)
         else:
             await event.answer("❌ فشل في إعادة تعيين الفلاتر")

@@ -124,32 +124,42 @@ class UserbotService:
                     if task_source_id == source_chat_id_str:
                         logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
-                        # Check media filter based on primary media type only
+                        # Check media filter first
                         media_allowed = self.is_media_allowed(task_id, message_media_type)
+                        
+                        # Check word filters
+                        message_text = event.message.text or ""
+                        word_filter_allowed = self.is_message_allowed_by_word_filter(task_id, message_text)
                         
                         # Decision is based on the primary media type, not the caption
                         # For text messages with media, we check the media type
                         # For pure text messages, we check text filter
                         if message_media_type == 'text':
-                            # Pure text message - check text filter
-                            is_message_allowed = self.is_media_allowed(task_id, 'text')
+                            # Pure text message - check text filter and word filter
+                            is_message_allowed = self.is_media_allowed(task_id, 'text') and word_filter_allowed
                             filter_type = "النص"
                         else:
-                            # Media message (photo, video, etc.) - check media filter regardless of caption
-                            is_message_allowed = media_allowed
+                            # Media message (photo, video, etc.) - check media filter and word filter for caption
+                            is_message_allowed = media_allowed and word_filter_allowed
                             filter_type = f"الوسائط ({message_media_type})"
                         
                         if is_message_allowed:
                             matching_tasks.append(task)
                             if has_text_caption and message_media_type != 'text':
-                                logger.info(f"✅ الرسالة مسموحة - {filter_type} مسموح مع caption")
+                                logger.info(f"✅ الرسالة مسموحة - {filter_type} مسموح مع caption وفلاتر الكلمات")
                             else:
-                                logger.info(f"✅ {filter_type} مسموح لهذه المهمة")
+                                logger.info(f"✅ {filter_type} مسموح لهذه المهمة وفلاتر الكلمات")
                         else:
-                            if has_text_caption and message_media_type != 'text':
-                                logger.info(f"🚫 {filter_type} محظور لهذه المهمة (مع caption)")
+                            # Check which filter blocked the message
+                            if not media_allowed:
+                                logger.info(f"🚫 {filter_type} محظور لهذه المهمة (فلتر الوسائط)")
+                            elif not word_filter_allowed:
+                                logger.info(f"🚫 الرسالة محظورة بواسطة فلتر الكلمات")
                             else:
-                                logger.info(f"🚫 {filter_type} محظور لهذه المهمة")
+                                if has_text_caption and message_media_type != 'text':
+                                    logger.info(f"🚫 {filter_type} محظور لهذه المهمة (مع caption)")
+                                else:
+                                    logger.info(f"🚫 {filter_type} محظور لهذه المهمة")
                     else:
                         logger.info(f"❌ لا يوجد تطابق للمهمة '{task_name}': '{task_source_id}' != '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
@@ -323,6 +333,18 @@ class UserbotService:
             return is_allowed
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر الوسائط: {e}")
+            return True  # Default to allowed on error
+
+    def is_message_allowed_by_word_filter(self, task_id, message_text):
+        """Check if message is allowed by word filters"""
+        try:
+            from database.database import Database
+            db = Database()
+            is_allowed = db.is_message_allowed_by_word_filter(task_id, message_text)
+            logger.info(f"🔍 فحص فلتر الكلمات: المهمة {task_id}, مسموح: {is_allowed}")
+            return is_allowed
+        except Exception as e:
+            logger.error(f"خطأ في فحص فلتر الكلمات: {e}")
             return True  # Default to allowed on error
 
 
