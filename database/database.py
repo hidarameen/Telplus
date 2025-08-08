@@ -247,6 +247,19 @@ class Database:
                 )
             ''')
 
+            # Add new columns for synchronization if they don't exist
+            try:
+                cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN sync_edit_enabled BOOLEAN DEFAULT FALSE")
+                logger.info("✅ تم إضافة عمود sync_edit_enabled")
+            except Exception:
+                pass  # Column already exists
+                
+            try:
+                cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN sync_delete_enabled BOOLEAN DEFAULT FALSE")
+                logger.info("✅ تم إضافة عمود sync_delete_enabled")
+            except Exception:
+                pass  # Column already exists
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
