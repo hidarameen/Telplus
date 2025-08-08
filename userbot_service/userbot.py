@@ -124,7 +124,10 @@ class UserbotService:
                     if task_source_id == source_chat_id_str:
                         logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
-                        # Check media filter first
+                        # Check admin filter first (if enabled)
+                        admin_allowed = self.is_admin_allowed(task_id, event.sender_id)
+                        
+                        # Check media filter
                         media_allowed = self.is_media_allowed(task_id, message_media_type)
                         
                         # Check word filters
@@ -135,12 +138,12 @@ class UserbotService:
                         # For text messages with media, we check the media type
                         # For pure text messages, we check text filter
                         if message_media_type == 'text':
-                            # Pure text message - check text filter and word filter
-                            is_message_allowed = self.is_media_allowed(task_id, 'text') and word_filter_allowed
+                            # Pure text message - check admin, text filter and word filter
+                            is_message_allowed = admin_allowed and self.is_media_allowed(task_id, 'text') and word_filter_allowed
                             filter_type = "النص"
                         else:
-                            # Media message (photo, video, etc.) - check media filter and word filter for caption
-                            is_message_allowed = media_allowed and word_filter_allowed
+                            # Media message (photo, video, etc.) - check admin, media filter and word filter for caption
+                            is_message_allowed = admin_allowed and media_allowed and word_filter_allowed
                             filter_type = f"الوسائط ({message_media_type})"
                         
                         if is_message_allowed:
@@ -151,7 +154,9 @@ class UserbotService:
                                 logger.info(f"✅ {filter_type} مسموح لهذه المهمة وفلاتر الكلمات")
                         else:
                             # Check which filter blocked the message
-                            if not media_allowed:
+                            if not admin_allowed:
+                                logger.info(f"🚫 الرسالة محظورة بواسطة فلتر المشرفين - المرسل {event.sender_id} غير مسموح")
+                            elif not media_allowed:
                                 logger.info(f"🚫 {filter_type} محظور لهذه المهمة (فلتر الوسائط)")
                             elif not word_filter_allowed:
                                 logger.info(f"🚫 الرسالة محظورة بواسطة فلتر الكلمات")
@@ -571,6 +576,26 @@ class UserbotService:
             return is_allowed
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر الوسائط: {e}")
+            return True  # Default to allowed on error
+
+    def is_admin_allowed(self, task_id, sender_id):
+        """Check if message sender is allowed by admin filters"""
+        try:
+            from database.database import Database
+            db = Database()
+            
+            # Check if admin filter is enabled for this task
+            admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
+            if not admin_filter_enabled:
+                logger.info(f"🔍 فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
+                return True
+            
+            # Check if sender is in allowed admin list
+            is_allowed = db.is_admin_allowed(task_id, sender_id)
+            logger.info(f"🔍 فحص فلتر المشرفين: المهمة {task_id}, المرسل {sender_id}, مسموح: {is_allowed}")
+            return is_allowed
+        except Exception as e:
+            logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
             return True  # Default to allowed on error
 
     def is_message_allowed_by_word_filter(self, task_id, message_text):
