@@ -764,6 +764,45 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديث المشرفين: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("admin_list_"): # Handler for showing admin list (source channels)
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_admin_list(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لقائمة المشرفين: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("source_admins_"): # Handler for showing specific source admins
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[2])
+                        source_chat_id = parts[3]
+                        await self.show_source_admins(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لمشرفي المصدر: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_admin_"): # Handler for toggling individual admin
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[2])
+                        admin_user_id = int(parts[3])
+                        await self.toggle_admin(event, task_id, admin_user_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/المشرف: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("refresh_source_admins_"): # Handler for refreshing specific source admins
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[3])
+                        source_chat_id = parts[4]
+                        await self.refresh_source_admin_list(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
 
 
         except Exception as e:
@@ -4598,19 +4637,13 @@ class SimpleTelegramBot:
         
         # Get settings
         advanced_settings = self.db.get_advanced_filters_settings(task_id)
-        admin_filters = self.db.get_admin_filters(task_id)
         
         enabled_status = "🟢 مُفَعَّل" if advanced_settings['admin_filter_enabled'] else "🔴 غير مُفَعَّل"
         
-        # Create admin buttons
-        admin_buttons = []
-        if admin_filters:
-            for admin in admin_filters:
-                status = "✅" if admin['is_allowed'] else "❌"
-                name = admin['admin_first_name'] or admin['admin_username'] or f"المستخدم {admin['admin_user_id']}"
-                admin_buttons.append([Button.inline(f"{status} {name}", f"toggle_admin_{task_id}_{admin['admin_user_id']}")])
-        else:
-            admin_buttons.append([Button.inline("👥 لا يوجد مشرفون محددون", "none")])
+        # Show admin list button instead of individual admins
+        admin_buttons = [
+            [Button.inline("👥 قائمة المشرفين", f"admin_list_{task_id}")]
+        ]
         
         # Add control buttons
         control_buttons = [
@@ -4624,11 +4657,170 @@ class SimpleTelegramBot:
         await event.edit(
             f"👨‍💼 فلتر المشرفين: {task_name}\n\n"
             f"📊 حالة الفلتر: {enabled_status}\n\n"
-            f"👥 المشرفون المُكونون:\n"
+            f"👥 إدارة المشرفين:\n"
             f"✅ = مسموح | ❌ = محظور\n\n"
             f"💡 ملاحظة: عند تفعيل هذا الفلتر، سيتم توجيه رسائل المشرفين المحددين فقط",
             buttons=buttons
         )
+    
+    async def show_admin_list(self, event, task_id):
+        """Show list of source channels for admin management"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get source channels
+        source_chats = self.db.get_task_sources(task_id)
+        
+        if not source_chats:
+            # Try to get from legacy data
+            if task.get('source_chat_id'):
+                source_chats = [{
+                    'chat_id': task['source_chat_id'],
+                    'chat_name': task['source_chat_name'] or 'قناة مصدر'
+                }]
+        
+        source_buttons = []
+        if source_chats:
+            for source in source_chats:
+                chat_id = source['chat_id']
+                chat_name = source.get('chat_name', f'القناة {chat_id}')
+                source_buttons.append([Button.inline(f"📢 {chat_name} ({chat_id})", f"source_admins_{task_id}_{chat_id}")])
+        else:
+            source_buttons.append([Button.inline("📢 لا توجد قنوات مصدر", "none")])
+        
+        # Control buttons
+        control_buttons = [
+            [Button.inline("🔙 رجوع لفلتر المشرفين", f"admin_filters_{task_id}")]
+        ]
+        
+        buttons = source_buttons + control_buttons
+        
+        await event.edit(
+            f"📋 قائمة المشرفين: {task_name}\n\n"
+            f"📢 قنوات المصدر المرتبطة بالمهمة:\n"
+            f"اختر قناة لعرض مشرفيها\n\n"
+            f"💡 ملاحظة: يمكنك إدارة المشرفين لكل قناة بشكل منفصل",
+            buttons=buttons
+        )
+    
+    async def show_source_admins(self, event, task_id, source_chat_id):
+        """Show admins for a specific source channel"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get admins for this source
+        admin_filters = self.db.get_admin_filters_for_source(task_id, source_chat_id)
+        
+        admin_buttons = []
+        if admin_filters:
+            for admin in admin_filters:
+                status = "✅" if admin['is_allowed'] else "❌"
+                name = admin['admin_first_name'] or admin['admin_username'] or f"المستخدم {admin['admin_user_id']}"
+                admin_buttons.append([Button.inline(f"{status} {name}", f"toggle_admin_{task_id}_{admin['admin_user_id']}")])
+        else:
+            admin_buttons.append([Button.inline("👥 لا يوجد مشرفون لهذه القناة", "none")])
+        
+        # Control buttons
+        control_buttons = [
+            [Button.inline("🔄 تحديث مشرفي هذه القناة", f"refresh_source_admins_{task_id}_{source_chat_id}")],
+            [Button.inline("🔙 رجوع لقائمة القنوات", f"admin_list_{task_id}")]
+        ]
+        
+        buttons = admin_buttons + control_buttons
+        
+        await event.edit(
+            f"👨‍💼 مشرفو القناة: {source_chat_id}\n"
+            f"🔗 المهمة: {task_name}\n\n"
+            f"👥 قائمة المشرفين:\n"
+            f"✅ = مسموح | ❌ = محظور\n\n"
+            f"💡 اضغط على اسم مشرف لتغيير حالته",
+            buttons=buttons
+        )
+    
+    async def toggle_admin(self, event, task_id, admin_user_id):
+        """Toggle admin filter status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Toggle admin status
+        success = self.db.toggle_admin_filter(task_id, admin_user_id)
+        
+        if success:
+            await event.answer("✅ تم تغيير حالة المشرف")
+            
+            # Refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Find which source this admin belongs to and refresh that view
+            admin_filters = self.db.get_admin_filters(task_id)
+            admin_found = None
+            for admin in admin_filters:
+                if admin['admin_user_id'] == admin_user_id:
+                    admin_found = admin
+                    break
+                    
+            if admin_found:
+                # Get source chat ID for this admin - we'll need to enhance the database to track this
+                # For now, just refresh the general admin filters view
+                await self.show_admin_filters(event, task_id)
+            else:
+                await self.show_admin_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير حالة المشرف")
+    
+    async def refresh_source_admin_list(self, event, task_id, source_chat_id):
+        """Refresh admin list for a specific source channel"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        await event.answer("🔄 جاري تحديث مشرفي هذه القناة...")
+        
+        try:
+            # Access userbot through userbot_instance
+            from userbot_service.userbot import userbot_instance
+            if user_id in userbot_instance.clients:
+                userbot_client = userbot_instance.clients[user_id]
+                
+                # Get admin list from userbot service
+                participants = await userbot_client.get_participants(int(source_chat_id), filter='admin')
+                
+                # Clear existing admins for this task
+                self.db.clear_admin_filters_for_source(task_id, source_chat_id)
+                
+                # Add new admins
+                admin_count = 0
+                for participant in participants:
+                    self.db.add_admin_filter(task_id, participant.id, 
+                                           participant.username or "", 
+                                           participant.first_name or "", True)
+                    admin_count += 1
+                
+                await event.edit(f"✅ تم تحديث {admin_count} مشرف للقناة")
+                await self.show_source_admins(event, task_id, source_chat_id)
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث مشرفي القناة {source_chat_id}: {e}")
+            await event.edit("❌ حدث خطأ أثناء تحديث مشرفي القناة")
     
     async def show_duplicate_filter(self, event, task_id):
         """Show duplicate filter management"""
@@ -4904,24 +5096,26 @@ class SimpleTelegramBot:
         
         try:
             # Get all source chats for this task
-            source_chats = self.db.get_source_chats(task_id)
+            source_chats = self.db.get_task_sources(task_id)
             updated_count = 0
             
             for source_chat in source_chats:
-                source_id = source_chat['source_chat_id']
+                source_id = source_chat['chat_id']
                 try:
-                    # Get admin list from userbot service
-                    if hasattr(self, 'userbot_client') and self.userbot_client:
-                        participants = await self.userbot_client.get_participants(source_id, filter='admin')
+                    # Access userbot through userbot_instance
+                    from userbot_service.userbot import userbot_instance
+                    if user_id in userbot_instance.clients:
+                        userbot_client = userbot_instance.clients[user_id]
+                        participants = await userbot_client.get_participants(int(source_id), filter='admin')
                         
-                        # Clear existing admins for this source
-                        self.db.clear_admin_filters(task_id, source_id)
+                        # Clear existing admins for this task
+                        self.db.clear_admin_filters_for_source(task_id, source_id)
                         
                         # Add new admins
                         for participant in participants:
-                            self.db.add_admin_filter(task_id, source_id, participant.id, 
-                                                   participant.first_name or "", 
-                                                   participant.username or "", True)
+                            self.db.add_admin_filter(task_id, participant.id, 
+                                                   participant.username or "", 
+                                                   participant.first_name or "", True)
                         updated_count += 1
                         
                 except Exception as e:

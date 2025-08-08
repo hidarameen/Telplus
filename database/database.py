@@ -1989,6 +1989,24 @@ class Database:
             conn.commit()
             return cursor.rowcount > 0
             
+    def get_admin_filters_for_source(self, task_id: int, source_chat_id: str) -> List[Dict]:
+        """Get admin filters for a specific source channel"""
+        # For now, return all admin filters for the task since we don't track source-specific admins yet
+        # In the future, we can enhance the schema to track which source each admin belongs to
+        return self.get_admin_filters(task_id)
+        
+    def clear_admin_filters_for_source(self, task_id: int, source_chat_id: str):
+        """Clear admin filters for a specific source (for now clears all for the task)"""
+        # For now, we'll clear all admins for the task when refreshing any source
+        # In the future, we can enhance to track source-specific admins
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM task_admin_filters WHERE task_id = ?
+            ''', (task_id,))
+            conn.commit()
+            return cursor.rowcount
+            
     # ===== Duplicate Detection Management =====
     
     def get_duplicate_settings(self, task_id: int) -> Dict:
