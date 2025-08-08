@@ -189,7 +189,10 @@ class SimpleTelegramBot:
         if state_data:
             state, data_str = state_data
             try:
-                data = json.loads(data_str) if data_str else {}
+                if isinstance(data_str, dict):
+                    data = data_str
+                else:
+                    data = json.loads(data_str) if data_str else {}
             except:
                 data = {}
 
@@ -337,7 +340,7 @@ class SimpleTelegramBot:
             for i, source in enumerate(sources[:10], 1):  # Show max 10
                 chat_id = source.get('chat_id')
                 chat_name = source.get('chat_name') or chat_id
-                
+
                 # Create channel link if it's a channel ID (starts with -100)
                 if str(chat_id).startswith('-100'):
                     # Convert -100XXXXXXXXX to https://t.me/c/XXXXXXXXX/1
@@ -393,7 +396,7 @@ class SimpleTelegramBot:
             for i, target in enumerate(targets[:10], 1):  # Show max 10
                 chat_id = target.get('chat_id')
                 chat_name = target.get('chat_name') or target.get('chat_id')
-                
+
                 # Create channel link if it's a channel ID (starts with -100)
                 if str(chat_id).startswith('-100'):
                     # Convert -100XXXXXXXXX to https://t.me/c/XXXXXXXXX/1
@@ -435,7 +438,7 @@ class SimpleTelegramBot:
             data = {'task_id': int(task_id), 'action': 'add_source'}
             data_str = json.dumps(data)
             self.db.set_conversation_state(user_id, 'adding_source', data_str)
-            
+
             logger.info(f"✅ تم حفظ حالة إضافة مصدر للمستخدم {user_id}: {data_str}")
         except Exception as e:
             logger.error(f"❌ خطأ في حفظ حالة إضافة مصدر: {e}")
@@ -467,7 +470,7 @@ class SimpleTelegramBot:
             data = {'task_id': int(task_id), 'action': 'add_target'}
             data_str = json.dumps(data)
             self.db.set_conversation_state(user_id, 'adding_target', data_str)
-            
+
             logger.info(f"✅ تم حفظ حالة إضافة هدف للمستخدم {user_id}: {data_str}")
         except Exception as e:
             logger.error(f"❌ خطأ في حفظ حالة إضافة هدف: {e}")
@@ -715,7 +718,7 @@ class SimpleTelegramBot:
             for i, source in enumerate(sources[:5], 1):  # Show max 5
                 chat_id = source.get('chat_id')
                 chat_name = source.get('chat_name') or chat_id
-                
+
                 # Create channel link if it's a channel ID (starts with -100)
                 if str(chat_id).startswith('-100'):
                     # Convert -100XXXXXXXXX to https://t.me/c/XXXXXXXXX/1
@@ -739,8 +742,8 @@ class SimpleTelegramBot:
         else:
             for i, target in enumerate(targets[:5], 1):  # Show max 5
                 chat_id = target.get('chat_id')
-                chat_name = target.get('chat_name') or chat_id
-                
+                chat_name = target.get('chat_name') or target.get('chat_id')
+
                 # Create channel link if it's a channel ID (starts with -100)
                 if str(chat_id).startswith('-100'):
                     # Convert -100XXXXXXXXX to https://t.me/c/XXXXXXXXX/1
@@ -868,7 +871,10 @@ class SimpleTelegramBot:
 
         state, data_str = state_data
         try:
-            data = json.loads(data_str) if data_str else {}
+            if isinstance(data_str, dict):
+                data = data_str
+            else:
+                data = json.loads(data_str) if data_str else {}
         except:
             data = {}
         message_text = event.raw_text.strip()
@@ -896,7 +902,10 @@ class SimpleTelegramBot:
 
         try:
             import json
-            data = json.loads(data_str) if data_str else {}
+            if isinstance(data_str, dict):
+                data = data_str
+            else:
+                data = json.loads(data_str) if data_str else {}
         except Exception as e:
             logger.error(f"خطأ في تحليل البيانات: {e}")
             data = {}
@@ -1113,10 +1122,14 @@ class SimpleTelegramBot:
             await event.respond("❌ حدث خطأ، يرجى البدء من جديد")
             return
 
-        state, data = state_data
-        if data:
+        state, data_str = state_data
+        if data_str:
             try:
-                source_data = json.loads(data)
+                if isinstance(data_str, dict):
+                    source_data = data_str
+                else:
+                    source_data = json.loads(data_str) if data_str else {}
+
                 source_chat_ids = source_data.get('source_chat_ids', [])
                 source_chat_names = source_data.get('source_chat_names', [])
                 task_name = source_data.get('task_name', 'مهمة توجيه')
@@ -1679,7 +1692,7 @@ class SimpleTelegramBot:
     async def handle_task_message(self, event, state_data):
         """Handle task creation messages"""
         user_id = event.sender_id
-        state, data = state_data
+        state, data_str = state_data
         message_text = event.text.strip()
 
         try:
