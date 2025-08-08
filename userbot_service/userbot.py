@@ -68,8 +68,13 @@ class UserbotService:
         @client.on(events.NewMessage(incoming=True))
         async def message_handler(event):
             try:
-                logger.info(f"🔔 استقبال رسالة جديدة من المستخدم {user_id}")
-                logger.info(f"📍 Chat ID: {event.chat_id}, Message: {event.text[:50] if event.text else 'رسالة بدون نص'}...")
+                logger.warning(f"🔔 *** استقبال رسالة جديدة من المستخدم {user_id} ***")
+                logger.warning(f"📍 Chat ID: {event.chat_id}, Message: {event.text[:50] if event.text else 'رسالة بدون نص'}...")
+                
+                # Immediate check for our target chat
+                if event.chat_id == -1002289754739:
+                    logger.error(f"🎯 *** رسالة من محادثة Hidar! Chat ID: {event.chat_id} ***")
+                    logger.error(f"🎯 *** بدء معالجة الرسالة للتوجيه... ***")
                 # Get user tasks
                 tasks = self.user_tasks.get(user_id, [])
                 
