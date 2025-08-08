@@ -599,7 +599,12 @@ class SimpleTelegramBot:
     async def show_task_details(self, event, task_id):
         """Show task details"""
         user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
+        
+        # First migrate task to new structure if needed
+        self.db.migrate_task_to_new_structure(task_id)
+        
+        # Get task with all sources and targets
+        task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
             await event.answer("❌ المهمة غير موجودة")
@@ -611,6 +616,10 @@ class SimpleTelegramBot:
 
         forward_mode_text = "📨 نسخ" if task.get('forward_mode', 'forward') == 'copy' else "📩 توجيه"
 
+        # Get sources and targets
+        sources = task.get('sources', [])
+        targets = task.get('targets', [])
+
         buttons = [
             [Button.inline(toggle_text, f"task_toggle_{task_id}")],
             [Button.inline("⚙️ إعدادات المهمة", f"task_settings_{task_id}")],
@@ -618,17 +627,37 @@ class SimpleTelegramBot:
             [Button.inline("📋 عرض المهام", b"list_tasks")]
         ]
 
+        # Build sources text
+        sources_text = f"📥 **المصادر ({len(sources)}):**\n"
+        if not sources:
+            sources_text += "• لا توجد مصادر\n"
+        else:
+            for i, source in enumerate(sources[:5], 1):  # Show max 5
+                source_name = source.get('chat_name') or source.get('chat_id')
+                sources_text += f"• {source_name}\n"
+                sources_text += f"  📍 `{source.get('chat_id')}`\n"
+            if len(sources) > 5:
+                sources_text += f"  ... و {len(sources) - 5} مصدر آخر\n"
+
+        # Build targets text
+        targets_text = f"\n📤 **الأهداف ({len(targets)}):**\n"
+        if not targets:
+            targets_text += "• لا توجد أهداف\n"
+        else:
+            for i, target in enumerate(targets[:5], 1):  # Show max 5
+                target_name = target.get('chat_name') or target.get('chat_id')
+                targets_text += f"• {target_name}\n"
+                targets_text += f"  📍 `{target.get('chat_id')}`\n"
+            if len(targets) > 5:
+                targets_text += f"  ... و {len(targets) - 5} هدف آخر\n"
+
         await event.edit(
             f"⚙️ تفاصيل المهمة #{task['id']}\n\n"
             f"🏷️ اسم المهمة: {task_name}\n"
             f"📊 الحالة: {status}\n"
             f"📋 وضع التوجيه: {forward_mode_text}\n\n"
-            f"📥 **المصدر:**\n"
-            f"• اسم: {task['source_chat_name'] or 'غير محدد'}\n"
-            f"• معرف: `{task['source_chat_id']}`\n\n"
-            f"📤 **الوجهة:**\n"
-            f"• اسم: {task['target_chat_name'] or 'غير محدد'}\n"
-            f"• معرف: `{task['target_chat_id']}`\n\n"
+            f"{sources_text}"
+            f"{targets_text}\n"
             f"📅 تاريخ الإنشاء: {task['created_at'][:16]}",
             buttons=buttons
         )
