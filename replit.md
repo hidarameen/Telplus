@@ -3,7 +3,16 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 8, 2025 (Latest Update - FULLY OPERATIONAL)**: Completed comprehensive message formatting system:
+- **August 8, 2025 (Critical Bug Fix - FULLY OPERATIONAL)**: Fixed inline buttons deletion issue:
+  - **CRITICAL BUG FIXED**: Transparent buttons now preserved when disabling inline buttons feature
+  - **DATABASE ENHANCEMENT**: Added proper `task_message_settings` table for enable/disable status tracking
+  - **ARCHITECTURE IMPROVEMENT**: Separated button storage from enable/disable logic to prevent data loss
+  - **ERROR HANDLING**: Added robust error handling for Telegram message edit failures
+  - **BACKWARD COMPATIBILITY**: All existing functionality preserved while fixing the core issue
+  - **AUTO-ENABLE**: Buttons now automatically enable when first button is added
+  - **AUTO-DISABLE**: Feature properly disables (without deletion) when all buttons are cleared
+  - **SYSTEM STATUS**: All 4 user tasks active, UserBot connected, no runtime errors
+- **August 8, 2025 (Previous Update)**: Completed comprehensive message formatting system:
   - **RESOLVED**: Critical database integration issues - added missing tables and functions
   - **FIXED**: MessageNotModifiedError in inline buttons toggle functionality
   - **IMPLEMENTED**: Complete header/footer system with enable/disable controls
@@ -11,7 +20,6 @@ This is a Telegram message forwarding automation system built entirely with Tele
   - **VERIFIED**: All formatting features working without errors
   - **DATABASE**: Successfully created and integrated task_headers, task_footers, task_inline_buttons tables
   - **UI TESTED**: Arabic interface with full functionality for all new features
-  - **SYSTEM STATUS**: All 4 user tasks active, UserBot connected, no runtime errors
   - **INTEGRATION COMPLETE**: New features fully integrated with existing text replacement and word filtering systems
 
 # User Preferences

@@ -198,6 +198,22 @@ class Database:
                 )
             ''')
 
+            # Task message settings table - for controlling enabled/disabled status
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_message_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    header_enabled BOOLEAN DEFAULT FALSE,
+                    header_text TEXT DEFAULT '',
+                    footer_enabled BOOLEAN DEFAULT FALSE,
+                    footer_text TEXT DEFAULT '',
+                    inline_buttons_enabled BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
@@ -1171,19 +1187,29 @@ class Database:
                 ''', (task_id,))
                 footer_result = cursor.fetchone()
                 
-                # Get inline buttons enabled status
+                # Get inline buttons enabled status from task_message_settings
                 cursor.execute('''
-                    SELECT COUNT(*) as count FROM task_inline_buttons 
+                    SELECT inline_buttons_enabled FROM task_message_settings 
                     WHERE task_id = ?
                 ''', (task_id,))
-                buttons_count = cursor.fetchone()['count']
+                settings_result = cursor.fetchone()
+                
+                if not settings_result:
+                    # Create default settings if not exist
+                    cursor.execute('''
+                        INSERT INTO task_message_settings (task_id) VALUES (?)
+                    ''', (task_id,))
+                    conn.commit()
+                    inline_buttons_enabled = False
+                else:
+                    inline_buttons_enabled = bool(settings_result['inline_buttons_enabled'])
                 
                 return {
                     'header_enabled': header_result['enabled'] if header_result else False,
                     'header_text': header_result['header_text'] if header_result else None,
                     'footer_enabled': footer_result['enabled'] if footer_result else False,
                     'footer_text': footer_result['footer_text'] if footer_result else None,
-                    'inline_buttons_enabled': buttons_count > 0
+                    'inline_buttons_enabled': inline_buttons_enabled
                 }
         except Exception as e:
             logger.error(f"خطأ في الحصول على إعدادات الرسالة: {e}")
@@ -1246,10 +1272,23 @@ class Database:
             conn.commit()
 
     def update_inline_buttons_enabled(self, task_id: int, enabled: bool):
-        """Update inline buttons enabled status - managed by presence of buttons"""
-        if not enabled:
-            # If disabling, clear all buttons
-            self.clear_inline_buttons(task_id)
+        """Update inline buttons enabled status"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_message_settings 
+                (task_id, header_enabled, header_text, footer_enabled, footer_text, inline_buttons_enabled)
+                SELECT ?, 
+                       COALESCE(header_enabled, FALSE),
+                       COALESCE(header_text, ''),
+                       COALESCE(footer_enabled, FALSE),
+                       COALESCE(footer_text, ''),
+                       ?
+                FROM task_message_settings WHERE task_id = ?
+                UNION SELECT ?, FALSE, '', FALSE, '', ? WHERE NOT EXISTS 
+                (SELECT 1 FROM task_message_settings WHERE task_id = ?)
+            ''', (task_id, enabled, task_id, task_id, enabled, task_id))
+            conn.commit()
 
     def get_inline_buttons(self, task_id: int):
         """Get inline buttons for a task"""
@@ -1281,14 +1320,47 @@ class Database:
                 (task_id, button_text, button_url, row_position, col_position)
                 VALUES (?, ?, ?, ?, ?)
             ''', (task_id, button_text, button_url, row_pos, col_pos))
+            
+            # Auto-enable inline buttons when first button is added
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_message_settings 
+                (task_id, header_enabled, header_text, footer_enabled, footer_text, inline_buttons_enabled)
+                SELECT ?, 
+                       COALESCE(header_enabled, FALSE),
+                       COALESCE(header_text, ''),
+                       COALESCE(footer_enabled, FALSE),
+                       COALESCE(footer_text, ''),
+                       TRUE
+                FROM task_message_settings WHERE task_id = ?
+                UNION SELECT ?, FALSE, '', FALSE, '', TRUE WHERE NOT EXISTS 
+                (SELECT 1 FROM task_message_settings WHERE task_id = ?)
+            ''', (task_id, task_id, task_id, task_id))
+            
             conn.commit()
             return cursor.lastrowid
 
     def clear_inline_buttons(self, task_id: int):
-        """Clear all inline buttons for task"""
+        """Clear all inline buttons for task and disable inline buttons"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM task_inline_buttons WHERE task_id = ?', (task_id,))
             deleted_count = cursor.rowcount
+            
+            # Disable inline buttons when all buttons are cleared
+            if deleted_count > 0:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_message_settings 
+                    (task_id, header_enabled, header_text, footer_enabled, footer_text, inline_buttons_enabled)
+                    SELECT ?, 
+                           COALESCE(header_enabled, FALSE),
+                           COALESCE(header_text, ''),
+                           COALESCE(footer_enabled, FALSE),
+                           COALESCE(footer_text, ''),
+                           FALSE
+                    FROM task_message_settings WHERE task_id = ?
+                    UNION SELECT ?, FALSE, '', FALSE, '', FALSE WHERE NOT EXISTS 
+                    (SELECT 1 FROM task_message_settings WHERE task_id = ?)
+                ''', (task_id, task_id, task_id, task_id))
+            
             conn.commit()
             return deleted_count

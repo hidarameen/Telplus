@@ -3521,16 +3521,22 @@ class SimpleTelegramBot:
         from datetime import datetime
         timestamp = datetime.now().strftime("%H:%M:%S")
         
-        await event.edit(
+        message_text = (
             f"🔘 أزرار إنلاين - المهمة #{task_id}\n\n"
             f"📊 **الحالة**: {status}\n"
             f"🔢 **عدد الأزرار**: {len(buttons_list)}\n\n"
             f"🔄 **الوظيفة**: إضافة أزرار قابلة للنقر أسفل الرسائل المُوجهة\n\n"
             f"💡 **مثال**: زر 'زيارة الموقع' أو 'اشترك في القناة'\n\n"
             f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الأزرار\n\n"
-            f"🕐 آخر تحديث: {timestamp}",
-            buttons=buttons
+            f"🕐 آخر تحديث: {timestamp}"
         )
+        
+        try:
+            await event.edit(message_text, buttons=buttons)
+        except Exception as e:
+            # If edit fails, send a new message instead
+            logger.warning(f"فشل تحرير الرسالة، إرسال رسالة جديدة: {e}")
+            await event.respond(message_text, buttons=buttons)
 
     async def toggle_inline_buttons(self, event, task_id):
         """Toggle inline buttons status"""
@@ -3545,12 +3551,17 @@ class SimpleTelegramBot:
         current_status = settings['inline_buttons_enabled']
         
         if current_status:
-            # Currently enabled, disable by clearing all buttons
-            self.db.clear_inline_buttons(task_id)
+            # Currently enabled, disable it (but keep the buttons in database)
+            self.db.update_inline_buttons_enabled(task_id, False)
             await event.answer("✅ تم إلغاء تفعيل الأزرار الإنلاين")
         else:
-            # Currently disabled, show info message
-            await event.answer("💡 لتفعيل الأزرار، اضغط 'إضافة أزرار' وأضف زر واحد على الأقل")
+            # Currently disabled, enable it if there are buttons
+            buttons_list = self.db.get_inline_buttons(task_id)
+            if buttons_list:
+                self.db.update_inline_buttons_enabled(task_id, True)
+                await event.answer("✅ تم تفعيل الأزرار الإنلاين")
+            else:
+                await event.answer("💡 لتفعيل الأزرار، اضغط 'إضافة أزرار' وأضف زر واحد على الأقل")
         
         await self.show_inline_buttons_settings(event, task_id)
 
