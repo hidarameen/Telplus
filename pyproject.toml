@@ -7,5 +7,6 @@ dependencies = [
     "asyncio-mqtt>=0.16.2",
     "flask>=3.1.1",
     "python-telegram-bot==20.8",
+    "telegram>=0.0.1",
     "telethon>=1.40.0",
 ]
