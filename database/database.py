@@ -761,6 +761,42 @@ class Database:
                 })
             return words
 
+    def get_word_id(self, task_id: int, filter_type: str, word: str):
+        """Get word ID from filter"""
+        filter_id = self.get_word_filter_id(task_id, filter_type)
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id FROM word_filter_entries
+                WHERE filter_id = ? AND word_or_phrase = ?
+            ''', (filter_id, word))
+            
+            result = cursor.fetchone()
+            return result['id'] if result else None
+
+    def get_word_by_id(self, word_id: int):
+        """Get word by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT word_or_phrase FROM word_filter_entries
+                WHERE id = ?
+            ''', (word_id,))
+            
+            result = cursor.fetchone()
+            return result['word_or_phrase'] if result else None
+
+    def remove_word_from_filter_by_id(self, word_id: int):
+        """Remove word from filter by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM word_filter_entries WHERE id = ?
+            ''', (word_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def clear_filter_words(self, task_id: int, filter_type: str):
         """Clear all words from filter"""
         filter_id = self.get_word_filter_id(task_id, filter_type)

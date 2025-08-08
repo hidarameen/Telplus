@@ -2052,6 +2052,263 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"خطأ في تحديث مهام UserBot: {e}")
 
+    async def show_word_filters(self, event, task_id):
+        """Show word filters management for task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get word filter settings
+        whitelist_enabled = self.db.is_word_filter_enabled(task_id, 'whitelist')
+        blacklist_enabled = self.db.is_word_filter_enabled(task_id, 'blacklist')
+        
+        # Get word counts
+        whitelist_count = len(self.db.get_filter_words(task_id, 'whitelist'))
+        blacklist_count = len(self.db.get_filter_words(task_id, 'blacklist'))
+
+        message = f"📝 فلاتر الكلمات للمهمة: {task_name}\n\n"
+        
+        # Whitelist section
+        whitelist_status = "✅ مفعل" if whitelist_enabled else "❌ معطل"
+        message += f"⚪ القائمة البيضاء: {whitelist_status}\n"
+        message += f"📊 عدد الكلمات: {whitelist_count}\n"
+        message += "💡 السماح للرسائل التي تحتوي على كلمات مسموحة فقط\n\n"
+        
+        # Blacklist section
+        blacklist_status = "✅ مفعل" if blacklist_enabled else "❌ معطل"
+        message += f"⚫ القائمة السوداء: {blacklist_status}\n"
+        message += f"📊 عدد الكلمات: {blacklist_count}\n"
+        message += "💡 حظر الرسائل التي تحتوي على كلمات محظورة\n\n"
+        
+        message += "اختر العملية المطلوبة:"
+
+        buttons = [
+            [
+                Button.inline(f"{'❌ تعطيل' if whitelist_enabled else '✅ تفعيل'} القائمة البيضاء", f"toggle_word_filter_{task_id}_whitelist"),
+                Button.inline(f"⚙️ إدارة ({whitelist_count})", f"manage_words_{task_id}_whitelist")
+            ],
+            [
+                Button.inline(f"{'❌ تعطيل' if blacklist_enabled else '✅ تفعيل'} القائمة السوداء", f"toggle_word_filter_{task_id}_blacklist"),
+                Button.inline(f"⚙️ إدارة ({blacklist_count})", f"manage_words_{task_id}_blacklist")
+            ],
+            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
+        ]
+
+        await event.edit(message, buttons=buttons)
+
+    async def toggle_word_filter(self, event, task_id, filter_type):
+        """Toggle word filter on/off"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        current_status = self.db.is_word_filter_enabled(task_id, filter_type)
+        new_status = not current_status
+
+        success = self.db.set_word_filter_enabled(task_id, filter_type, new_status)
+
+        if success:
+            filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+            status_text = "تم تفعيل" if new_status else "تم تعطيل"
+            await event.answer(f"✅ {status_text} {filter_name}")
+
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+
+            await self.show_word_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير حالة الفلتر")
+
+    async def manage_words(self, event, task_id, filter_type):
+        """Manage words in a specific filter"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+        words = self.db.get_filter_words(task_id, filter_type)
+
+        message = f"⚙️ إدارة {filter_name}\n\n"
+        
+        if not words:
+            message += "❌ لا توجد كلمات حالياً\n\n"
+        else:
+            message += f"📋 الكلمات الحالية ({len(words)}):\n\n"
+            for i, word_data in enumerate(words[:10], 1):  # Show max 10
+                word = word_data['word']
+                case_sensitive = "🔤" if word_data['case_sensitive'] else "🔡"
+                message += f"{i}. {case_sensitive} {word}\n"
+            
+            if len(words) > 10:
+                message += f"... و {len(words) - 10} كلمة أخرى\n"
+            message += "\n"
+
+        message += "اختر العملية:"
+
+        buttons = [
+            [Button.inline("➕ إضافة كلمات", f"add_word_{task_id}_{filter_type}")],
+        ]
+
+        # Add remove buttons for each word (max 8 to avoid Telegram limits)
+        for word_data in words[:8]:
+            word = word_data['word']
+            display_word = word if len(word) <= 12 else word[:12] + "..."
+            buttons.append([
+                Button.inline(f"🗑️ حذف {display_word}", f"remove_word_{self.db.get_word_id(task_id, filter_type, word)}_{task_id}_{filter_type}")
+            ])
+
+        if words:
+            buttons.append([Button.inline("🗑️ إفراغ القائمة", f"clear_filter_{task_id}_{filter_type}")])
+
+        buttons.append([Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    async def start_add_word(self, event, task_id, filter_type):
+        """Start adding words to filter"""
+        user_id = event.sender_id
+        
+        # Set conversation state with proper error handling
+        import json
+        try:
+            data = {'task_id': int(task_id), 'filter_type': filter_type, 'action': 'add_words'}
+            data_str = json.dumps(data)
+            self.db.set_conversation_state(user_id, 'adding_words', data_str)
+
+            logger.info(f"✅ تم حفظ حالة إضافة كلمات للمستخدم {user_id}: {data_str}")
+        except Exception as e:
+            logger.error(f"❌ خطأ في حفظ حالة إضافة كلمات: {e}")
+            await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            return
+
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"manage_words_{task_id}_{filter_type}")]
+        ]
+
+        await event.edit(
+            f"➕ إضافة كلمات إلى {filter_name}\n\n"
+            f"📝 أرسل الكلمات أو الجمل المراد إضافتها:\n\n"
+            f"🔹 **للكلمة الواحدة:**\n"
+            f"• عاجل\n"
+            f"• إعلان\n\n"
+            f"🔹 **لعدة كلمات (مفصولة بفاصلة):**\n"
+            f"• عاجل, خبر مهم, تحديث\n"
+            f"• إعلان, دعاية, ترويج\n\n"
+            f"💡 يمكن إضافة جمل كاملة أيضاً",
+            buttons=buttons
+        )
+
+    async def handle_adding_words(self, event, state_data):
+        """Handle adding words to filter"""
+        user_id = event.sender_id
+        state, data_str = state_data
+
+        try:
+            import json
+            if isinstance(data_str, dict):
+                data = data_str
+            else:
+                data = json.loads(data_str) if data_str else {}
+        except Exception as e:
+            logger.error(f"خطأ في تحليل البيانات: {e}")
+            data = {}
+
+        task_id = data.get('task_id')
+        filter_type = data.get('filter_type')
+        words_input = event.raw_text.strip()
+
+        if not task_id or not filter_type:
+            await event.respond("❌ خطأ في البيانات، حاول مرة أخرى")
+            self.db.clear_conversation_state(user_id)
+            return
+
+        # Parse words input
+        if ',' in words_input:
+            words = [word.strip() for word in words_input.split(',') if word.strip()]
+        else:
+            words = [words_input] if words_input else []
+
+        if not words:
+            await event.respond("❌ لم يتم إدخال أي كلمات صحيحة")
+            return
+
+        # Add each word
+        added_count = 0
+        for word in words:
+            if len(word) > 200:  # Limit word length
+                continue
+            
+            success = self.db.add_word_to_filter(task_id, filter_type, word)
+            if success:
+                added_count += 1
+
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+
+        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+
+        if added_count > 0:
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+
+            await event.respond(f"✅ تم إضافة {added_count} كلمة إلى {filter_name}")
+            await self.manage_words(event, task_id, filter_type)
+        else:
+            await event.respond("❌ فشل في إضافة الكلمات أو أنها موجودة بالفعل")
+
+    async def remove_word(self, event, word_id, task_id, filter_type):
+        """Remove word from filter"""
+        user_id = event.sender_id
+
+        # Get the word first
+        word = self.db.get_word_by_id(word_id)
+        if not word:
+            await event.answer("❌ الكلمة غير موجودة")
+            return
+
+        success = self.db.remove_word_from_filter_by_id(word_id)
+
+        if success:
+            filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+
+            await event.answer(f"✅ تم حذف الكلمة من {filter_name}")
+            await self.manage_words(event, task_id, filter_type)
+        else:
+            await event.answer("❌ فشل في حذف الكلمة")
+
+    async def clear_filter(self, event, task_id, filter_type):
+        """Clear all words from filter"""
+        user_id = event.sender_id
+
+        success = self.db.clear_filter_words(task_id, filter_type)
+
+        if success:
+            filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+
+            await event.answer(f"✅ تم إفراغ {filter_name}")
+            await self.manage_words(event, task_id, filter_type)
+        else:
+            await event.answer("❌ فشل في إفراغ القائمة")
+
     async def show_about(self, event):
         buttons = [
             [Button.inline("🏠 العودة للرئيسية", b"back_main")]
