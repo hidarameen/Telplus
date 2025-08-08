@@ -303,8 +303,9 @@ class SimpleTelegramBot:
         try:
             from userbot_service.userbot import userbot_instance
             await userbot_instance.refresh_user_tasks(user_id)
-        except:
-            pass
+            logger.info(f"تم تحديث مهام UserBot للمستخدم {user_id} بعد إنشاء المهمة")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 
         status_text = "تم تشغيل" if new_status else "تم إيقاف"
         await event.answer(f"✅ {status_text} المهمة بنجاح")
@@ -327,8 +328,9 @@ class SimpleTelegramBot:
         try:
             from userbot_service.userbot import userbot_instance
             await userbot_instance.refresh_user_tasks(user_id)
-        except:
-            pass
+            logger.info(f"تم تحديث مهام UserBot للمستخدم {user_id} بعد إنشاء المهمة")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 
         await event.answer("✅ تم حذف المهمة بنجاح")
         await self.list_tasks(event)
@@ -539,8 +541,9 @@ class SimpleTelegramBot:
         try:
             from userbot_service.userbot import userbot_instance
             await userbot_instance.refresh_user_tasks(user_id)
-        except:
-            pass
+            logger.info(f"تم تحديث مهام UserBot للمستخدم {user_id} بعد إنشاء المهمة")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 
         buttons = [
             [Button.inline("📋 عرض المهام", b"list_tasks")],

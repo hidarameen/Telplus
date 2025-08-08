@@ -71,36 +71,61 @@ class UserbotService:
                 # Get user tasks
                 tasks = self.user_tasks.get(user_id, [])
                 
+                # Log incoming message details
+                chat_info = f"Chat ID: {event.chat_id}"
+                if hasattr(event.chat, 'username') and event.chat.username:
+                    chat_info += f", Username: @{event.chat.username}"
+                if hasattr(event.chat, 'title') and event.chat.title:
+                    chat_info += f", Title: {event.chat.title}"
+                
+                logger.info(f"رسالة جديدة من المستخدم {user_id} - {chat_info}")
+                
                 if not tasks:
                     return
                 
-                # Get source chat ID
-                source_chat_id = str(event.chat_id)
-                if event.chat_id > 0:
-                    # Private chat, convert to negative
-                    source_chat_id = f"-{event.chat_id}"
+                # Get source chat ID and username
+                source_chat_id = event.chat_id
+                source_username = getattr(event.chat, 'username', None)
                 
                 # Find matching tasks for this source chat
                 matching_tasks = []
                 for task in tasks:
-                    task_source = task['source_chat_id']
+                    task_source = task['source_chat_id'].strip()
                     
-                    # Handle different formats
-                    if (task_source == source_chat_id or 
-                        task_source == str(event.chat_id) or
-                        task_source == f"@{getattr(event.chat, 'username', '')}" or
-                        (hasattr(event.chat, 'username') and 
-                         event.chat.username and 
-                         task_source == f"@{event.chat.username}")):
-                        matching_tasks.append(task)
+                    # Handle different ID formats
+                    try:
+                        # Convert both to integers for comparison if possible
+                        if task_source.lstrip('-').isdigit():
+                            task_source_int = int(task_source)
+                            if task_source_int == source_chat_id:
+                                matching_tasks.append(task)
+                                continue
+                        
+                        # Handle username format (@username)
+                        if task_source.startswith('@') and source_username:
+                            if task_source == f"@{source_username}":
+                                matching_tasks.append(task)
+                                continue
+                        
+                        # Handle direct string comparison
+                        if task_source == str(source_chat_id):
+                            matching_tasks.append(task)
+                            continue
+                            
+                    except (ValueError, AttributeError):
+                        continue
                 
                 if not matching_tasks:
+                    logger.debug(f"لا توجد مهام مطابقة للمحادثة {source_chat_id} للمستخدم {user_id}")
                     return
+                
+                logger.info(f"تم العثور على {len(matching_tasks)} مهمة مطابقة للمحادثة {source_chat_id}")
                 
                 # Forward message to all target chats
                 for task in matching_tasks:
                     try:
-                        target_chat_id = task['target_chat_id']
+                        target_chat_id = task['target_chat_id'].strip()
+                        task_name = task.get('task_name', f"مهمة {task['id']}")
                         
                         # Parse target chat ID
                         if target_chat_id.startswith('@'):
@@ -114,10 +139,12 @@ class UserbotService:
                             event.message
                         )
                         
-                        logger.info(f"تم توجيه رسالة من {source_chat_id} إلى {target_chat_id} للمستخدم {user_id}")
+                        logger.info(f"✅ تم توجيه رسالة من {source_chat_id} إلى {target_chat_id} (المهمة: {task_name}) للمستخدم {user_id}")
                         
                     except Exception as forward_error:
-                        logger.error(f"خطأ في توجيه الرسالة للمستخدم {user_id}: {forward_error}")
+                        task_name = task.get('task_name', f"مهمة {task['id']}")
+                        logger.error(f"❌ خطأ في توجيه الرسالة (المهمة: {task_name}) للمستخدم {user_id}: {forward_error}")
+                        logger.error(f"تفاصيل الخطأ: مصدر={source_chat_id}, هدف={target_chat_id}")
                         
             except Exception as e:
                 logger.error(f"خطأ في معالج الرسائل للمستخدم {user_id}: {e}")
@@ -127,7 +154,12 @@ class UserbotService:
         try:
             tasks = self.db.get_active_tasks(user_id)
             self.user_tasks[user_id] = tasks
+            
+            # Log detailed task information
             logger.info(f"تم تحديث {len(tasks)} مهمة للمستخدم {user_id}")
+            for task in tasks:
+                logger.info(f"مهمة {task['id']}: مصدر={task['source_chat_id']}, هدف={task['target_chat_id']}")
+                
         except Exception as e:
             logger.error(f"خطأ في تحديث المهام للمستخدم {user_id}: {e}")
     
