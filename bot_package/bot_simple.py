@@ -433,7 +433,15 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         # Parse target chat
-        target_chat_id, target_chat_name = self.parse_chat_input(chat_input)
+        target_chat_ids, target_chat_names = self.parse_chat_input(chat_input)
+
+        if not target_chat_ids:
+            target_chat_id = None
+            target_chat_name = None
+        else:
+            # Take the first one for target (only one target allowed)
+            target_chat_id = target_chat_ids[0]
+            target_chat_name = target_chat_names[0] if target_chat_names else None
 
         if not target_chat_id:
             await event.respond(
@@ -510,23 +518,29 @@ class SimpleTelegramBot:
 
         # Split by comma if multiple inputs
         if ',' in chat_input:
-            inputs = [inp.strip() for inp in chat_input.split(',')]
+            inputs = [inp.strip() for inp in chat_input.split(',') if inp.strip()]
         else:
-            inputs = [chat_input]
+            inputs = [chat_input] if chat_input else []
 
         for chat_input_item in inputs:
+            chat_input_item = chat_input_item.strip()
+            if not chat_input_item:
+                continue
+                
             if chat_input_item.startswith('@'):
                 # Username format
-                username = chat_input_item[1:]
-                chat_ids.append(chat_input_item)
-                chat_names.append(username)
+                username = chat_input_item[1:] if len(chat_input_item) > 1 else None
+                if username:
+                    chat_ids.append(chat_input_item)
+                    chat_names.append(username)
             elif chat_input_item.startswith('https://t.me/'):
                 # URL format
                 username = chat_input_item.split('/')[-1]
-                chat_ids.append(f"@{username}")
-                chat_names.append(username)
-            elif chat_input_item.startswith('-') and chat_input_item[1:].isdigit():
-                # Chat ID format
+                if username:
+                    chat_ids.append(f"@{username}")
+                    chat_names.append(username)
+            elif chat_input_item.startswith('-') and len(chat_input_item) > 1 and chat_input_item[1:].isdigit():
+                # Chat ID format (negative)
                 chat_ids.append(chat_input_item)
                 chat_names.append(None)
             else:
@@ -537,7 +551,7 @@ class SimpleTelegramBot:
                     chat_names.append(None)
                 except ValueError:
                     # Invalid format, skip this item
-                    pass
+                    continue
         
         # Return None if no valid inputs were found
         if not chat_ids:

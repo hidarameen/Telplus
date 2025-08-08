@@ -113,18 +113,28 @@ class Database:
             conn.commit()
 
     # Task Management
-    def create_task(self, user_id: int, source_chat_id: str, source_chat_name: str, 
-                   target_chat_id: str, target_chat_name: str, task_name: str = 'مهمة توجيه') -> int:
+    def create_task(self, user_id: int, task_name: str, source_chat_ids: list, 
+                   source_chat_names: list, target_chat_id: str, target_chat_name: str) -> int:
         """Create new forwarding task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO tasks 
-                (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
+            
+            # Handle multiple source chats by creating separate tasks for each
+            task_ids = []
+            
+            for i, source_chat_id in enumerate(source_chat_ids):
+                source_chat_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else None
+                
+                cursor.execute('''
+                    INSERT INTO tasks 
+                    (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
+                
+                task_ids.append(cursor.lastrowid)
+            
             conn.commit()
-            return cursor.lastrowid
+            return task_ids[0] if task_ids else None
 
     def get_user_tasks(self, user_id: int):
         """Get all tasks for a user"""
