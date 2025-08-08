@@ -28,6 +28,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
+                    task_name TEXT DEFAULT 'مهمة توجيه',
                     source_chat_id TEXT NOT NULL,
                     source_chat_name TEXT,
                     target_chat_id TEXT NOT NULL,
@@ -106,15 +107,15 @@ class Database:
 
     # Task Management
     def create_task(self, user_id: int, source_chat_id: str, source_chat_name: str, 
-                   target_chat_id: str, target_chat_name: str) -> int:
+                   target_chat_id: str, target_chat_name: str, task_name: str = 'مهمة توجيه') -> int:
         """Create new forwarding task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO tasks 
-                (user_id, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (user_id, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
+                (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
             conn.commit()
             return cursor.lastrowid
 
@@ -123,7 +124,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, source_chat_id, source_chat_name, target_chat_id, 
+                SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, 
                        target_chat_name, is_active, created_at
                 FROM tasks 
                 WHERE user_id = ?
@@ -134,12 +135,13 @@ class Database:
             for row in cursor.fetchall():
                 tasks.append({
                     'id': row[0],
-                    'source_chat_id': row[1],
-                    'source_chat_name': row[2],
-                    'target_chat_id': row[3],
-                    'target_chat_name': row[4],
-                    'is_active': bool(row[5]),
-                    'created_at': row[6]
+                    'task_name': row[1],
+                    'source_chat_id': row[2],
+                    'source_chat_name': row[3],
+                    'target_chat_id': row[4],
+                    'target_chat_name': row[5],
+                    'is_active': bool(row[6]),
+                    'created_at': row[7]
                 })
             return tasks
 
@@ -149,14 +151,14 @@ class Database:
             cursor = conn.cursor()
             if user_id:
                 cursor.execute("""
-                    SELECT id, source_chat_id, source_chat_name, target_chat_id, 
+                    SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, 
                            target_chat_name, is_active, created_at
                     FROM tasks 
                     WHERE id = ? AND user_id = ?
                 """, (task_id, user_id))
             else:
                 cursor.execute("""
-                    SELECT id, source_chat_id, source_chat_name, target_chat_id, 
+                    SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, 
                            target_chat_name, is_active, created_at
                     FROM tasks 
                     WHERE id = ?
@@ -166,12 +168,13 @@ class Database:
             if row:
                 return {
                     'id': row[0],
-                    'source_chat_id': row[1],
-                    'source_chat_name': row[2],
-                    'target_chat_id': row[3],
-                    'target_chat_name': row[4],
-                    'is_active': bool(row[5]),
-                    'created_at': row[6]
+                    'task_name': row[1],
+                    'source_chat_id': row[2],
+                    'source_chat_name': row[3],
+                    'target_chat_id': row[4],
+                    'target_chat_name': row[5],
+                    'is_active': bool(row[6]),
+                    'created_at': row[7]
                 }
             return None
 
