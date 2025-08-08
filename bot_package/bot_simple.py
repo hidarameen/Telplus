@@ -232,10 +232,53 @@ class SimpleTelegramBot:
             
         except Exception as e:
             logger.error(f"خطأ في إرسال الرمز: {e}")
-            await event.respond(
-                "❌ حدث خطأ في إرسال رمز التحقق\n"
-                "تأكد من رقم الهاتف وحاول مرة أخرى"
-            )
+            error_message = str(e)
+            
+            if "wait of" in error_message and "seconds is required" in error_message:
+                # Extract wait time from error message
+                try:
+                    wait_seconds = int(error_message.split("wait of ")[1].split(" seconds")[0])
+                    wait_minutes = wait_seconds // 60
+                    wait_hours = wait_minutes // 60
+                    
+                    if wait_hours > 0:
+                        time_str = f"{wait_hours} ساعة و {wait_minutes % 60} دقيقة"
+                    elif wait_minutes > 0:
+                        time_str = f"{wait_minutes} دقيقة"
+                    else:
+                        time_str = f"{wait_seconds} ثانية"
+                    
+                    await event.respond(
+                        f"⏰ تم طلب رموز كثيرة من تليجرام\n\n"
+                        f"🚫 يجب الانتظار: {time_str}\n\n"
+                        f"💡 نصائح لتجنب هذه المشكلة:\n"
+                        f"• لا تطلب رمز جديد إلا بعد انتهاء الرمز السابق\n"
+                        f"• استخدم رقم هاتف صحيح من المرة الأولى\n"
+                        f"• انتظر وصول الرمز قبل طلب آخر\n\n"
+                        f"حاول مرة أخرى بعد انتهاء فترة الانتظار"
+                    )
+                except:
+                    await event.respond(
+                        "⏰ تم طلب رموز كثيرة من تليجرام\n\n"
+                        "يجب الانتظار قبل طلب رمز جديد\n"
+                        "حاول مرة أخرى بعد فترة"
+                    )
+            elif "AuthRestartError" in error_message or "Restart the authorization" in error_message:
+                await event.respond(
+                    "🔄 خطأ في الاتصال مع تليجرام\n\n"
+                    "حاول تسجيل الدخول مرة أخرى\n"
+                    "اضغط /start للبدء من جديد"
+                )
+                self.db.clear_conversation_state(user_id)
+            else:
+                await event.respond(
+                    "❌ حدث خطأ في إرسال رمز التحقق\n\n"
+                    "🔍 تحقق من:\n"
+                    "• رقم الهاتف صحيح ومُفعل\n"
+                    "• لديك اتصال إنترنت جيد\n"
+                    "• لم تطلب رموز كثيرة مؤخراً\n\n"
+                    "حاول مرة أخرى أو اضغط /start"
+                )
     
     async def handle_code_input(self, event, code: str, data: str):
         """Handle verification code input"""
