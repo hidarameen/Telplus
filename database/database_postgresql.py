@@ -551,3 +551,55 @@ class Database:
                 conn.commit()
                 logger.info(f"✅ تم تهجير المهمة {task_id} بنجاح")
                 return True
+
+    def copy_session_from_sqlite(self, sqlite_db_path: str = 'telegram_bot.db'):
+        """Copy user session from SQLite to PostgreSQL"""
+        if not os.path.exists(sqlite_db_path):
+            logger.info("📄 لا توجد قاعدة بيانات SQLite قديمة للنسخ منها")
+            return
+            
+        try:
+            import sqlite3
+            
+            # Connect to SQLite
+            sqlite_conn = sqlite3.connect(sqlite_db_path)
+            sqlite_cursor = sqlite_conn.cursor()
+            
+            # Get authenticated users
+            sqlite_cursor.execute('''
+                SELECT user_id, phone_number, session_string 
+                FROM user_sessions 
+                WHERE is_authenticated = TRUE AND session_string IS NOT NULL
+            ''')
+            
+            sessions = sqlite_cursor.fetchall()
+            
+            if sessions:
+                logger.info(f"📋 تم العثور على {len(sessions)} جلسة في SQLite")
+                
+                # Copy to PostgreSQL
+                with self.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        for user_id, phone_number, session_string in sessions:
+                            cursor.execute('''
+                                INSERT INTO user_sessions 
+                                (user_id, phone_number, session_string, is_authenticated)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (user_id) DO UPDATE SET
+                                    phone_number = EXCLUDED.phone_number,
+                                    session_string = EXCLUDED.session_string,
+                                    is_authenticated = EXCLUDED.is_authenticated,
+                                    updated_at = CURRENT_TIMESTAMP
+                            ''', (user_id, phone_number, session_string, True))
+                            logger.info(f"✅ تم نسخ جلسة المستخدم {user_id} ({phone_number})")
+                        
+                        conn.commit()
+                        
+                logger.info(f"🎉 تم نسخ {len(sessions)} جلسة إلى PostgreSQL بنجاح")
+            else:
+                logger.info("📄 لا توجد جلسات محفوظة في SQLite")
+                
+            sqlite_conn.close()
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في نسخ الجلسات من SQLite: {e}")

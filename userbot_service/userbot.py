@@ -338,7 +338,7 @@ class UserbotService:
                 cursor.execute('''
                     SELECT user_id, session_string, phone_number 
                     FROM user_sessions 
-                    WHERE is_authenticated = 1 AND session_string IS NOT NULL AND session_string != ''
+                    WHERE is_authenticated = TRUE AND session_string IS NOT NULL AND session_string != ''
                 ''')
                 saved_sessions = cursor.fetchall()
             
