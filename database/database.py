@@ -90,6 +90,19 @@ class Database:
                 )
             ''')
 
+            # Task media filters table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_media_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    media_type TEXT NOT NULL,
+                    is_allowed BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, media_type)
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
@@ -552,3 +565,60 @@ class Database:
             conn.commit()
             logger.info(f"✅ تم تهجير المهمة {task_id} بنجاح")
             return True
+
+    # Media Filters Management
+    def get_task_media_filters(self, task_id: int):
+        """Get media filters for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT media_type, is_allowed FROM task_media_filters
+                WHERE task_id = ?
+                ORDER BY media_type
+            ''', (task_id,))
+            
+            filters = {}
+            for row in cursor.fetchall():
+                filters[row['media_type']] = bool(row['is_allowed'])
+            
+            # If no filters exist, return default (all allowed)
+            if not filters:
+                media_types = ['text', 'photo', 'video', 'audio', 'document', 'voice', 'video_note', 'sticker', 'animation', 'location', 'contact', 'poll']
+                filters = {media_type: True for media_type in media_types}
+            
+            return filters
+
+    def set_task_media_filter(self, task_id: int, media_type: str, is_allowed: bool):
+        """Set media filter for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_media_filters 
+                (task_id, media_type, is_allowed)
+                VALUES (?, ?, ?)
+            ''', (task_id, media_type, is_allowed))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def set_all_media_filters(self, task_id: int, is_allowed: bool):
+        """Set all media filters for a task (allow all or block all)"""
+        media_types = ['text', 'photo', 'video', 'audio', 'document', 'voice', 'video_note', 'sticker', 'animation', 'location', 'contact', 'poll']
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for media_type in media_types:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_media_filters 
+                    (task_id, media_type, is_allowed)
+                    VALUES (?, ?, ?)
+                ''', (task_id, media_type, is_allowed))
+            conn.commit()
+            return True
+
+    def reset_task_media_filters(self, task_id: int):
+        """Reset task media filters to default (all allowed)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM task_media_filters WHERE task_id = ?', (task_id,))
+            conn.commit()
+            return cursor.rowcount >= 0

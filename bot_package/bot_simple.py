@@ -170,6 +170,32 @@ class SimpleTelegramBot:
                 await self.cancel_auth(event)
             elif data == "login": # Added handler for login button
                 await self.handle_relogin(event)
+            elif data.startswith("media_filters_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    task_id = int(parts[2])
+                    await self.show_media_filters(event, task_id)
+            elif data.startswith("toggle_media_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    task_id = int(parts[2])
+                    media_type = parts[3]
+                    await self.toggle_media_filter(event, task_id, media_type)
+            elif data.startswith("allow_all_media_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    task_id = int(parts[3])
+                    await self.set_all_media_filters(event, task_id, True)
+            elif data.startswith("block_all_media_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    task_id = int(parts[3])
+                    await self.set_all_media_filters(event, task_id, False)
+            elif data.startswith("reset_media_filters_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    task_id = int(parts[3])
+                    await self.reset_media_filters(event, task_id)
 
         except Exception as e:
             logger.error(f"خطأ في معالج الأزرار: {e}")
@@ -272,6 +298,7 @@ class SimpleTelegramBot:
             [Button.inline(f"🔄 تغيير وضع التوجيه ({forward_mode_text})", f"toggle_forward_mode_{task_id}")],
             [Button.inline(f"📥 إدارة المصادر ({sources_count})", f"manage_sources_{task_id}")],
             [Button.inline(f"📤 إدارة الأهداف ({targets_count})", f"manage_targets_{task_id}")],
+            [Button.inline("🎬 فلاتر الوسائط", f"media_filters_{task_id}")],
             [Button.inline("🔙 رجوع لتفاصيل المهمة", f"task_manage_{task_id}")]
         ]
 
@@ -280,7 +307,8 @@ class SimpleTelegramBot:
             f"📋 الإعدادات الحالية:\n"
             f"• وضع التوجيه: {forward_mode_text}\n"
             f"• عدد المصادر: {sources_count}\n"
-            f"• عدد الأهداف: {targets_count}\n\n"
+            f"• عدد الأهداف: {targets_count}\n"
+            f"• فلاتر الوسائط: متاحة\n\n"
             f"اختر الإعداد الذي تريد تعديله:",
             buttons=buttons
         )
@@ -1820,6 +1848,155 @@ class SimpleTelegramBot:
                 buttons=[[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
             )
 
+
+    async def show_media_filters(self, event, task_id):
+        """Show media filters management for task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        filters = self.db.get_task_media_filters(task_id)
+
+        # Media types with Arabic names
+        media_types = {
+            'text': 'نصوص',
+            'photo': 'صور',
+            'video': 'فيديو',
+            'audio': 'صوتيات',
+            'document': 'ملفات',
+            'voice': 'رسائل صوتية',
+            'video_note': 'فيديو دائري',
+            'sticker': 'ملصقات',
+            'animation': 'صور متحركة',
+            'location': 'مواقع',
+            'contact': 'جهات اتصال',
+            'poll': 'استطلاعات'
+        }
+
+        message = f"🎬 فلاتر الوسائط للمهمة: {task_name}\n\n"
+        message += "📋 حالة أنواع الوسائط:\n\n"
+
+        buttons = []
+        allowed_count = 0
+        total_count = len(media_types)
+
+        for media_type, arabic_name in media_types.items():
+            is_allowed = filters.get(media_type, True)
+            status_icon = "✅" if is_allowed else "❌"
+            if is_allowed:
+                allowed_count += 1
+            
+            message += f"{status_icon} {arabic_name}\n"
+            
+            # Add toggle button
+            toggle_text = "❌ منع" if is_allowed else "✅ سماح"
+            buttons.append([
+                Button.inline(f"{toggle_text} {arabic_name}", f"toggle_media_{task_id}_{media_type}")
+            ])
+
+        message += f"\n📊 الإحصائيات: {allowed_count}/{total_count} مسموح\n\n"
+        message += "اختر نوع الوسائط لتغيير حالته:"
+
+        # Add bulk action buttons
+        buttons.append([
+            Button.inline("✅ السماح للكل", f"allow_all_media_{task_id}"),
+            Button.inline("❌ منع الكل", f"block_all_media_{task_id}")
+        ])
+        buttons.append([Button.inline("🔄 إعادة تعيين افتراضي", f"reset_media_filters_{task_id}")])
+        buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    async def toggle_media_filter(self, event, task_id, media_type):
+        """Toggle media filter for specific type"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        filters = self.db.get_task_media_filters(task_id)
+        current_status = filters.get(media_type, True)
+        new_status = not current_status
+
+        success = self.db.set_task_media_filter(task_id, media_type, new_status)
+
+        if success:
+            status_text = "سُمح" if new_status else "مُنع"
+            media_names = {
+                'text': 'النصوص', 'photo': 'الصور', 'video': 'الفيديو',
+                'audio': 'الصوتيات', 'document': 'الملفات', 'voice': 'الرسائل الصوتية',
+                'video_note': 'الفيديو الدائري', 'sticker': 'الملصقات', 'animation': 'الصور المتحركة',
+                'location': 'المواقع', 'contact': 'جهات الاتصال', 'poll': 'الاستطلاعات'
+            }
+            media_name = media_names.get(media_type, media_type)
+            
+            await event.answer(f"✅ تم تغيير حالة {media_name} إلى: {status_text}")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            await self.show_media_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير الفلتر")
+
+    async def set_all_media_filters(self, event, task_id, is_allowed):
+        """Set all media filters to allow or block all"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        success = self.db.set_all_media_filters(task_id, is_allowed)
+
+        if success:
+            action_text = "السماح لجميع" if is_allowed else "منع جميع"
+            await event.answer(f"✅ تم {action_text} أنواع الوسائط")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            await self.show_media_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تطبيق الفلاتر")
+
+    async def reset_media_filters(self, event, task_id):
+        """Reset media filters to default (all allowed)"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        success = self.db.reset_task_media_filters(task_id)
+
+        if success:
+            await event.answer("✅ تم إعادة تعيين الفلاتر إلى الوضع الافتراضي (السماح للكل)")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            await self.show_media_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في إعادة تعيين الفلاتر")
+
+    async def _refresh_userbot_tasks(self, user_id):
+        """Helper function to refresh UserBot tasks"""
+        try:
+            from userbot_service.userbot import userbot_instance
+            if user_id in userbot_instance.clients:
+                await userbot_instance.refresh_user_tasks(user_id)
+                logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير فلاتر الوسائط")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث مهام UserBot: {e}")
 
     async def show_about(self, event):
         buttons = [
