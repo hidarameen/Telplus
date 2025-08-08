@@ -89,8 +89,13 @@ class UserbotService:
                 
                 # Find matching tasks for this source chat
                 matching_tasks = []
+                logger.debug(f"🔍 البحث عن مهام مطابقة للمحادثة {source_chat_id} (username: {source_username})")
+                
                 for task in tasks:
                     task_source = task['source_chat_id'].strip()
+                    task_name = task.get('task_name', f"مهمة {task['id']}")
+                    
+                    logger.debug(f"🔍 فحص المهمة '{task_name}': مصدر={task_source} ضد {source_chat_id}")
                     
                     # Handle different ID formats
                     try:
@@ -99,20 +104,24 @@ class UserbotService:
                             task_source_int = int(task_source)
                             if task_source_int == source_chat_id:
                                 matching_tasks.append(task)
+                                logger.debug(f"✅ تطابق عددي: {task_source_int} == {source_chat_id}")
                                 continue
                         
                         # Handle username format (@username)
                         if task_source.startswith('@') and source_username:
                             if task_source == f"@{source_username}":
                                 matching_tasks.append(task)
+                                logger.debug(f"✅ تطابق اسم المستخدم: {task_source} == @{source_username}")
                                 continue
                         
                         # Handle direct string comparison
                         if task_source == str(source_chat_id):
                             matching_tasks.append(task)
+                            logger.debug(f"✅ تطابق نصي: {task_source} == {str(source_chat_id)}")
                             continue
                             
-                    except (ValueError, AttributeError):
+                    except (ValueError, AttributeError) as e:
+                        logger.debug(f"❌ خطأ في مقارنة المهمة '{task_name}': {e}")
                         continue
                 
                 if not matching_tasks:
@@ -252,7 +261,7 @@ class UserbotService:
                 cursor.execute('''
                     SELECT user_id, session_string, phone_number 
                     FROM user_sessions 
-                    WHERE is_authenticated = 1 AND session_string IS NOT NULL
+                    WHERE is_authenticated = 1 AND session_string IS NOT NULL AND session_string != ''
                 ''')
                 saved_sessions = cursor.fetchall()
             
@@ -266,10 +275,17 @@ class UserbotService:
             for user_id, session_string, phone_number in saved_sessions:
                 try:
                     logger.info(f"🔄 بدء تشغيل UserBot للمستخدم {user_id} ({phone_number})")
+                    
+                    # Give a small delay between sessions
+                    await asyncio.sleep(1)
+                    
                     success = await self.start_with_session(user_id, session_string)
                     
                     if success:
                         logger.info(f"✅ تم تشغيل UserBot بنجاح للمستخدم {user_id}")
+                        # Load tasks immediately after successful connection
+                        await self.refresh_user_tasks(user_id)
+                        logger.info(f"🔄 تم تحديث مهام المستخدم {user_id}")
                     else:
                         logger.warning(f"⚠️ فشل في تشغيل UserBot للمستخدم {user_id}")
                         
@@ -279,6 +295,14 @@ class UserbotService:
                     
             active_clients = len(self.clients)
             logger.info(f"🎉 تم تشغيل {active_clients} من أصل {len(saved_sessions)} جلسة محفوظة")
+            
+            # Log active tasks summary
+            if active_clients > 0:
+                total_tasks = sum(len(tasks) for tasks in self.user_tasks.values())
+                logger.info(f"📋 إجمالي المهام النشطة: {total_tasks}")
+                for user_id, tasks in self.user_tasks.items():
+                    if tasks:
+                        logger.info(f"👤 المستخدم {user_id}: {len(tasks)} مهمة نشطة")
             
         except Exception as e:
             logger.error(f"خطأ في تشغيل الجلسات الموجودة: {e}")

@@ -36,15 +36,30 @@ class TelegramBotSystem:
         except Exception as e:
             logger.error(f"خطأ في بوت تليجرام: {e}")
 
-    def start_userbot_service(self):
-        """Start userbot service (will wait for authentication)"""
-        logger.info("👤 خدمة UserBot جاهزة وتنتظر تسجيل الدخول...")
-        # UserBot will be started when user authenticates through the bot
+    def start_userbot_service_thread(self):
+        """Start userbot service in async context"""
+        logger.info("👤 بدء تشغيل خدمة UserBot...")
         try:
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Start the userbot service
+            loop.run_until_complete(start_userbot_service())
+            
+            # Keep service running
             while self.running:
                 time.sleep(1)
         except KeyboardInterrupt:
             pass
+        except Exception as e:
+            logger.error(f"خطأ في خدمة UserBot: {e}")
+        finally:
+            if 'loop' in locals():
+                try:
+                    loop.close()
+                except:
+                    pass
 
     def start_all_services(self):
         """Start all services"""
@@ -55,7 +70,7 @@ class TelegramBotSystem:
         self.bot_thread.start()
 
         # Start userbot service monitoring
-        self.userbot_thread = threading.Thread(target=self.start_userbot_service, daemon=True)
+        self.userbot_thread = threading.Thread(target=self.start_userbot_service_thread, daemon=True)
         self.userbot_thread.start()
 
         logger.info("✅ تم تشغيل جميع الخدمات بنجاح")
