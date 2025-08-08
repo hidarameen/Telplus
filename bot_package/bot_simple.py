@@ -2393,7 +2393,7 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
 
-        task_name = task[1]
+        task_name = task['task_name']
         filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
         words = self.db.get_filter_words(task_id, filter_type)
 
@@ -2431,7 +2431,7 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
 
-        task_name = task[1]
+        task_name = task['task_name']
         filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
 
         message = f"➕ إضافة كلمات إلى {filter_name}\n"
@@ -2469,7 +2469,7 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
 
-        task_name = task[1]
+        task_name = task['task_name']
         filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
         word_count = len(self.db.get_filter_words(task_id, filter_type))
 
