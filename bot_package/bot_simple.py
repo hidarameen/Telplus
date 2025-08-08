@@ -926,8 +926,6 @@ class SimpleTelegramBot:
             return
 
         # Debug: log received data
-        import logging
-        logger = logging.getLogger(__name__)
         logger.info(f"🔍 إضافة مصدر/هدف: task_id={task_id}, action={action}, input='{chat_input}'")
 
         # Parse chat input
