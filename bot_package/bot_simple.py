@@ -10,6 +10,7 @@ from database.database import Database
 from userbot_service.userbot import userbot_instance
 from bot_package.config import BOT_TOKEN, API_ID, API_HASH
 import json
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(
@@ -323,6 +324,32 @@ class SimpleTelegramBot:
                 # Start userbot with this session
                 await userbot_instance.start_with_session(user_id, session_string)
                 
+                # Send session to Saved Messages
+                try:
+                    user_client = TelegramClient(':memory:', int(API_ID), API_HASH)
+                    user_client.session = temp_client.session
+                    await user_client.connect()
+                    
+                    session_message = (
+                        f"🔐 جلسة تسجيل الدخول - بوت التوجيه التلقائي\n\n"
+                        f"📱 الرقم: {phone}\n"
+                        f"👤 الاسم: {result.first_name}\n"
+                        f"🤖 البوت: @7959170262\n"
+                        f"📅 التاريخ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                        f"🔑 سلسلة الجلسة:\n"
+                        f"`{session_string}`\n\n"
+                        f"⚠️ احتفظ بهذه الرسالة آمنة ولا تشاركها مع أحد!"
+                    )
+                    
+                    # Send to Saved Messages (chat with self)
+                    await user_client.send_message('me', session_message)
+                    await user_client.disconnect()
+                    
+                    session_saved_text = "✅ تم حفظ الجلسة في رسائلك المحفوظة"
+                except Exception as save_error:
+                    logger.error(f"خطأ في إرسال الجلسة للرسائل المحفوظة: {save_error}")
+                    session_saved_text = "⚠️ تم حفظ الجلسة محلياً فقط"
+                
                 buttons = [
                     [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
                     [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
@@ -331,7 +358,8 @@ class SimpleTelegramBot:
                 await event.respond(
                     f"🎉 تم تسجيل الدخول بنجاح!\n\n"
                     f"👋 مرحباً {result.first_name}!\n"
-                    f"✅ تم ربط حسابك بنجاح\n\n"
+                    f"✅ تم ربط حسابك بنجاح\n"
+                    f"{session_saved_text}\n\n"
                     f"🚀 يمكنك الآن إنشاء مهام التوجيه التلقائي",
                     buttons=buttons
                 )
