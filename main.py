@@ -44,12 +44,18 @@ class TelegramBotSystem:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            # Start the userbot service
-            loop.run_until_complete(start_userbot_service())
+            async def userbot_main():
+                # Start userbot service
+                await start_userbot_service()
+                
+                # Keep running forever
+                logger.info("🚀 UserBot يعمل ويراقب الرسائل...")
+                while self.running:
+                    await asyncio.sleep(1)
             
-            # Keep service running
-            while self.running:
-                time.sleep(1)
+            # Run the userbot service
+            loop.run_until_complete(userbot_main())
+            
         except KeyboardInterrupt:
             pass
         except Exception as e:
@@ -57,6 +63,8 @@ class TelegramBotSystem:
         finally:
             if 'loop' in locals():
                 try:
+                    logger.info("📴 إغلاق خدمة UserBot...")
+                    loop.run_until_complete(stop_userbot_service())
                     loop.close()
                 except:
                     pass
