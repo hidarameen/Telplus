@@ -376,6 +376,14 @@ class UserbotService:
                         # Get forwarding settings
                         forwarding_settings = self.get_forwarding_settings(task['id'])
 
+                        # Check advanced features before sending
+                        if not await self._check_advanced_features(task['id'], final_text, user_id):
+                            logger.info(f"🚫 الرسالة محظورة بواسطة إحدى الميزات المتقدمة للمهمة {task['id']}")
+                            continue
+
+                        # Apply forwarding delay if enabled
+                        await self._apply_forwarding_delay(task['id'])
+
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")
 
@@ -542,6 +550,11 @@ class UserbotService:
 
                             # Apply post-forwarding settings
                             await self.apply_post_forwarding_settings(client, target_entity, msg_id, forwarding_settings, task['id'])
+
+                            # Apply sending interval if there are more targets to process
+                            current_index = matching_tasks.index(task)
+                            if current_index < len(matching_tasks) - 1:  # Not the last task
+                                await self._apply_sending_interval(task['id'])
 
                             # If inline buttons are enabled, notify bot to add them
                             if inline_buttons and message_settings['inline_buttons_enabled']:
@@ -966,6 +979,120 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في جدولة حذف الرسالة: {e}")
 
+    async def _check_advanced_features(self, task_id: int, message_text: str, user_id: int) -> bool:
+        """Check all advanced features before sending message"""
+        try:
+            # Check character limits
+            if not await self._check_character_limits(task_id, message_text):
+                logger.info(f"🚫 الرسالة تجاوزت حدود الأحرف للمهمة {task_id}")
+                return False
+
+            # Check rate limits
+            if not await self._check_rate_limits(task_id, user_id):
+                logger.info(f"🚫 تم رفض الرسالة بسبب حد المعدل للمهمة {task_id}")
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"خطأ في فحص الميزات المتقدمة: {e}")
+            return True  # Allow message if check fails
+
+    async def _check_character_limits(self, task_id: int, message_text: str) -> bool:
+        """Check if message meets character limit requirements"""
+        try:
+            settings = self.db.get_character_limit_settings(task_id)
+            if not settings or not settings.get('enabled', False):
+                return True
+
+            if not message_text:
+                return True
+
+            message_length = len(message_text)
+            min_chars = settings.get('min_chars', 0)
+            max_chars = settings.get('max_chars', 0)
+
+            # Check minimum characters
+            if min_chars > 0 and message_length < min_chars:
+                logger.info(f"📏 الرسالة قصيرة جداً: {message_length} < {min_chars} حرف")
+                return False
+
+            # Check maximum characters
+            if max_chars > 0 and message_length > max_chars:
+                logger.info(f"📏 الرسالة طويلة جداً: {message_length} > {max_chars} حرف")
+                return False
+
+            logger.debug(f"✅ حد الأحرف مقبول: {message_length} حرف (حد أدنى: {min_chars}, حد أقصى: {max_chars})")
+            return True
+
+        except Exception as e:
+            logger.error(f"خطأ في فحص حدود الأحرف: {e}")
+            return True
+
+    async def _check_rate_limits(self, task_id: int, user_id: int) -> bool:
+        """Check if message meets rate limit requirements"""
+        try:
+            settings = self.db.get_rate_limit_settings(task_id)
+            if not settings or not settings.get('enabled', False):
+                return True
+
+            max_messages = settings.get('message_count', 0)
+            time_period_seconds = settings.get('time_period_seconds', 0)
+
+            if max_messages <= 0 or time_period_seconds <= 0:
+                return True
+
+            # Check if rate limit is exceeded
+            is_rate_limited = self.db.check_rate_limit(task_id)
+            
+            if is_rate_limited:
+                logger.info(f"⏰ تم الوصول لحد المعدل: {max_messages} رسالة في {time_period_seconds} ثانية")
+                return False
+
+            # Track this message for rate limiting
+            self.db.track_message_for_rate_limit(task_id)
+            logger.debug(f"✅ حد المعدل مقبول: أقل من {max_messages} رسالة في {time_period_seconds} ثانية")
+            return True
+
+        except Exception as e:
+            logger.error(f"خطأ في فحص حد المعدل: {e}")
+            return True
+
+    async def _apply_forwarding_delay(self, task_id: int):
+        """Apply forwarding delay before sending message"""
+        try:
+            settings = self.db.get_forwarding_delay_settings(task_id)
+            if not settings or not settings.get('enabled', False):
+                return
+
+            delay_seconds = settings.get('delay_seconds', 0)
+            if delay_seconds <= 0:
+                return
+
+            logger.info(f"⏳ تطبيق تأخير التوجيه: {delay_seconds} ثانية للمهمة {task_id}")
+            await asyncio.sleep(delay_seconds)
+            logger.debug(f"✅ انتهى تأخير التوجيه للمهمة {task_id}")
+
+        except Exception as e:
+            logger.error(f"خطأ في تطبيق تأخير التوجيه: {e}")
+
+    async def _apply_sending_interval(self, task_id: int):
+        """Apply sending interval between messages to different targets"""
+        try:
+            settings = self.db.get_sending_interval_settings(task_id)
+            if not settings or not settings.get('enabled', False):
+                return
+
+            interval_seconds = settings.get('interval_seconds', 0)
+            if interval_seconds <= 0:
+                return
+
+            logger.info(f"⏱️ تطبيق فاصل الإرسال: {interval_seconds} ثانية للمهمة {task_id}")
+            await asyncio.sleep(interval_seconds)
+            logger.debug(f"✅ انتهى فاصل الإرسال للمهمة {task_id}")
+
+        except Exception as e:
+            logger.error(f"خطأ في تطبيق فاصل الإرسال: {e}")
 
     async def stop_user(self, user_id: int):
         """Stop userbot for specific user"""
