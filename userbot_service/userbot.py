@@ -1430,11 +1430,13 @@ class UserbotService:
                 formatted_lines = []
                 for line in lines:
                     if line.strip():
+                        # Use proper quote formatting with > and space
                         formatted_lines.append(f"> {line}")
                     else:
-                        formatted_lines.append(line)
+                        # Keep empty lines as they are
+                        formatted_lines.append("")
                 formatted_result = '\n'.join(formatted_lines)
-                logger.info(f"🔤 تطبيق تنسيق اقتباس: '{formatted_result[:50]}...'")
+                logger.info(f"🔤 تطبيق تنسيق اقتباس صحيح: '{formatted_result[:50]}...'")
                 return formatted_result
             elif format_type == 'spoiler':
                 formatted_result = f"||{cleaned_text}||"
