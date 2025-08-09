@@ -46,7 +46,7 @@ class Database:
             # Task Sources table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_sources (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     chat_id TEXT NOT NULL,
                     chat_name TEXT,
@@ -58,7 +58,7 @@ class Database:
             # Task Targets table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_targets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     chat_id TEXT NOT NULL,
                     chat_name TEXT,
@@ -70,7 +70,7 @@ class Database:
             # User sessions table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS user_sessions (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id INTEGER PRIMARYKEY,
                     phone_number TEXT,
                     session_string TEXT,
                     is_authenticated BOOLEAN DEFAULT FALSE,
@@ -82,7 +82,7 @@ class Database:
             # Conversation states table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS conversation_states (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id INTEGER PRIMARYKEY,
                     state TEXT,
                     data TEXT,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -92,7 +92,7 @@ class Database:
             # Task media filters table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_media_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     media_type TEXT NOT NULL,
                     is_allowed BOOLEAN DEFAULT TRUE,
@@ -105,7 +105,7 @@ class Database:
             # Task word filters table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_word_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     filter_type TEXT NOT NULL CHECK (filter_type IN ('whitelist', 'blacklist')),
                     is_enabled BOOLEAN DEFAULT FALSE,
@@ -119,7 +119,7 @@ class Database:
             # Word filter entries table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS word_filter_entries (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     filter_id INTEGER NOT NULL,
                     word_or_phrase TEXT NOT NULL,
                     is_case_sensitive BOOLEAN DEFAULT FALSE,
@@ -131,7 +131,7 @@ class Database:
             # Task text replacements table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_text_replacements (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     is_enabled BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -144,7 +144,7 @@ class Database:
             # Text replacement entries table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS text_replacement_entries (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     replacement_id INTEGER NOT NULL,
                     find_text TEXT NOT NULL,
                     replace_text TEXT NOT NULL,
@@ -172,7 +172,7 @@ class Database:
             # Task footers table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_footers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     enabled BOOLEAN DEFAULT FALSE,
                     footer_text TEXT,
@@ -186,21 +186,21 @@ class Database:
             # Task inline buttons table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_inline_buttons (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     button_text TEXT NOT NULL,
                     button_url TEXT NOT NULL,
                     row_position INTEGER DEFAULT 0,
                     col_position INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Task message settings table - for controlling enabled/disabled status
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_message_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     header_enabled BOOLEAN DEFAULT FALSE,
                     header_text TEXT DEFAULT '',
@@ -209,14 +209,14 @@ class Database:
                     inline_buttons_enabled BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Task forwarding settings table - for advanced forwarding options
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_forwarding_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     link_preview_enabled BOOLEAN DEFAULT TRUE,
                     pin_message_enabled BOOLEAN DEFAULT FALSE,
@@ -227,21 +227,21 @@ class Database:
                     sync_delete_enabled BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Message mappings table - for tracking forwarded messages
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS message_mappings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     source_chat_id TEXT NOT NULL,
                     source_message_id INTEGER NOT NULL,
                     target_chat_id TEXT NOT NULL,
                     target_message_id INTEGER NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
                     UNIQUE(task_id, source_chat_id, source_message_id, target_chat_id)
                 )
             ''')
@@ -249,7 +249,7 @@ class Database:
             # Advanced filters master table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_advanced_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     day_filter_enabled BOOLEAN DEFAULT FALSE,
                     working_hours_enabled BOOLEAN DEFAULT FALSE,
@@ -260,19 +260,19 @@ class Database:
                     forwarded_message_filter_enabled BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Day filters table - for specifying allowed/blocked days
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_day_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     day_number INTEGER NOT NULL CHECK (day_number >= 0 AND day_number <= 6),
                     is_allowed BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
                     UNIQUE(task_id, day_number)
                 )
             ''')
@@ -280,7 +280,7 @@ class Database:
             # Working hours table - for time-based filtering
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_working_hours (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     start_hour INTEGER DEFAULT 0 CHECK (start_hour >= 0 AND start_hour <= 23),
                     start_minute INTEGER DEFAULT 0 CHECK (start_minute >= 0 AND start_minute <= 59),
@@ -289,20 +289,20 @@ class Database:
                     timezone_offset INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Language filters table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_language_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     language_code TEXT NOT NULL,
                     language_name TEXT,
                     is_allowed BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
                     UNIQUE(task_id, language_code)
                 )
             ''')
@@ -310,7 +310,7 @@ class Database:
             # Admin filters table - for filtering by admin users
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_admin_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     admin_user_id INTEGER NOT NULL,
                     admin_username TEXT,
@@ -318,7 +318,7 @@ class Database:
                     is_allowed BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
                     UNIQUE(task_id, admin_user_id)
                 )
             ''')
@@ -326,7 +326,7 @@ class Database:
             # Duplicate settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_duplicate_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     check_text_similarity BOOLEAN DEFAULT TRUE,
                     check_media_similarity BOOLEAN DEFAULT TRUE,
@@ -334,14 +334,14 @@ class Database:
                     time_window_hours INTEGER DEFAULT 24,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Forwarded messages log - for duplicate detection
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS forwarded_messages_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     source_chat_id TEXT NOT NULL,
                     source_message_id INTEGER NOT NULL,
@@ -350,7 +350,7 @@ class Database:
                     media_type TEXT,
                     media_hash TEXT,
                     forwarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
@@ -368,31 +368,31 @@ class Database:
             # Inline button filter settings
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_inline_button_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     block_messages_with_buttons BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Forwarded message filter settings
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_forwarded_message_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     block_forwarded_messages BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Text cleaning settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_text_cleaning_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     remove_links BOOLEAN DEFAULT FALSE,
                     remove_emojis BOOLEAN DEFAULT FALSE,
@@ -402,18 +402,18 @@ class Database:
                     remove_lines_with_keywords BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
             # Text cleaning keywords table (for removing lines containing specific words)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_text_cleaning_keywords (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     keyword TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
                     UNIQUE(task_id, keyword)
                 )
             ''')
@@ -421,7 +421,7 @@ class Database:
             # Text formatting settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_text_formatting_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     text_formatting_enabled BOOLEAN DEFAULT FALSE,
                     format_type TEXT DEFAULT 'regular' CHECK (format_type IN ('regular', 'bold', 'italic', 'underline', 'strikethrough', 'code', 'monospace', 'quote', 'spoiler', 'hyperlink')),
@@ -429,7 +429,7 @@ class Database:
                     hyperlink_url TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    FOREIGNKEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
