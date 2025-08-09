@@ -28,7 +28,7 @@ class UserbotService:
             # Create client with session string
             client = TelegramClient(
                 StringSession(session_string),
-                int(API_ID), 
+                int(API_ID),
                 API_HASH
             )
 
@@ -105,9 +105,9 @@ class UserbotService:
                     "\u200d"                 # zero width joiner
                     "\u23cf"                 # various symbols
                     "\u23e9-\u23f3"          # symbol range
-                    "\u23f8-\u23fa"          # symbol range
+                    "\u23f8-\u23f9"          # symbol range
                     "\u3030"                 # wavy dash
-                    "]+", 
+                    "]+",
                     flags=re.UNICODE
                 )
                 cleaned_text = emoji_pattern.sub('', cleaned_text)
@@ -171,7 +171,7 @@ class UserbotService:
                         filtered_lines.append(line)
                     else:  # Empty line
                         # Only keep empty line if it's between two content lines
-                        if (i > 0 and i < len(lines) - 1 and 
+                        if (i > 0 and i < len(lines) - 1 and
                             lines[i-1].strip() and lines[i+1].strip()):
                             filtered_lines.append('')
 
@@ -551,8 +551,8 @@ class UserbotService:
 
                             # Update the target message with the edited content
                             await client.edit_message(
-                                target_entity, 
-                                target_message_id, 
+                                target_entity,
+                                target_message_id,
                                 event.message.text or event.message.message,
                                 file=None if not event.message.media else event.message.media
                             )
@@ -993,8 +993,8 @@ class UserbotService:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT user_id, session_string, phone_number 
-                    FROM user_sessions 
+                    SELECT user_id, session_string, phone_number
+                    FROM user_sessions
                     WHERE is_authenticated = TRUE AND session_string IS NOT NULL AND session_string != ''
                 ''')
                 saved_sessions = cursor.fetchall()
@@ -1040,7 +1040,7 @@ class UserbotService:
                             logger.info(f"📋 تم تحميل {len(user_tasks)} مهمة للمستخدم {user_id}")
                             for task in user_tasks:
                                 task_name = task.get('task_name', f"مهمة {task['id']}")
-                                logger.info(f"  • {task_name}: {task['source_chat_id']} → {task['target_chat_id']}")
+                                logger.info(f"  • {task_name} - {task['source_chat_id']} → {task['target_chat_id']}")
                                 # Special log for the specific task
                                 if str(task['source_chat_id']) == '-1002289754739':
                                     logger.warning(f"🎯 مهمة Hidar جاهزة للتوجيه: {task['source_chat_id']} → {task['target_chat_id']}")
@@ -1387,12 +1387,15 @@ class UserbotService:
             cleaned_text = re.sub(r'`([^`]+)`', r'\1', cleaned_text)
             # Remove code blocks
             cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
-            # Remove spoiler
-            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'<tg-spoiler>\1</tg-spoiler>', cleaned_text)
+            # Remove spoiler (both markdown and HTML)
+            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<span class="tg-spoiler">(.*?)</span>', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
-            # Remove hyperlinks but keep text
+            # Remove hyperlinks but keep text (both markdown and HTML)
             cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<a href="[^"]*">([^<]+)</a>', r'\1', cleaned_text)
 
             # Apply new formatting based on type
             if format_type == 'regular':
@@ -1413,7 +1416,7 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct HTML spoiler tag for Telegram 
+                # Use correct HTML spoiler tag for Telegram
                 return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
@@ -1450,12 +1453,15 @@ class UserbotService:
             cleaned_text = re.sub(r'`([^`]+)`', r'\1', cleaned_text)
             # Remove code blocks
             cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
-            # Remove spoiler
-            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'<tg-spoiler>\1</tg-spoiler>', cleaned_text)
+            # Remove spoiler (both markdown and HTML)
+            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<span class="tg-spoiler">(.*?)</span>', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
-            # Remove hyperlinks but keep text
+            # Remove hyperlinks but keep text (both markdown and HTML)
             cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<a href="[^"]*">([^<]+)</a>', r'\1', cleaned_text)
 
             # Apply new formatting based on type
             if format_type == 'regular':
@@ -1476,7 +1482,7 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct HTML spoiler tag for Telegram 
+                # Use correct HTML spoiler tag for Telegram
                 return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 return f"[{cleaned_text.strip()}](https://example.com)"
