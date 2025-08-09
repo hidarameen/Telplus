@@ -316,6 +316,51 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فاصل الإرسال: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_char_range_"): # Handler for editing character range
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_edit_character_range(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل نطاق الأحرف: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_rate_count_"): # Handler for editing rate count
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_edit_rate_count(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل عدد الرسائل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_rate_period_"): # Handler for editing rate period
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_edit_rate_period(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل فترة الرسائل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_forwarding_delay_"): # Handler for editing forwarding delay
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_edit_forwarding_delay(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل تأخير التوجيه: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_sending_interval_"): # Handler for editing sending interval
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_edit_sending_interval(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل فاصل الإرسال: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("day_filters_"): # Handler for day filters
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1116,6 +1161,26 @@ class SimpleTelegramBot:
             elif state == 'waiting_button_data': # Handle adding inline button
                 task_id = int(data)
                 await self.handle_add_inline_button(event, task_id, event.text)
+                return
+            elif state == 'editing_char_range': # Handle character range editing
+                task_id = int(data)
+                await self.handle_edit_character_range(event, task_id, event.text)
+                return
+            elif state == 'editing_rate_count': # Handle rate count editing
+                task_id = int(data)
+                await self.handle_edit_rate_count(event, task_id, event.text)
+                return
+            elif state == 'editing_rate_period': # Handle rate period editing
+                task_id = int(data)
+                await self.handle_edit_rate_period(event, task_id, event.text)
+                return
+            elif state == 'editing_forwarding_delay': # Handle forwarding delay editing
+                task_id = int(data)
+                await self.handle_edit_forwarding_delay(event, task_id, event.text)
+                return
+            elif state == 'editing_sending_interval': # Handle sending interval editing
+                task_id = int(data)
+                await self.handle_edit_sending_interval(event, task_id, event.text)
                 return
             elif state == 'waiting_auto_delete_time': # Handle setting auto delete time
                 task_id = int(data)
@@ -6538,6 +6603,316 @@ class SimpleTelegramBot:
         
         # Show updated settings
         await self.show_sending_interval_settings(event, task_id)
+
+    # ===== Edit Settings Functions =====
+    
+    async def start_edit_character_range(self, event, task_id):
+        """Start editing character range"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_character_limit_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+
+        buttons = [
+            [Button.inline("🔙 إلغاء", f"character_limit_{task_id}")]
+        ]
+
+        message = f"📏 تعديل نطاق الأحرف للمهمة: {task_name}\n\n"
+        message += f"📊 النطاق الحالي: {settings['min_chars']} - {settings['max_chars']} حرف\n\n"
+        message += "📝 أرسل النطاق الجديد في صورة:\n"
+        message += "الحد_الأدنى-الحد_الأقصى\n\n"
+        message += "مثال: 10-500"
+
+        await event.edit(message, buttons=buttons)
+        
+        # Set conversation state for this user and task
+        self.db.set_conversation_state(user_id, 'editing_char_range', str(task_id))
+
+    async def start_edit_rate_count(self, event, task_id):
+        """Start editing rate count"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_rate_limit_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+
+        buttons = [
+            [Button.inline("🔙 إلغاء", f"rate_limit_{task_id}")]
+        ]
+
+        message = f"📊 تعديل عدد الرسائل للمهمة: {task_name}\n\n"
+        message += f"📈 العدد الحالي: {settings['message_count']} رسائل\n\n"
+        message += "📝 أرسل العدد الجديد (رقم صحيح موجب)\n\n"
+        message += "مثال: 10"
+
+        await event.edit(message, buttons=buttons)
+        
+        # Set conversation state for this user and task
+        self.db.set_conversation_state(user_id, 'editing_rate_count', str(task_id))
+
+    async def start_edit_rate_period(self, event, task_id):
+        """Start editing rate period"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_rate_limit_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+
+        buttons = [
+            [Button.inline("🔙 إلغاء", f"rate_limit_{task_id}")]
+        ]
+
+        message = f"⏱️ تعديل فترة الرسائل للمهمة: {task_name}\n\n"
+        message += f"⏰ الفترة الحالية: {settings['time_period_seconds']} ثانية\n\n"
+        message += "📝 أرسل الفترة الجديدة بالثواني (رقم صحيح موجب)\n\n"
+        message += "مثال: 60 (للدقيقة الواحدة)"
+
+        await event.edit(message, buttons=buttons)
+        
+        # Set conversation state for this user and task
+        self.db.set_conversation_state(user_id, 'editing_rate_period', str(task_id))
+
+    async def start_edit_forwarding_delay(self, event, task_id):
+        """Start editing forwarding delay"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_forwarding_delay_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+
+        buttons = [
+            [Button.inline("🔙 إلغاء", f"forwarding_delay_{task_id}")]
+        ]
+
+        message = f"⏱️ تعديل تأخير التوجيه للمهمة: {task_name}\n\n"
+        message += f"⏰ التأخير الحالي: {settings['delay_seconds']} ثانية\n\n"
+        message += "📝 أرسل التأخير الجديد بالثواني (رقم صحيح موجب)\n\n"
+        message += "مثال: 5 (للانتظار 5 ثوان قبل التوجيه)"
+
+        await event.edit(message, buttons=buttons)
+        
+        # Set conversation state for this user and task
+        self.db.set_conversation_state(user_id, 'editing_forwarding_delay', str(task_id))
+
+    async def start_edit_sending_interval(self, event, task_id):
+        """Start editing sending interval"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_sending_interval_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+
+        buttons = [
+            [Button.inline("🔙 إلغاء", f"sending_interval_{task_id}")]
+        ]
+
+        message = f"⏱️ تعديل فاصل الإرسال للمهمة: {task_name}\n\n"
+        message += f"⏰ الفاصل الحالي: {settings['interval_seconds']} ثانية\n\n"
+        message += "📝 أرسل الفاصل الجديد بالثواني (رقم صحيح موجب)\n\n"
+        message += "مثال: 2 (للانتظار ثانيتين بين كل هدف)"
+
+        await event.edit(message, buttons=buttons)
+        
+        # Set conversation state for this user and task
+        self.db.set_conversation_state(user_id, 'editing_sending_interval', str(task_id))
+
+    # ===== Edit Handler Functions =====
+    
+    async def handle_edit_character_range(self, event, task_id, text):
+        """Handle character range editing"""
+        user_id = event.sender_id
+        
+        try:
+            # Parse the range in format: min-max
+            if '-' not in text:
+                await event.respond("❌ صيغة خاطئة. يجب أن تكون: الحد_الأدنى-الحد_الأقصى\nمثال: 10-500")
+                return
+            
+            parts = text.strip().split('-')
+            if len(parts) != 2:
+                await event.respond("❌ صيغة خاطئة. يجب أن تكون: الحد_الأدنى-الحد_الأقصى\nمثال: 10-500")
+                return
+            
+            min_chars = int(parts[0].strip())
+            max_chars = int(parts[1].strip())
+            
+            if min_chars < 0 or max_chars < 0:
+                await event.respond("❌ الأرقام يجب أن تكون موجبة")
+                return
+            
+            if min_chars >= max_chars:
+                await event.respond("❌ الحد الأدنى يجب أن يكون أقل من الحد الأقصى")
+                return
+            
+            # Update the settings
+            self.db.update_character_limit_settings(task_id, min_chars=min_chars, max_chars=max_chars)
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Clear conversation state
+            self.db.clear_conversation_state(user_id)
+            
+            await event.respond(f"✅ تم تحديث نطاق الأحرف إلى: {min_chars} - {max_chars}")
+            
+            # Show updated settings
+            await self.show_character_limit_settings(event, task_id)
+            
+        except ValueError:
+            await event.respond("❌ يجب إدخال أرقام صحيحة فقط\nمثال: 10-500")
+        except Exception as e:
+            logger.error(f"خطأ في تعديل نطاق الأحرف: {e}")
+            await event.respond("❌ حدث خطأ في تحديث النطاق")
+            self.db.clear_conversation_state(user_id)
+
+    async def handle_edit_rate_count(self, event, task_id, text):
+        """Handle rate count editing"""
+        user_id = event.sender_id
+        
+        try:
+            count = int(text.strip())
+            
+            if count <= 0:
+                await event.respond("❌ العدد يجب أن يكون رقماً موجباً أكبر من الصفر")
+                return
+            
+            # Update the settings
+            self.db.update_rate_limit_settings(task_id, message_count=count)
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Clear conversation state
+            self.db.clear_conversation_state(user_id)
+            
+            await event.respond(f"✅ تم تحديث عدد الرسائل إلى: {count}")
+            
+            # Show updated settings
+            await self.show_rate_limit_settings(event, task_id)
+            
+        except ValueError:
+            await event.respond("❌ يجب إدخال رقم صحيح موجب\nمثال: 10")
+        except Exception as e:
+            logger.error(f"خطأ في تعديل عدد الرسائل: {e}")
+            await event.respond("❌ حدث خطأ في تحديث عدد الرسائل")
+            self.db.clear_conversation_state(user_id)
+
+    async def handle_edit_rate_period(self, event, task_id, text):
+        """Handle rate period editing"""
+        user_id = event.sender_id
+        
+        try:
+            period = int(text.strip())
+            
+            if period <= 0:
+                await event.respond("❌ الفترة يجب أن تكون رقماً موجباً أكبر من الصفر")
+                return
+            
+            # Update the settings
+            self.db.update_rate_limit_settings(task_id, time_period_seconds=period)
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Clear conversation state
+            self.db.clear_conversation_state(user_id)
+            
+            await event.respond(f"✅ تم تحديث فترة الرسائل إلى: {period} ثانية")
+            
+            # Show updated settings
+            await self.show_rate_limit_settings(event, task_id)
+            
+        except ValueError:
+            await event.respond("❌ يجب إدخال رقم صحيح موجب\nمثال: 60")
+        except Exception as e:
+            logger.error(f"خطأ في تعديل فترة الرسائل: {e}")
+            await event.respond("❌ حدث خطأ في تحديث فترة الرسائل")
+            self.db.clear_conversation_state(user_id)
+
+    async def handle_edit_forwarding_delay(self, event, task_id, text):
+        """Handle forwarding delay editing"""
+        user_id = event.sender_id
+        
+        try:
+            delay = int(text.strip())
+            
+            if delay < 0:
+                await event.respond("❌ التأخير يجب أن يكون رقماً صفراً أو موجباً")
+                return
+            
+            # Update the settings
+            self.db.update_forwarding_delay_settings(task_id, delay_seconds=delay)
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Clear conversation state
+            self.db.clear_conversation_state(user_id)
+            
+            await event.respond(f"✅ تم تحديث تأخير التوجيه إلى: {delay} ثانية")
+            
+            # Show updated settings
+            await self.show_forwarding_delay_settings(event, task_id)
+            
+        except ValueError:
+            await event.respond("❌ يجب إدخال رقم صحيح\nمثال: 5")
+        except Exception as e:
+            logger.error(f"خطأ في تعديل تأخير التوجيه: {e}")
+            await event.respond("❌ حدث خطأ في تحديث تأخير التوجيه")
+            self.db.clear_conversation_state(user_id)
+
+    async def handle_edit_sending_interval(self, event, task_id, text):
+        """Handle sending interval editing"""
+        user_id = event.sender_id
+        
+        try:
+            interval = int(text.strip())
+            
+            if interval < 0:
+                await event.respond("❌ الفاصل يجب أن يكون رقماً صفراً أو موجباً")
+                return
+            
+            # Update the settings
+            self.db.update_sending_interval_settings(task_id, interval_seconds=interval)
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Clear conversation state
+            self.db.clear_conversation_state(user_id)
+            
+            await event.respond(f"✅ تم تحديث فاصل الإرسال إلى: {interval} ثانية")
+            
+            # Show updated settings
+            await self.show_sending_interval_settings(event, task_id)
+            
+        except ValueError:
+            await event.respond("❌ يجب إدخال رقم صحيح\nمثال: 2")
+        except Exception as e:
+            logger.error(f"خطأ في تعديل فاصل الإرسال: {e}")
+            await event.respond("❌ حدث خطأ في تحديث فاصل الإرسال")
+            self.db.clear_conversation_state(user_id)
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()
