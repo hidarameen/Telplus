@@ -1387,10 +1387,10 @@ class UserbotService:
             cleaned_text = re.sub(r'`([^`]+)`', r'\1', cleaned_text)
             # Remove code blocks
             cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
-            # Remove spoiler (both markdown and HTML)
+            # Remove spoiler (both markdown and HTML) - specific order
             cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
-            cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
             cleaned_text = re.sub(r'<span class="tg-spoiler">(.*?)</span>', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
             # Remove hyperlinks but keep text (both markdown and HTML)
@@ -1453,10 +1453,10 @@ class UserbotService:
             cleaned_text = re.sub(r'`([^`]+)`', r'\1', cleaned_text)
             # Remove code blocks
             cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
-            # Remove spoiler (both markdown and HTML)
+            # Remove spoiler (both markdown and HTML) - specific order
             cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
-            cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
             cleaned_text = re.sub(r'<span class="tg-spoiler">(.*?)</span>', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
             # Remove hyperlinks but keep text (both markdown and HTML)
