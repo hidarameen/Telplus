@@ -1362,34 +1362,72 @@ class UserbotService:
             
             format_type = formatting_settings.get('format_type', 'regular')
             
-            # Apply formatting based on type
+            # First, clean any existing Telegram formatting to ensure clean application
+            import re
+            cleaned_text = message_text
+            
+            # Remove existing Telegram markdown formatting
+            if format_type != 'regular':
+                # Remove bold
+                cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
+                # Remove italic  
+                cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
+                # Remove underline
+                cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
+                # Remove strikethrough
+                cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
+                # Remove code
+                cleaned_text = re.sub(r'`(.*?)`', r'\1', cleaned_text)
+                # Remove spoiler
+                cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
+                # Remove quotes
+                cleaned_text = re.sub(r'^>', '', cleaned_text, flags=re.MULTILINE)
+                # Remove code blocks
+                cleaned_text = re.sub(r'```(.*?)```', r'\1', cleaned_text, flags=re.DOTALL)
+            
+            # Apply new formatting based on type
             if format_type == 'regular':
-                return message_text
+                # For regular, remove all formatting and return clean text
+                cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', message_text)
+                cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
+                cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
+                cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
+                cleaned_text = re.sub(r'`(.*?)`', r'\1', cleaned_text)
+                cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
+                cleaned_text = re.sub(r'^>', '', cleaned_text, flags=re.MULTILINE)
+                cleaned_text = re.sub(r'```(.*?)```', r'\1', cleaned_text, flags=re.DOTALL)
+                return cleaned_text.strip()
             elif format_type == 'bold':
-                return f"**{message_text}**"
+                return f"**{cleaned_text}**"
             elif format_type == 'italic':
-                return f"*{message_text}*"
+                return f"_{cleaned_text}_"  # Use underscore for italic to avoid conflicts
             elif format_type == 'underline':
-                return f"__{message_text}__"
+                return f"__{cleaned_text}__"
             elif format_type == 'strikethrough':
-                return f"~~{message_text}~~"
+                return f"~~{cleaned_text}~~"
             elif format_type == 'code':
-                return f"`{message_text}`"
+                return f"`{cleaned_text}`"
             elif format_type == 'monospace':
-                return f"```{message_text}```"
+                return f"```\n{cleaned_text}\n```"
             elif format_type == 'quote':
-                # Apply quote formatting to each line
-                lines = message_text.split('\n')
-                formatted_lines = [f">{line}" for line in lines]
+                # Apply quote formatting to each non-empty line
+                lines = cleaned_text.split('\n')
+                formatted_lines = []
+                for line in lines:
+                    if line.strip():
+                        formatted_lines.append(f"> {line}")
+                    else:
+                        formatted_lines.append(line)
                 return '\n'.join(formatted_lines)
             elif format_type == 'spoiler':
-                return f"||{message_text}||"
+                return f"||{cleaned_text}||"
             elif format_type == 'hyperlink':
                 hyperlink_text = formatting_settings.get('hyperlink_text', 'نص')
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
+                # Replace the entire message with the hyperlink
                 return f"[{hyperlink_text}]({hyperlink_url})"
             
-            return message_text
+            return cleaned_text
             
         except Exception as e:
             logger.error(f"خطأ في تنسيق النص للمهمة {task_id}: {e}")

@@ -1,4 +1,3 @@
-
 """
 SQLite Database management for Telegram Bot System
 """
@@ -26,7 +25,7 @@ class Database:
         """Initialize database tables"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Tasks table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -159,7 +158,7 @@ class Database:
             # Task headers table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_headers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     enabled BOOLEAN DEFAULT FALSE,
                     header_text TEXT,
@@ -173,7 +172,7 @@ class Database:
             # Task footers table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_footers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     enabled BOOLEAN DEFAULT FALSE,
                     footer_text TEXT,
@@ -187,7 +186,7 @@ class Database:
             # Task inline buttons table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_inline_buttons (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     button_text TEXT NOT NULL,
                     button_url TEXT NOT NULL,
@@ -201,7 +200,7 @@ class Database:
             # Task message settings table - for controlling enabled/disabled status
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_message_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     header_enabled BOOLEAN DEFAULT FALSE,
                     header_text TEXT DEFAULT '',
@@ -217,7 +216,7 @@ class Database:
             # Task forwarding settings table - for advanced forwarding options
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_forwarding_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     link_preview_enabled BOOLEAN DEFAULT TRUE,
                     pin_message_enabled BOOLEAN DEFAULT FALSE,
@@ -235,7 +234,7 @@ class Database:
             # Message mappings table - for tracking forwarded messages
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS message_mappings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     source_chat_id TEXT NOT NULL,
                     source_message_id INTEGER NOT NULL,
@@ -250,7 +249,7 @@ class Database:
             # Advanced filters master table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_advanced_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     day_filter_enabled BOOLEAN DEFAULT FALSE,
                     working_hours_enabled BOOLEAN DEFAULT FALSE,
@@ -268,7 +267,7 @@ class Database:
             # Day filters table - for specifying allowed/blocked days
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_day_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     day_number INTEGER NOT NULL CHECK (day_number >= 0 AND day_number <= 6),
                     is_allowed BOOLEAN DEFAULT TRUE,
@@ -281,7 +280,7 @@ class Database:
             # Working hours table - for time-based filtering
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_working_hours (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     start_hour INTEGER DEFAULT 0 CHECK (start_hour >= 0 AND start_hour <= 23),
                     start_minute INTEGER DEFAULT 0 CHECK (start_minute >= 0 AND start_minute <= 59),
@@ -297,7 +296,7 @@ class Database:
             # Language filters table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_language_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     language_code TEXT NOT NULL,
                     language_name TEXT,
@@ -311,7 +310,7 @@ class Database:
             # Admin filters table - for filtering by admin users
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_admin_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     admin_user_id INTEGER NOT NULL,
                     admin_username TEXT,
@@ -327,7 +326,7 @@ class Database:
             # Duplicate settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_duplicate_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     check_text_similarity BOOLEAN DEFAULT TRUE,
                     check_media_similarity BOOLEAN DEFAULT TRUE,
@@ -342,7 +341,7 @@ class Database:
             # Forwarded messages log - for duplicate detection
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS forwarded_messages_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     source_chat_id TEXT NOT NULL,
                     source_message_id INTEGER NOT NULL,
@@ -360,7 +359,7 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_forwarded_messages_task_message_hash 
                 ON forwarded_messages_log (task_id, message_hash)
             ''')
-            
+
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_forwarded_messages_task_media_hash 
                 ON forwarded_messages_log (task_id, media_hash)
@@ -369,7 +368,7 @@ class Database:
             # Inline button filter settings
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_inline_button_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     block_messages_with_buttons BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -381,7 +380,7 @@ class Database:
             # Forwarded message filter settings
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_forwarded_message_filters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     block_forwarded_messages BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -393,7 +392,7 @@ class Database:
             # Text cleaning settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_text_cleaning_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     remove_links BOOLEAN DEFAULT FALSE,
                     remove_emojis BOOLEAN DEFAULT FALSE,
@@ -410,7 +409,7 @@ class Database:
             # Text cleaning keywords table (for removing lines containing specific words)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_text_cleaning_keywords (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL,
                     keyword TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -422,7 +421,7 @@ class Database:
             # Text formatting settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_text_formatting_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARYKEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
                     text_formatting_enabled BOOLEAN DEFAULT FALSE,
                     format_type TEXT DEFAULT 'regular' CHECK (format_type IN ('regular', 'bold', 'italic', 'underline', 'strikethrough', 'code', 'monospace', 'quote', 'spoiler', 'hyperlink')),
@@ -440,7 +439,7 @@ class Database:
                 logger.info("✅ تم إضافة عمود sync_edit_enabled")
             except Exception:
                 pass  # Column already exists
-                
+
             try:
                 cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN sync_delete_enabled BOOLEAN DEFAULT FALSE")
                 logger.info("✅ تم إضافة عمود sync_delete_enabled")
@@ -492,7 +491,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM user_sessions WHERE user_id = ?', (user_id,))
             conn.commit()
-    
+
     def get_all_authenticated_users(self):
         """Get all authenticated users with their sessions"""
         with self.get_connection() as conn:
@@ -515,7 +514,7 @@ class Database:
                 (user_id, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
                 VALUES (?, ?, ?, ?, ?)
             ''', (user_id, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
-            
+
             task_id = cursor.lastrowid
             conn.commit()
             return task_id
@@ -526,21 +525,21 @@ class Database:
         """Create new forwarding task with multiple sources and targets"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Create main task with the first source and target
             first_source_id = source_chat_ids[0] if source_chat_ids else ''
             first_source_name = source_chat_names[0] if source_chat_names else first_source_id
             first_target_id = target_chat_ids[0] if target_chat_ids else ''
             first_target_name = target_chat_names[0] if target_chat_names else first_target_id
-            
+
             cursor.execute('''
                 INSERT INTO tasks 
                 (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (user_id, task_name, first_source_id, first_source_name, first_target_id, first_target_name))
-            
+
             task_id = cursor.lastrowid
-            
+
             # Add all sources to task_sources table
             for i, source_id in enumerate(source_chat_ids):
                 source_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else source_id
@@ -548,7 +547,7 @@ class Database:
                     INSERT INTO task_sources (task_id, chat_id, chat_name)
                     VALUES (?, ?, ?)
                 ''', (task_id, source_id, source_name))
-            
+
             # Add all targets to task_targets table
             for i, target_id in enumerate(target_chat_ids):
                 target_name = target_chat_names[i] if target_chat_names and i < len(target_chat_names) else target_id
@@ -556,7 +555,7 @@ class Database:
                     INSERT INTO task_targets (task_id, chat_id, chat_name)
                     VALUES (?, ?, ?)
                 ''', (task_id, target_id, target_name))
-            
+
             conn.commit()
             return task_id
 
@@ -654,7 +653,7 @@ class Database:
             tasks = []
             for row in cursor.fetchall():
                 task_id = row['id']
-                
+
                 # Get all sources for this task
                 sources = self.get_task_sources(task_id)
                 if not sources:
@@ -664,7 +663,7 @@ class Database:
                         'chat_id': row['source_chat_id'],
                         'chat_name': row['source_chat_name']
                     }] if row['source_chat_id'] else []
-                
+
                 # Get all targets for this task  
                 targets = self.get_task_targets(task_id)
                 if not targets:
@@ -674,7 +673,7 @@ class Database:
                         'chat_id': row['target_chat_id'],
                         'chat_name': row['target_chat_name']
                     }] if row['target_chat_id'] else []
-                
+
                 # Create individual task entries for each source-target combination
                 for source in sources:
                     for target in targets:
@@ -787,7 +786,7 @@ class Database:
                 WHERE task_id = ?
                 ORDER BY created_at
             ''', (task_id,))
-            
+
             sources = []
             for row in cursor.fetchall():
                 sources.append({
@@ -806,7 +805,7 @@ class Database:
                 WHERE task_id = ?
                 ORDER BY created_at
             ''', (task_id,))
-            
+
             targets = []
             for row in cursor.fetchall():
                 targets.append({
@@ -843,11 +842,11 @@ class Database:
         task = self.get_task(task_id, user_id)
         if not task:
             return None
-            
+
         # Get sources and targets from new tables
         sources = self.get_task_sources(task_id)
         targets = self.get_task_targets(task_id)
-        
+
         # If no sources/targets in new tables, use legacy data
         if not sources and task.get('source_chat_id'):
             sources = [{
@@ -855,17 +854,17 @@ class Database:
                 'chat_id': task['source_chat_id'],
                 'chat_name': task['source_chat_name']
             }]
-            
+
         if not targets and task.get('target_chat_id'):
             targets = [{
                 'id': 0,
                 'chat_id': task['target_chat_id'],
                 'chat_name': task['target_chat_name']
             }]
-        
+
         task['sources'] = sources
         task['targets'] = targets
-        
+
         return task
 
     def migrate_task_to_new_structure(self, task_id: int):
@@ -874,22 +873,22 @@ class Database:
         if not task:
             logger.error(f"❌ لا يمكن العثور على المهمة {task_id} للتهجير")
             return False
-            
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Check if already migrated
             cursor.execute('SELECT COUNT(*) FROM task_sources WHERE task_id = ?', (task_id,))
             sources_count = cursor.fetchone()[0]
             cursor.execute('SELECT COUNT(*) FROM task_targets WHERE task_id = ?', (task_id,))
             targets_count = cursor.fetchone()[0]
-            
+
             if sources_count > 0 and targets_count > 0:
                 logger.info(f"✅ المهمة {task_id} مهاجرة بالفعل ({sources_count} مصادر, {targets_count} أهداف)")
                 return True  # Already migrated
-            
+
             logger.info(f"🔄 بدء تهجير المهمة {task_id} إلى البنية الجديدة")
-            
+
             # Migrate source if not exists
             if sources_count == 0 and task.get('source_chat_id'):
                 cursor.execute('''
@@ -897,7 +896,7 @@ class Database:
                     VALUES (?, ?, ?)
                 ''', (task_id, task['source_chat_id'], task['source_chat_name']))
                 logger.info(f"➕ أضيف مصدر: {task['source_chat_id']}")
-            
+
             # Migrate target if not exists
             if targets_count == 0 and task.get('target_chat_id'):
                 cursor.execute('''
@@ -905,7 +904,7 @@ class Database:
                     VALUES (?, ?, ?)
                 ''', (task_id, task['target_chat_id'], task['target_chat_name']))
                 logger.info(f"➕ أضيف هدف: {task['target_chat_id']}")
-            
+
             conn.commit()
             logger.info(f"✅ تم تهجير المهمة {task_id} بنجاح")
             return True
@@ -920,16 +919,16 @@ class Database:
                 WHERE task_id = ?
                 ORDER BY media_type
             ''', (task_id,))
-            
+
             filters = {}
             for row in cursor.fetchall():
                 filters[row['media_type']] = bool(row['is_allowed'])
-            
+
             # If no filters exist, return default (all allowed)
             if not filters:
                 media_types = ['text', 'photo', 'video', 'audio', 'document', 'voice', 'video_note', 'sticker', 'animation', 'location', 'contact', 'poll']
                 filters = {media_type: True for media_type in media_types}
-            
+
             return filters
 
     def set_task_media_filter(self, task_id: int, media_type: str, is_allowed: bool):
@@ -947,7 +946,7 @@ class Database:
     def set_all_media_filters(self, task_id: int, is_allowed: bool):
         """Set all media filters for a task (allow all or block all)"""
         media_types = ['text', 'photo', 'video', 'audio', 'document', 'voice', 'video_note', 'sticker', 'animation', 'location', 'contact', 'poll']
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             for media_type in media_types:
@@ -976,19 +975,19 @@ class Database:
                 SELECT filter_type, is_enabled FROM task_word_filters
                 WHERE task_id = ?
             ''', (task_id,))
-            
+
             settings = {}
             for row in cursor.fetchall():
                 settings[row['filter_type']] = {
                     'enabled': bool(row['is_enabled'])
                 }
-            
+
             # Set defaults if not exist
             if 'whitelist' not in settings:
                 settings['whitelist'] = {'enabled': False}
             if 'blacklist' not in settings:
                 settings['blacklist'] = {'enabled': False}
-                
+
             return settings
 
     def set_word_filter_status(self, task_id: int, filter_type: str, is_enabled: bool):
@@ -1011,11 +1010,11 @@ class Database:
                 SELECT id FROM task_word_filters
                 WHERE task_id = ? AND filter_type = ?
             ''', (task_id, filter_type))
-            
+
             result = cursor.fetchone()
             if result:
                 return result['id']
-            
+
             # Create new filter (enabled by default)
             cursor.execute('''
                 INSERT INTO task_word_filters (task_id, filter_type, is_enabled)
@@ -1027,7 +1026,7 @@ class Database:
     def add_word_to_filter(self, task_id: int, filter_type: str, word_or_phrase: str, is_case_sensitive: bool = False):
         """Add word/phrase to filter list"""
         filter_id = self.get_word_filter_id(task_id, filter_type)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             # Check if word already exists
@@ -1035,10 +1034,10 @@ class Database:
                 SELECT id FROM word_filter_entries
                 WHERE filter_id = ? AND word_or_phrase = ?
             ''', (filter_id, word_or_phrase))
-            
+
             if cursor.fetchone():
                 return False  # Word already exists
-            
+
             cursor.execute('''
                 INSERT INTO word_filter_entries (filter_id, word_or_phrase, is_case_sensitive)
                 VALUES (?, ?, ?)
@@ -1049,7 +1048,7 @@ class Database:
     def remove_word_from_filter(self, task_id: int, filter_type: str, word_or_phrase: str):
         """Remove word/phrase from filter list"""
         filter_id = self.get_word_filter_id(task_id, filter_type)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -1062,7 +1061,7 @@ class Database:
     def get_filter_words(self, task_id: int, filter_type: str):
         """Get all words/phrases for a filter - returns format compatible with bot functions"""
         filter_id = self.get_word_filter_id(task_id, filter_type)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -1070,7 +1069,7 @@ class Database:
                 WHERE filter_id = ?
                 ORDER BY word_or_phrase
             ''', (filter_id,))
-            
+
             # Return tuples in format (id, filter_id, word_or_phrase, is_case_sensitive)
             # This includes case sensitivity info to avoid separate queries
             words = []
@@ -1081,14 +1080,14 @@ class Database:
     def get_word_id(self, task_id: int, filter_type: str, word: str):
         """Get word ID from filter"""
         filter_id = self.get_word_filter_id(task_id, filter_type)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id FROM word_filter_entries
                 WHERE filter_id = ? AND word_or_phrase = ?
             ''', (filter_id, word))
-            
+
             result = cursor.fetchone()
             return result['id'] if result else None
 
@@ -1100,7 +1099,7 @@ class Database:
                 SELECT is_enabled FROM task_word_filters
                 WHERE task_id = ? AND filter_type = ?
             ''', (task_id, filter_type))
-            
+
             result = cursor.fetchone()
             return bool(result['is_enabled']) if result else False
 
@@ -1116,7 +1115,7 @@ class Database:
                 SELECT word_or_phrase FROM word_filter_entries
                 WHERE id = ?
             ''', (word_id,))
-            
+
             result = cursor.fetchone()
             return result['word_or_phrase'] if result else None
 
@@ -1133,7 +1132,7 @@ class Database:
     def clear_filter_words(self, task_id: int, filter_type: str):
         """Clear all words from filter"""
         filter_id = self.get_word_filter_id(task_id, filter_type)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM word_filter_entries WHERE filter_id = ?', (filter_id,))
@@ -1144,9 +1143,9 @@ class Database:
         """Check if message is allowed by word filters"""
         if not message_text:
             return True  # No text to filter
-        
+
         settings = self.get_task_word_filter_settings(task_id)
-        
+
         # Check whitelist first (if enabled)
         if settings['whitelist']['enabled']:
             whitelist_words = self.get_filter_words(task_id, 'whitelist')
@@ -1154,11 +1153,11 @@ class Database:
                 # Message must contain at least one whitelisted word/phrase
                 message_lower = message_text.lower()
                 found_match = False
-                
+
                 for word_data in whitelist_words:
                     word = word_data[2]  # word_or_phrase from tuple
                     is_case_sensitive = word_data[3]  # is_case_sensitive from tuple
-                    
+
                     if is_case_sensitive:
                         if word in message_text:
                             found_match = True
@@ -1167,20 +1166,20 @@ class Database:
                         if word.lower() in message_lower:
                             found_match = True
                             break
-                
+
                 if not found_match:
                     logger.info(f"🚫 الرسالة محظورة: لا تحتوي على كلمات من القائمة البيضاء")
                     return False
-        
+
         # Check blacklist (if enabled)
         if settings['blacklist']['enabled']:
             blacklist_words = self.get_filter_words(task_id, 'blacklist')
             message_lower = message_text.lower()
-            
+
             for word_data in blacklist_words:
                 word = word_data[2]  # word_or_phrase from tuple
                 is_case_sensitive = word_data[3]  # is_case_sensitive from tuple
-                
+
                 if is_case_sensitive:
                     if word in message_text:
                         logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
@@ -1189,14 +1188,14 @@ class Database:
                     if word.lower() in message_lower:
                         logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
                         return False
-        
+
         return True  # Message is allowed
 
     def add_multiple_filter_words(self, task_id: int, filter_type: str, words_list: list):
         """Add multiple words to a filter"""
         filter_id = self.get_word_filter_id(task_id, filter_type)
         added_count = 0
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             for word in words_list:
@@ -1207,14 +1206,14 @@ class Database:
                         SELECT id FROM word_filter_entries
                         WHERE filter_id = ? AND word_or_phrase = ?
                     ''', (filter_id, word))
-                    
+
                     if not cursor.fetchone():
                         cursor.execute('''
                             INSERT INTO word_filter_entries (filter_id, word_or_phrase, is_case_sensitive)
                             VALUES (?, ?, FALSE)
                         ''', (filter_id, word))
                         added_count += 1
-            
+
             conn.commit()
             logger.info(f"✅ تم إضافة {added_count} كلمة إلى فلتر {filter_type} للمهمة {task_id}")
             return added_count
@@ -1227,11 +1226,11 @@ class Database:
             cursor.execute('''
                 SELECT id FROM task_text_replacements WHERE task_id = ?
             ''', (task_id,))
-            
+
             result = cursor.fetchone()
             if result:
                 return result['id']
-            
+
             # Create new replacement configuration (enabled by default)
             cursor.execute('''
                 INSERT INTO task_text_replacements (task_id, is_enabled)
@@ -1247,14 +1246,14 @@ class Database:
             cursor.execute('''
                 SELECT is_enabled FROM task_text_replacements WHERE task_id = ?
             ''', (task_id,))
-            
+
             result = cursor.fetchone()
             return bool(result['is_enabled']) if result else False
 
     def set_text_replacement_enabled(self, task_id: int, is_enabled: bool):
         """Enable/disable text replacement for a task"""
         replacement_id = self.get_text_replacement_id(task_id)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -1269,7 +1268,7 @@ class Database:
                            is_case_sensitive: bool = False, is_whole_word: bool = False):
         """Add text replacement rule"""
         replacement_id = self.get_text_replacement_id(task_id)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -1283,7 +1282,7 @@ class Database:
     def get_text_replacements(self, task_id: int):
         """Get all text replacements for a task"""
         replacement_id = self.get_text_replacement_id(task_id)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -1292,7 +1291,7 @@ class Database:
                 WHERE replacement_id = ?
                 ORDER BY find_text
             ''', (replacement_id,))
-            
+
             return cursor.fetchall()
 
     def remove_text_replacement(self, replacement_entry_id: int):
@@ -1308,7 +1307,7 @@ class Database:
     def clear_text_replacements(self, task_id: int):
         """Clear all text replacements for a task"""
         replacement_id = self.get_text_replacement_id(task_id)
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -1323,7 +1322,7 @@ class Database:
         """
         replacement_id = self.get_text_replacement_id(task_id)
         added_count = 0
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             for replacement in replacements_list:
@@ -1332,14 +1331,14 @@ class Database:
                     replace_text = replacement[1].strip()
                     is_case_sensitive = replacement[2] if len(replacement) > 2 else False
                     is_whole_word = replacement[3] if len(replacement) > 3 else False
-                    
+
                     if find_text:  # Only add non-empty find text
                         # Check if replacement already exists
                         cursor.execute('''
                             SELECT id FROM text_replacement_entries
                             WHERE replacement_id = ? AND find_text = ?
                         ''', (replacement_id, find_text))
-                        
+
                         if not cursor.fetchone():
                             cursor.execute('''
                                 INSERT INTO text_replacement_entries 
@@ -1347,7 +1346,7 @@ class Database:
                                 VALUES (?, ?, ?, ?, ?)
                             ''', (replacement_id, find_text, replace_text, is_case_sensitive, is_whole_word))
                             added_count += 1
-            
+
             conn.commit()
             logger.info(f"✅ تم إضافة {added_count} استبدال نصي للمهمة {task_id}")
             return added_count
@@ -1356,26 +1355,26 @@ class Database:
         """Apply text replacements to message text"""
         if not message_text or not self.is_text_replacement_enabled(task_id):
             return message_text
-        
+
         replacements = self.get_text_replacements(task_id)
         if not replacements:
             return message_text
-        
+
         modified_text = message_text
         replacement_count = 0
-        
+
         for replacement in replacements:
             find_text = replacement['find_text']
             replace_text = replacement['replace_text']
             is_case_sensitive = replacement['is_case_sensitive']
             is_whole_word = replacement['is_whole_word']
-            
+
             if is_whole_word:
                 # Use word boundary matching
                 import re
                 pattern = r'\b' + re.escape(find_text) + r'\b'
                 flags = 0 if is_case_sensitive else re.IGNORECASE
-                
+
                 old_text = modified_text
                 modified_text = re.sub(pattern, replace_text, modified_text, flags=flags)
                 if old_text != modified_text:
@@ -1394,10 +1393,10 @@ class Database:
                     modified_text = re.sub(pattern, replace_text, modified_text, flags=re.IGNORECASE)
                     if old_text != modified_text:
                         replacement_count += 1
-        
+
         if replacement_count > 0:
             logger.info(f"✅ تم تطبيق {replacement_count} استبدال على الرسالة للمهمة {task_id}")
-        
+
         return modified_text
 
     def get_message_settings(self, task_id: int) -> dict:
@@ -1405,28 +1404,28 @@ class Database:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 # Get header settings
                 cursor.execute('''
                     SELECT enabled, header_text FROM task_headers 
                     WHERE task_id = ?
                 ''', (task_id,))
                 header_result = cursor.fetchone()
-                
+
                 # Get footer settings
                 cursor.execute('''
                     SELECT enabled, footer_text FROM task_footers 
                     WHERE task_id = ?
                 ''', (task_id,))
                 footer_result = cursor.fetchone()
-                
+
                 # Get inline buttons enabled status from task_message_settings
                 cursor.execute('''
                     SELECT inline_buttons_enabled FROM task_message_settings 
                     WHERE task_id = ?
                 ''', (task_id,))
                 settings_result = cursor.fetchone()
-                
+
                 if not settings_result:
                     # Create default settings if not exist
                     cursor.execute('''
@@ -1436,7 +1435,7 @@ class Database:
                     inline_buttons_enabled = False
                 else:
                     inline_buttons_enabled = bool(settings_result['inline_buttons_enabled'])
-                
+
                 return {
                     'header_enabled': header_result['enabled'] if header_result else False,
                     'header_text': header_result['header_text'] if header_result else None,
@@ -1458,11 +1457,11 @@ class Database:
         """Update header settings for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Check if header exists
             cursor.execute('SELECT id FROM task_headers WHERE task_id = ?', (task_id,))
             existing = cursor.fetchone()
-            
+
             if existing:
                 # Update existing
                 cursor.execute('''
@@ -1476,18 +1475,18 @@ class Database:
                     INSERT INTO task_headers (task_id, enabled, header_text)
                     VALUES (?, ?, ?)
                 ''', (task_id, enabled, header_text))
-            
+
             conn.commit()
 
     def update_footer_settings(self, task_id: int, enabled: bool, footer_text: str = None):
         """Update footer settings for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Check if footer exists
             cursor.execute('SELECT id FROM task_footers WHERE task_id = ?', (task_id,))
             existing = cursor.fetchone()
-            
+
             if existing:
                 # Update existing
                 cursor.execute('''
@@ -1501,7 +1500,7 @@ class Database:
                     INSERT INTO task_footers (task_id, enabled, footer_text)
                     VALUES (?, ?, ?)
                 ''', (task_id, enabled, footer_text))
-            
+
             conn.commit()
 
     def update_inline_buttons_enabled(self, task_id: int, enabled: bool):
@@ -1534,7 +1533,7 @@ class Database:
                 ORDER BY row_position, col_position
             ''', (task_id,))
             results = cursor.fetchall()
-            
+
             return [{
                 'id': row['id'],
                 'task_id': row['task_id'],
@@ -1553,7 +1552,7 @@ class Database:
                 (task_id, button_text, button_url, row_position, col_position)
                 VALUES (?, ?, ?, ?, ?)
             ''', (task_id, button_text, button_url, row_pos, col_pos))
-            
+
             # Auto-enable inline buttons when first button is added
             cursor.execute('''
                 INSERT OR REPLACE INTO task_message_settings 
@@ -1568,7 +1567,7 @@ class Database:
                 UNION SELECT ?, FALSE, '', FALSE, '', TRUE WHERE NOT EXISTS 
                 (SELECT 1 FROM task_message_settings WHERE task_id = ?)
             ''', (task_id, task_id, task_id, task_id))
-            
+
             conn.commit()
             return cursor.lastrowid
 
@@ -1578,7 +1577,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM task_inline_buttons WHERE task_id = ?', (task_id,))
             deleted_count = cursor.rowcount
-            
+
             # Disable inline buttons when all buttons are cleared
             if deleted_count > 0:
                 cursor.execute('''
@@ -1594,7 +1593,7 @@ class Database:
                     UNION SELECT ?, FALSE, '', FALSE, '', FALSE WHERE NOT EXISTS 
                     (SELECT 1 FROM task_message_settings WHERE task_id = ?)
                 ''', (task_id, task_id, task_id, task_id))
-            
+
             conn.commit()
             return deleted_count
 
@@ -1610,7 +1609,7 @@ class Database:
                 WHERE task_id = ?
             ''', (task_id,))
             result = cursor.fetchone()
-            
+
             if result:
                 return {
                     'link_preview_enabled': result['link_preview_enabled'],
@@ -1637,13 +1636,13 @@ class Database:
         """Update forwarding settings for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Get current settings
             current_settings = self.get_forwarding_settings(task_id)
-            
+
             # Update with new values
             current_settings.update(kwargs)
-            
+
             cursor.execute('''
                 INSERT OR REPLACE INTO task_forwarding_settings 
                 (task_id, link_preview_enabled, pin_message_enabled, silent_notifications, 
@@ -1653,7 +1652,7 @@ class Database:
                   current_settings['pin_message_enabled'], current_settings['silent_notifications'],
                   current_settings['auto_delete_enabled'], current_settings['auto_delete_time'],
                   current_settings['sync_edit_enabled'], current_settings['sync_delete_enabled']))
-            
+
             conn.commit()
 
     def toggle_link_preview(self, task_id: int) -> bool:
@@ -1738,7 +1737,7 @@ class Database:
             conn.commit()
 
     # ===== Advanced Filters Management =====
-    
+
     def get_advanced_filters_settings(self, task_id: int) -> Dict:
         """Get advanced filters settings for a task"""
         with self.get_connection() as conn:
@@ -1747,7 +1746,7 @@ class Database:
                 SELECT * FROM task_advanced_filters WHERE task_id = ?
             ''', (task_id,))
             result = cursor.fetchone()
-            
+
             if result:
                 return {
                     'day_filter_enabled': bool(result['day_filter_enabled']),
@@ -1770,7 +1769,7 @@ class Database:
                     'inline_button_filter_enabled': False,
                     'forwarded_message_filter_enabled': False
                 }
-                
+
     def create_default_advanced_filters_settings(self, task_id: int):
         """Create default advanced filters settings for a task"""
         with self.get_connection() as conn:
@@ -1780,7 +1779,7 @@ class Database:
                 VALUES (?)
             ''', (task_id,))
             conn.commit()
-            
+
     def update_advanced_filter_setting(self, task_id: int, filter_type: str, enabled: bool):
         """Update a specific advanced filter setting"""
         valid_filters = {
@@ -1799,13 +1798,13 @@ class Database:
             'inline_button': 'inline_button_filter_enabled',
             'forwarded_message': 'forwarded_message_filter_enabled'
         }
-        
+
         if filter_type not in valid_filters:
             logger.error(f"نوع فلتر غير صالح: {filter_type}. الأنواع المتاحة: {list(valid_filters.keys())}")
             return False
-            
+
         column_name = valid_filters[filter_type]
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             # Create record if doesn't exist
@@ -1813,19 +1812,19 @@ class Database:
                 INSERT OR IGNORE INTO task_advanced_filters (task_id)
                 VALUES (?)
             ''', (task_id,))
-            
+
             # Update the specific filter
             cursor.execute(f'''
                 UPDATE task_advanced_filters 
                 SET {column_name} = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE task_id = ?
             ''', (enabled, task_id))
-            
+
             conn.commit()
             return cursor.rowcount > 0
-            
+
     # ===== Day Filters Management =====
-    
+
     def get_day_filters(self, task_id: int) -> List[Dict]:
         """Get day filters for a task"""
         with self.get_connection() as conn:
@@ -1835,15 +1834,15 @@ class Database:
                 WHERE task_id = ?
                 ORDER BY day_number
             ''', (task_id,))
-            
+
             # Create a dict for all days (0=Monday to 6=Sunday)
             day_names = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
             day_filters = {}
-            
+
             # Get existing filters
             for row in cursor.fetchall():
                 day_filters[row['day_number']] = bool(row['is_allowed'])
-            
+
             # Fill in missing days with default (allowed)
             result = []
             for day_num in range(7):
@@ -1852,15 +1851,15 @@ class Database:
                     'day_name': day_names[day_num],
                     'is_allowed': day_filters.get(day_num, True)
                 })
-            
+
             return result
-            
+
     def set_day_filter(self, task_id: int, day_number: int, is_allowed: bool):
         """Set day filter for a specific day"""
         if day_number < 0 or day_number > 6:
             logger.error(f"رقم يوم غير صالح: {day_number}")
             return False
-            
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -1870,7 +1869,7 @@ class Database:
             ''', (task_id, day_number, is_allowed))
             conn.commit()
             return True
-            
+
     def set_all_day_filters(self, task_id: int, is_allowed: bool):
         """Set all day filters (select all/none)"""
         with self.get_connection() as conn:
@@ -1883,9 +1882,9 @@ class Database:
                 ''', (task_id, day_num, is_allowed))
             conn.commit()
             return True
-            
+
     # ===== Working Hours Management =====
-    
+
     def get_working_hours(self, task_id: int) -> Optional[Dict]:
         """Get working hours for a task"""
         with self.get_connection() as conn:
@@ -1895,7 +1894,7 @@ class Database:
                 FROM task_working_hours WHERE task_id = ?
             ''', (task_id,))
             result = cursor.fetchone()
-            
+
             if result:
                 return {
                     'start_hour': result['start_hour'],
@@ -1905,7 +1904,7 @@ class Database:
                     'timezone_offset': result['timezone_offset']
                 }
             return None
-            
+
     def set_working_hours(self, task_id: int, start_hour: int, start_minute: int, 
                          end_hour: int, end_minute: int, timezone_offset: int = 0):
         """Set working hours for a task"""
@@ -1918,9 +1917,9 @@ class Database:
             ''', (task_id, start_hour, start_minute, end_hour, end_minute, timezone_offset))
             conn.commit()
             return True
-            
+
     # ===== Language Filters Management =====
-    
+
     def get_language_filters(self, task_id: int) -> List[Dict]:
         """Get language filters for a task"""
         with self.get_connection() as conn:
@@ -1930,7 +1929,7 @@ class Database:
                 FROM task_language_filters WHERE task_id = ?
                 ORDER BY language_name
             ''', (task_id,))
-            
+
             filters = []
             for row in cursor.fetchall():
                 filters.append({
@@ -1939,7 +1938,7 @@ class Database:
                     'is_allowed': bool(row['is_allowed'])
                 })
             return filters
-            
+
     def add_language_filter(self, task_id: int, language_code: str, language_name: str, is_allowed: bool = True):
         """Add language filter"""
         with self.get_connection() as conn:
@@ -1951,7 +1950,7 @@ class Database:
             ''', (task_id, language_code, language_name, is_allowed))
             conn.commit()
             return True
-            
+
     def toggle_language_filter(self, task_id: int, language_code: str):
         """Toggle language filter status"""
         with self.get_connection() as conn:
@@ -1963,7 +1962,7 @@ class Database:
             ''', (task_id, language_code))
             conn.commit()
             return cursor.rowcount > 0
-            
+
     def remove_language_filter(self, task_id: int, language_code: str):
         """Remove language filter"""
         with self.get_connection() as conn:
@@ -1974,9 +1973,9 @@ class Database:
             ''', (task_id, language_code))
             conn.commit()
             return cursor.rowcount > 0
-            
+
     # ===== Admin Filters Management =====
-    
+
     def get_admin_filters(self, task_id: int) -> List[Dict]:
         """Get admin filters for a task"""
         with self.get_connection() as conn:
@@ -1986,7 +1985,7 @@ class Database:
                 FROM task_admin_filters WHERE task_id = ?
                 ORDER BY admin_first_name, admin_username
             ''', (task_id,))
-            
+
             filters = []
             for row in cursor.fetchall():
                 filters.append({
@@ -1996,7 +1995,7 @@ class Database:
                     'is_allowed': bool(row['is_allowed'])
                 })
             return filters
-            
+
     def add_admin_filter(self, task_id: int, admin_user_id: int, admin_username: str = None, 
                         admin_first_name: str = None, is_allowed: bool = True):
         """Add admin filter"""
@@ -2009,7 +2008,7 @@ class Database:
             ''', (task_id, admin_user_id, admin_username, admin_first_name, is_allowed))
             conn.commit()
             return True
-            
+
     def toggle_admin_filter(self, task_id: int, admin_user_id: int):
         """Toggle admin filter status"""
         with self.get_connection() as conn:
@@ -2021,7 +2020,7 @@ class Database:
             ''', (task_id, admin_user_id))
             conn.commit()
             return cursor.rowcount > 0
-            
+
     def remove_admin_filter(self, task_id: int, admin_user_id: int):
         """Remove admin filter"""
         with self.get_connection() as conn:
@@ -2032,13 +2031,13 @@ class Database:
             ''', (task_id, admin_user_id))
             conn.commit()
             return cursor.rowcount > 0
-            
+
     def get_admin_filters_for_source(self, task_id: int, source_chat_id: str) -> List[Dict]:
         """Get admin filters for a specific source channel"""
         # For now, return all admin filters for the task since we don't track source-specific admins yet
         # In the future, we can enhance the schema to track which source each admin belongs to
         return self.get_admin_filters(task_id)
-        
+
     def clear_admin_filters_for_source(self, task_id: int, source_chat_id: str):
         """Clear admin filters for a specific source (for now clears all for the task)"""
         # For now, we'll clear all admins for the task when refreshing any source
@@ -2050,7 +2049,7 @@ class Database:
             ''', (task_id,))
             conn.commit()
             return cursor.rowcount
-            
+
     def get_admin_previous_permissions(self, task_id: int) -> Dict[int, bool]:
         """Get previous admin permissions before refresh"""
         with self.get_connection() as conn:
@@ -2058,12 +2057,12 @@ class Database:
             cursor.execute('''
                 SELECT admin_user_id, is_allowed FROM task_admin_filters WHERE task_id = ?
             ''', (task_id,))
-            
+
             permissions = {}
             for row in cursor.fetchall():
                 permissions[row['admin_user_id']] = bool(row['is_allowed'])
             return permissions
-            
+
     def add_admin_filter_with_previous_permission(self, task_id: int, admin_user_id: int, 
                                                  admin_username: str = None, admin_first_name: str = None, 
                                                  previous_permissions: Dict[int, bool] = None):
@@ -2075,14 +2074,14 @@ class Database:
         else:
             is_allowed = True  # Default for new admins
             logger.info(f"✅ مشرف جديد {admin_user_id}: إذن افتراضي = True")
-            
+
         return self.add_admin_filter(task_id, admin_user_id, admin_username, admin_first_name, is_allowed)
-            
+
     def is_advanced_filter_enabled(self, task_id: int, filter_type: str) -> bool:
         """Check if an advanced filter is enabled for a task"""
         try:
             settings = self.get_advanced_filters_settings(task_id)
-            
+
             filter_mapping = {
                 'admin': 'admin_filter_enabled',
                 'admin_filter': 'admin_filter_enabled',
@@ -2098,7 +2097,7 @@ class Database:
                 'forwarded_message': 'forwarded_message_filter_enabled',
                 'forwarded_message_filter': 'forwarded_message_filter_enabled'
             }
-            
+
             setting_key = filter_mapping.get(filter_type.lower())
             if setting_key:
                 return settings.get(setting_key, False)
@@ -2108,7 +2107,7 @@ class Database:
         except Exception as e:
             logger.error(f"خطأ في فحص حالة الفلتر المتقدم: {e}")
             return False
-            
+
     def get_task_allowed_admins(self, task_id: int) -> List[int]:
         """Get list of allowed admin user IDs for a task"""
         try:
@@ -2118,14 +2117,14 @@ class Database:
                     SELECT admin_user_id FROM task_admin_filters 
                     WHERE task_id = ? AND is_allowed = TRUE
                 ''', (task_id,))
-                
+
                 allowed_admins = [row['admin_user_id'] for row in cursor.fetchall()]
                 logger.info(f"المشرفين المسموحين للمهمة {task_id}: {allowed_admins}")
                 return allowed_admins
         except Exception as e:
             logger.error(f"خطأ في جلب المشرفين المسموحين للمهمة {task_id}: {e}")
             return []
-            
+
     def is_admin_allowed(self, task_id: int, user_id: int) -> bool:
         """Check if a user is allowed by admin filters for a task"""
         try:
@@ -2135,7 +2134,7 @@ class Database:
                     SELECT is_allowed FROM task_admin_filters 
                     WHERE task_id = ? AND admin_user_id = ?
                 ''', (task_id, user_id))
-                
+
                 result = cursor.fetchone()
                 if result:
                     is_allowed = bool(result['is_allowed'])
@@ -2147,9 +2146,9 @@ class Database:
         except Exception as e:
             logger.error(f"خطأ في فحص إذن المشرف {user_id} للمهمة {task_id}: {e}")
             return False
-            
+
     # ===== Text Cleaning Management =====
-    
+
     def get_text_cleaning_settings(self, task_id: int) -> Dict:
         """Get text cleaning settings for a task"""
         with self.get_connection() as conn:
@@ -2160,7 +2159,7 @@ class Database:
                 FROM task_text_cleaning_settings WHERE task_id = ?
             ''', (task_id,))
             result = cursor.fetchone()
-            
+
             if result:
                 return {
                     'remove_links': bool(result['remove_links']),
@@ -2181,7 +2180,7 @@ class Database:
                     'remove_empty_lines': False,
                     'remove_lines_with_keywords': False
                 }
-                
+
     def create_default_text_cleaning_settings(self, task_id: int):
         """Create default text cleaning settings for a task"""
         with self.get_connection() as conn:
@@ -2191,7 +2190,7 @@ class Database:
                 VALUES (?)
             ''', (task_id,))
             conn.commit()
-            
+
     def update_text_cleaning_setting(self, task_id: int, setting_type: str, enabled: bool):
         """Update a specific text cleaning setting"""
         valid_settings = {
@@ -2202,13 +2201,13 @@ class Database:
             'remove_empty_lines': 'remove_empty_lines',
             'remove_lines_with_keywords': 'remove_lines_with_keywords'
         }
-        
+
         if setting_type not in valid_settings:
             logger.error(f"نوع إعداد تنظيف النص غير صالح: {setting_type}")
             return False
-            
+
         column_name = valid_settings[setting_type]
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             # Create record if doesn't exist
@@ -2216,17 +2215,17 @@ class Database:
                 INSERT OR IGNORE INTO task_text_cleaning_settings (task_id)
                 VALUES (?)
             ''', (task_id,))
-            
+
             # Update the specific setting
             cursor.execute(f'''
                 UPDATE task_text_cleaning_settings 
                 SET {column_name} = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE task_id = ?
             ''', (enabled, task_id))
-            
+
             conn.commit()
             return cursor.rowcount > 0
-            
+
     def get_text_cleaning_keywords(self, task_id: int) -> List[str]:
         """Get text cleaning keywords for a task"""
         with self.get_connection() as conn:
@@ -2235,9 +2234,9 @@ class Database:
                 SELECT keyword FROM task_text_cleaning_keywords 
                 WHERE task_id = ? ORDER BY keyword
             ''', (task_id,))
-            
+
             return [row['keyword'] for row in cursor.fetchall()]
-            
+
     def add_text_cleaning_keyword(self, task_id: int, keyword: str):
         """Add a text cleaning keyword"""
         with self.get_connection() as conn:
@@ -2248,7 +2247,7 @@ class Database:
             ''', (task_id, keyword.strip()))
             conn.commit()
             return cursor.rowcount > 0
-            
+
     def remove_text_cleaning_keyword(self, task_id: int, keyword: str):
         """Remove a text cleaning keyword"""
         with self.get_connection() as conn:
@@ -2259,7 +2258,7 @@ class Database:
             ''', (task_id, keyword))
             conn.commit()
             return cursor.rowcount > 0
-            
+
     def clear_text_cleaning_keywords(self, task_id: int):
         """Clear all text cleaning keywords for a task"""
         with self.get_connection() as conn:
@@ -2269,7 +2268,7 @@ class Database:
             ''', (task_id,))
             conn.commit()
             return cursor.rowcount
-            
+
     def add_multiple_text_cleaning_keywords(self, task_id: int, keywords: List[str]) -> int:
         """Add multiple text cleaning keywords"""
         added_count = 0
@@ -2278,9 +2277,9 @@ class Database:
             if keyword and self.add_text_cleaning_keyword(task_id, keyword):
                 added_count += 1
         return added_count
-            
+
     # ===== Duplicate Detection Management =====
-    
+
     def get_duplicate_settings(self, task_id: int) -> Dict:
         """Get duplicate detection settings"""
         with self.get_connection() as conn:
@@ -2291,7 +2290,7 @@ class Database:
                 FROM task_duplicate_settings WHERE task_id = ?
             ''', (task_id,))
             result = cursor.fetchone()
-            
+
             if result:
                 return {
                     'check_text_similarity': bool(result['check_text_similarity']),
@@ -2308,7 +2307,7 @@ class Database:
                     'similarity_threshold': 0.85,
                     'time_window_hours': 24
                 }
-                
+
     def create_default_duplicate_settings(self, task_id: int):
         """Create default duplicate detection settings"""
         with self.get_connection() as conn:
@@ -2318,7 +2317,7 @@ class Database:
                 VALUES (?)
             ''', (task_id,))
             conn.commit()
-            
+
     def update_duplicate_settings(self, task_id: int, check_text: bool = True, 
                                  check_media: bool = True, threshold: float = 0.85, 
                                  time_window: int = 24):
@@ -2332,7 +2331,7 @@ class Database:
             ''', (task_id, check_text, check_media, threshold, time_window))
             conn.commit()
             return True
-            
+
     def log_forwarded_message(self, task_id: int, source_chat_id: str, source_message_id: int,
                              message_text: str = None, message_hash: str = None, 
                              media_type: str = None, media_hash: str = None):
@@ -2346,13 +2345,13 @@ class Database:
             ''', (task_id, source_chat_id, source_message_id, message_text, message_hash, media_type, media_hash))
             conn.commit()
             return cursor.lastrowid
-            
+
     def check_duplicate_message(self, task_id: int, message_hash: str = None, media_hash: str = None,
                                time_window_hours: int = 24) -> bool:
         """Check if message is duplicate within time window"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Check for duplicates within time window
             if message_hash:
                 cursor.execute('''
@@ -2360,24 +2359,24 @@ class Database:
                     WHERE task_id = ? AND message_hash = ?
                     AND datetime(forwarded_at) > datetime('now', '-{} hours')
                 '''.format(time_window_hours), (task_id, message_hash))
-                
+
                 if cursor.fetchone()['count'] > 0:
                     return True
-                    
+
             if media_hash:
                 cursor.execute('''
                     SELECT COUNT(*) as count FROM forwarded_messages_log
                     WHERE task_id = ? AND media_hash = ?
                     AND datetime(forwarded_at) > datetime('now', '-{} hours')
                 '''.format(time_window_hours), (task_id, media_hash))
-                
+
                 if cursor.fetchone()['count'] > 0:
                     return True
-                    
+
             return False
-            
+
     # ===== Inline Button and Forwarded Message Filters =====
-    
+
     def get_inline_button_filter_setting(self, task_id: int) -> bool:
         """Get inline button filter setting"""
         with self.get_connection() as conn:
@@ -2388,7 +2387,7 @@ class Database:
             ''', (task_id,))
             result = cursor.fetchone()
             return bool(result['block_messages_with_buttons']) if result else False
-            
+
     def set_inline_button_filter(self, task_id: int, block_buttons: bool):
         """Set inline button filter"""
         with self.get_connection() as conn:
@@ -2400,7 +2399,7 @@ class Database:
             ''', (task_id, block_buttons))
             conn.commit()
             return True
-            
+
     def get_forwarded_message_filter_setting(self, task_id: int) -> bool:
         """Get forwarded message filter setting"""
         with self.get_connection() as conn:
@@ -2411,7 +2410,7 @@ class Database:
             ''', (task_id,))
             result = cursor.fetchone()
             return bool(result['block_forwarded_messages']) if result else False
-            
+
     def set_forwarded_message_filter(self, task_id: int, block_forwarded: bool):
         """Set forwarded message filter"""
         with self.get_connection() as conn:
@@ -2425,7 +2424,7 @@ class Database:
             return True
 
     # ===== Text Cleaning Functions =====
-    
+
     def get_text_cleaning_keywords(self, task_id):
         """Get text cleaning keywords for a task"""
         with self.get_connection() as conn:
@@ -2435,7 +2434,7 @@ class Database:
                 WHERE task_id = ?
                 ORDER BY keyword
             """, (task_id,))
-            
+
             results = cursor.fetchall()
             return [row[0] for row in results]
 
@@ -2444,7 +2443,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             added_count = 0
-            
+
             for keyword in keywords:
                 keyword = keyword.strip()
                 if keyword:
@@ -2453,7 +2452,7 @@ class Database:
                         SELECT keyword FROM task_text_cleaning_keywords
                         WHERE task_id = ? AND keyword = ?
                     """, (task_id, keyword))
-                    
+
                     if not cursor.fetchone():
                         # Add new keyword
                         cursor.execute("""
@@ -2461,7 +2460,7 @@ class Database:
                             VALUES (?, ?)
                         """, (task_id, keyword))
                         added_count += 1
-            
+
             conn.commit()
             return added_count
 
@@ -2473,7 +2472,7 @@ class Database:
                 DELETE FROM task_text_cleaning_keywords
                 WHERE task_id = ? AND keyword = ?
             """, (task_id, keyword))
-            
+
             conn.commit()
             return cursor.rowcount > 0
 
@@ -2485,13 +2484,13 @@ class Database:
                 DELETE FROM task_text_cleaning_keywords
                 WHERE task_id = ?
             """, (task_id,))
-            
+
             deleted_count = cursor.rowcount
             conn.commit()
             return deleted_count
 
     # ===== Text Formatting Settings =====
-    
+
     def get_text_formatting_settings(self, task_id: int) -> Dict:
         """Get text formatting settings for a task"""
         with self.get_connection() as conn:
@@ -2500,7 +2499,7 @@ class Database:
                 SELECT text_formatting_enabled, format_type, hyperlink_text, hyperlink_url
                 FROM task_text_formatting_settings WHERE task_id = ?
             ''', (task_id,))
-            
+
             result = cursor.fetchone()
             if result:
                 return {
@@ -2515,32 +2514,53 @@ class Database:
                 'hyperlink_text': None,
                 'hyperlink_url': None
             }
-    
+
     def update_text_formatting_settings(self, task_id: int, text_formatting_enabled: bool = None,
                                       format_type: str = None, hyperlink_text: str = None, 
-                                      hyperlink_url: str = None):
+                                      hyperlink_url: str = None) -> bool:
         """Update text formatting settings for a task"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Get current settings
-            current = self.get_text_formatting_settings(task_id)
-            
-            # Use current values if new ones not provided
-            enabled = text_formatting_enabled if text_formatting_enabled is not None else current['text_formatting_enabled']
-            fmt_type = format_type if format_type is not None else current['format_type']
-            link_text = hyperlink_text if hyperlink_text is not None else current['hyperlink_text']
-            link_url = hyperlink_url if hyperlink_url is not None else current['hyperlink_url']
-            
-            cursor.execute('''
-                INSERT OR REPLACE INTO task_text_formatting_settings 
-                (task_id, text_formatting_enabled, format_type, hyperlink_text, hyperlink_url, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (task_id, enabled, fmt_type, link_text, link_url))
-            
-            conn.commit()
-            return True
-    
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Build update query dynamically
+                updates = []
+                params = []
+
+                if format_type is not None:
+                    updates.append("format_type = ?")
+                    params.append(format_type)
+
+                if text_formatting_enabled is not None:
+                    updates.append("text_formatting_enabled = ?")
+                    params.append(text_formatting_enabled)
+
+                if hyperlink_text is not None:
+                    updates.append("hyperlink_text = ?")
+                    params.append(hyperlink_text)
+
+                if hyperlink_url is not None:
+                    updates.append("hyperlink_url = ?")
+                    params.append(hyperlink_url)
+
+                if not updates:
+                    return False
+
+                params.append(task_id)
+
+                cursor.execute(f'''
+                    UPDATE task_text_formatting_settings 
+                    SET {', '.join(updates)}
+                    WHERE task_id = ?
+                ''', params)
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات تنسيق النص: {e}")
+            return False
+
     def toggle_text_formatting(self, task_id: int) -> bool:
         """Toggle text formatting on/off for a task"""
         current_settings = self.get_text_formatting_settings(task_id)
@@ -2549,7 +2569,7 @@ class Database:
         return new_enabled
 
     # ===== Cleanup Functions =====
-    
+
     def cleanup_old_forwarded_messages_log(self, days_old: int = 7):
         """Clean up old forwarded messages log for duplicate detection"""
         with self.get_connection() as conn:

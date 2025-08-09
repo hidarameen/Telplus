@@ -378,6 +378,15 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد نوع التنسيق: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_hyperlink_"): # Handler for editing hyperlink settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.start_edit_hyperlink_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل إعدادات الرابط: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_forwarded_block_"): # Handler for toggle forwarded message block
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1029,6 +1038,10 @@ class SimpleTelegramBot:
             elif state == 'add_language': # Handle adding language filter
                 task_id = data.get('task_id')
                 await self.handle_add_language_filter(event, task_id, event.text)
+                return
+            elif state == 'waiting_hyperlink_settings': # Handle editing hyperlink settings
+                task_id = data.get('task_id')
+                await self.handle_hyperlink_settings(event, task_id, event.text)
                 return
 
         # Check if this chat is a target chat for any active forwarding task
@@ -2815,6 +2828,115 @@ class SimpleTelegramBot:
                 logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير فلاتر الوسائط")
         except Exception as e:
             logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+
+    async def start_edit_hyperlink_settings(self, event, task_id):
+        """Start editing hyperlink settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_text_formatting_settings(task_id)
+        
+        current_text = settings.get('hyperlink_text', 'نص')
+        current_url = settings.get('hyperlink_url', 'https://example.com')
+
+        message = f"🔗 تعديل إعدادات الرابط\n"
+        message += f"📝 المهمة: {task_name}\n\n"
+        message += f"الإعدادات الحالية:\n"
+        message += f"• نص الرابط: {current_text}\n"
+        message += f"• عنوان الرابط: {current_url}\n\n"
+        message += "📝 أرسل الإعدادات الجديدة بالتنسيق التالي:\n\n"
+        message += "نص الرابط\n"
+        message += "https://example.com\n\n"
+        message += "مثال:\n"
+        message += "اضغط هنا\n"
+        message += "https://t.me/mychannel\n\n"
+        message += "⚠️ أرسل 'إلغاء' للخروج"
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"text_formatting_{task_id}")]
+        ]
+
+        await event.edit(message, buttons=buttons)
+        
+        # Store the state for this user in database
+        state_data = {
+            'task_id': task_id,
+            'action': 'edit_hyperlink_settings'
+        }
+        self.db.set_conversation_state(user_id, 'waiting_hyperlink_settings', json.dumps(state_data))
+
+    async def handle_hyperlink_settings(self, event, task_id, message_text):
+        """Handle hyperlink settings input from user"""
+        user_id = event.sender_id
+        
+        # Check if user wants to cancel
+        if message_text.lower() in ['إلغاء', 'cancel']:
+            self.db.clear_conversation_state(user_id)
+            await event.respond("❌ تم إلغاء تعديل إعدادات الرابط.")
+            await self.show_text_formatting(event, task_id)
+            return
+
+        # Parse the input
+        lines = message_text.strip().split('\n')
+        
+        if len(lines) < 2:
+            await event.respond(
+                "❌ تنسيق غير صحيح\n\n"
+                "يجب إرسال سطرين:\n"
+                "السطر الأول: نص الرابط\n"
+                "السطر الثاني: عنوان الرابط\n\n"
+                "حاول مرة أخرى أو أرسل 'إلغاء'"
+            )
+            return
+
+        hyperlink_text = lines[0].strip()
+        hyperlink_url = lines[1].strip()
+
+        # Validate URL
+        if not hyperlink_url.startswith(('http://', 'https://')):
+            await event.respond(
+                "❌ عنوان الرابط يجب أن يبدأ بـ http:// أو https://\n\n"
+                "حاول مرة أخرى أو أرسل 'إلغاء'"
+            )
+            return
+
+        if not hyperlink_text:
+            await event.respond(
+                "❌ نص الرابط لا يمكن أن يكون فارغاً\n\n"
+                "حاول مرة أخرى أو أرسل 'إلغاء'"
+            )
+            return
+
+        # Update hyperlink settings
+        success = self.db.update_text_formatting_settings(
+            task_id, 
+            hyperlink_text=hyperlink_text, 
+            hyperlink_url=hyperlink_url
+        )
+
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+
+        if success:
+            await event.respond(
+                f"✅ تم تحديث إعدادات الرابط بنجاح!\n\n"
+                f"• نص الرابط: {hyperlink_text}\n"
+                f"• عنوان الرابط: {hyperlink_url}"
+            )
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Return to text formatting settings
+            await self.show_text_formatting(event, task_id)
+        else:
+            await event.respond("❌ فشل في تحديث إعدادات الرابط")
+            await self.show_text_formatting(event, task_id)
 
     async def show_word_filters(self, event, task_id):
         """Show word filters management for task"""

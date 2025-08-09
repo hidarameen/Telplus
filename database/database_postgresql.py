@@ -15,7 +15,7 @@ class Database:
         self.database_url = os.getenv('DATABASE_URL')
         if not self.database_url:
             raise ValueError("DATABASE_URL environment variable not set")
-        
+
         # Test connection
         self.test_connection()
         self.init_database()
@@ -104,6 +104,21 @@ class Database:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
+                
+                # Task text formatting settings table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS task_text_formatting_settings (
+                        id SERIAL PRIMARY KEY,
+                        task_id INTEGER NOT NULL UNIQUE,
+                        format_type TEXT DEFAULT 'markdown',
+                        text_formatting_enabled BOOLEAN DEFAULT TRUE,
+                        hyperlink_text TEXT,
+                        hyperlink_url TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    )
+                ''')
 
                 conn.commit()
                 logger.info("✅ تم تهيئة جداول PostgreSQL بنجاح")
@@ -155,7 +170,7 @@ class Database:
             with conn.cursor() as cursor:
                 cursor.execute('DELETE FROM user_sessions WHERE user_id = %s', (user_id,))
                 conn.commit()
-    
+
     def get_all_authenticated_users(self):
         """Get all authenticated users with their sessions"""
         with self.get_connection() as conn:
@@ -175,23 +190,23 @@ class Database:
             with conn.cursor() as cursor:
                 # Handle multiple source chats by creating separate tasks for each
                 task_ids = []
-                
+
                 for i, source_chat_id in enumerate(source_chat_ids):
                     source_chat_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else source_chat_id
-                    
+
                     if source_chat_name is None or source_chat_name == '':
                         source_chat_name = source_chat_id
-                    
+
                     cursor.execute('''
                         INSERT INTO tasks 
                         (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
                         VALUES (%s, %s, %s, %s, %s, %s)
                         RETURNING id
                     ''', (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
-                    
+
                     task_id = cursor.fetchone()['id']
                     task_ids.append(task_id)
-                
+
                 conn.commit()
                 return task_ids[0] if task_ids else None
 
@@ -405,7 +420,7 @@ class Database:
                     WHERE task_id = %s
                     ORDER BY created_at
                 ''', (task_id,))
-                
+
                 sources = []
                 for row in cursor.fetchall():
                     sources.append({
@@ -424,7 +439,7 @@ class Database:
                     WHERE task_id = %s
                     ORDER BY created_at
                 ''', (task_id,))
-                
+
                 targets = []
                 for row in cursor.fetchall():
                     targets.append({
@@ -442,17 +457,17 @@ class Database:
                 cursor.execute('SELECT COUNT(*) as count FROM task_sources WHERE id = %s AND task_id = %s', 
                              (source_id, task_id))
                 exists = cursor.fetchone()['count'] > 0
-                
+
                 if not exists:
                     logger.warning(f"⚠️ محاولة حذف مصدر غير موجود: source_id={source_id}, task_id={task_id}")
                     return False
-                
+
                 cursor.execute('''
                     DELETE FROM task_sources 
                     WHERE id = %s AND task_id = %s
                 ''', (source_id, task_id))
                 conn.commit()
-                
+
                 deleted_count = cursor.rowcount
                 logger.info(f"🗑️ حذف مصدر: source_id={source_id}, task_id={task_id}, deleted={deleted_count}")
                 return deleted_count > 0
@@ -465,17 +480,17 @@ class Database:
                 cursor.execute('SELECT COUNT(*) as count FROM task_targets WHERE id = %s AND task_id = %s', 
                              (target_id, task_id))
                 exists = cursor.fetchone()['count'] > 0
-                
+
                 if not exists:
                     logger.warning(f"⚠️ محاولة حذف هدف غير موجود: target_id={target_id}, task_id={task_id}")
                     return False
-                
+
                 cursor.execute('''
                     DELETE FROM task_targets 
                     WHERE id = %s AND task_id = %s
                 ''', (target_id, task_id))
                 conn.commit()
-                
+
                 deleted_count = cursor.rowcount
                 logger.info(f"🗑️ حذف هدف: target_id={target_id}, task_id={task_id}, deleted={deleted_count}")
                 return deleted_count > 0
@@ -485,11 +500,11 @@ class Database:
         task = self.get_task(task_id, user_id)
         if not task:
             return None
-            
+
         # Get sources and targets from new tables
         sources = self.get_task_sources(task_id)
         targets = self.get_task_targets(task_id)
-        
+
         # If no sources/targets in new tables, use legacy data
         if not sources and task.get('source_chat_id'):
             sources = [{
@@ -497,17 +512,17 @@ class Database:
                 'chat_id': task['source_chat_id'],
                 'chat_name': task['source_chat_name']
             }]
-            
+
         if not targets and task.get('target_chat_id'):
             targets = [{
                 'id': 0,
                 'chat_id': task['target_chat_id'],
                 'chat_name': task['target_chat_name']
             }]
-        
+
         task['sources'] = sources
         task['targets'] = targets
-        
+
         return task
 
     def migrate_task_to_new_structure(self, task_id: int):
@@ -516,22 +531,22 @@ class Database:
         if not task:
             logger.error(f"❌ لا يمكن العثور على المهمة {task_id} للتهجير")
             return False
-            
+
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
-                
+
                 # Check if already migrated
                 cursor.execute('SELECT COUNT(*) as count FROM task_sources WHERE task_id = %s', (task_id,))
                 sources_count = cursor.fetchone()['count']
                 cursor.execute('SELECT COUNT(*) as count FROM task_targets WHERE task_id = %s', (task_id,))
                 targets_count = cursor.fetchone()['count']
-                
+
                 if sources_count > 0 and targets_count > 0:
                     logger.info(f"✅ المهمة {task_id} مهاجرة بالفعل ({sources_count} مصادر, {targets_count} أهداف)")
                     return True  # Already migrated
-                
+
                 logger.info(f"🔄 بدء تهجير المهمة {task_id} إلى البنية الجديدة")
-                
+
                 # Migrate source if not exists
                 if sources_count == 0 and task.get('source_chat_id'):
                     cursor.execute('''
@@ -539,7 +554,7 @@ class Database:
                         VALUES (%s, %s, %s)
                     ''', (task_id, task['source_chat_id'], task['source_chat_name']))
                     logger.info(f"➕ أضيف مصدر: {task['source_chat_id']}")
-                
+
                 # Migrate target if not exists
                 if targets_count == 0 and task.get('target_chat_id'):
                     cursor.execute('''
@@ -547,7 +562,7 @@ class Database:
                         VALUES (%s, %s, %s)
                     ''', (task_id, task['target_chat_id'], task['target_chat_name']))
                     logger.info(f"➕ أضيف هدف: {task['target_chat_id']}")
-                
+
                 conn.commit()
                 logger.info(f"✅ تم تهجير المهمة {task_id} بنجاح")
                 return True
@@ -557,26 +572,26 @@ class Database:
         if not os.path.exists(sqlite_db_path):
             logger.info("📄 لا توجد قاعدة بيانات SQLite قديمة للنسخ منها")
             return
-            
+
         try:
             import sqlite3
-            
+
             # Connect to SQLite
             sqlite_conn = sqlite3.connect(sqlite_db_path)
             sqlite_cursor = sqlite_conn.cursor()
-            
+
             # Get authenticated users
             sqlite_cursor.execute('''
                 SELECT user_id, phone_number, session_string 
                 FROM user_sessions 
                 WHERE is_authenticated = TRUE AND session_string IS NOT NULL
             ''')
-            
+
             sessions = sqlite_cursor.fetchall()
-            
+
             if sessions:
                 logger.info(f"📋 تم العثور على {len(sessions)} جلسة في SQLite")
-                
+
                 # Copy to PostgreSQL
                 with self.get_connection() as conn:
                     with conn.cursor() as cursor:
@@ -592,14 +607,63 @@ class Database:
                                     updated_at = CURRENT_TIMESTAMP
                             ''', (user_id, phone_number, session_string, True))
                             logger.info(f"✅ تم نسخ جلسة المستخدم {user_id} ({phone_number})")
-                        
+
                         conn.commit()
-                        
+
                 logger.info(f"🎉 تم نسخ {len(sessions)} جلسة إلى PostgreSQL بنجاح")
             else:
                 logger.info("📄 لا توجد جلسات محفوظة في SQLite")
-                
+
             sqlite_conn.close()
-            
+
         except Exception as e:
             logger.error(f"❌ خطأ في نسخ الجلسات من SQLite: {e}")
+
+    def update_text_formatting_settings(self, task_id: int, format_type: str = None, text_formatting_enabled: bool = None, hyperlink_text: str = None, hyperlink_url: str = None) -> bool:
+        """Update text formatting settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Build update query dynamically
+                updates = []
+                params = []
+                param_counter = 1
+
+                if format_type is not None:
+                    updates.append(f"format_type = ${param_counter}")
+                    params.append(format_type)
+                    param_counter += 1
+
+                if text_formatting_enabled is not None:
+                    updates.append(f"text_formatting_enabled = ${param_counter}")
+                    params.append(text_formatting_enabled)
+                    param_counter += 1
+
+                if hyperlink_text is not None:
+                    updates.append(f"hyperlink_text = ${param_counter}")
+                    params.append(hyperlink_text)
+                    param_counter += 1
+
+                if hyperlink_url is not None:
+                    updates.append(f"hyperlink_url = ${param_counter}")
+                    params.append(hyperlink_url)
+                    param_counter += 1
+
+                if not updates:
+                    return False
+
+                params.append(task_id)
+
+                cursor.execute(f'''
+                    UPDATE task_text_formatting_settings 
+                    SET {', '.join(updates)}
+                    WHERE task_id = ${param_counter}
+                ''', params)
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات تنسيق النص: {e}")
+            return False
