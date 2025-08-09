@@ -84,6 +84,8 @@ class UserbotService:
                 cleaned_text = re.sub(r't\.me/[^\s]+', '', cleaned_text)
                 # Remove www links
                 cleaned_text = re.sub(r'www\.[^\s]+', '', cleaned_text)
+                # Remove domain-like patterns (improved pattern for sites like meyon.com.ye/path)
+                cleaned_text = re.sub(r'\b[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.([a-zA-Z]{2,6}\.?)+(/[^\s]*)?', '', cleaned_text)
                 logger.debug(f"🧹 تم حذف الروابط من المهمة {task_id}")
 
             # 2. Remove emojis
@@ -117,14 +119,16 @@ class UserbotService:
                 cleaned_text = re.sub(r'#\w+', '', cleaned_text)
                 logger.debug(f"🧹 تم حذف الهاشتاقات من المهمة {task_id}")
 
-            # 4. Remove phone numbers
+            # 4. Remove phone numbers (improved patterns to avoid years like 2025)
             if settings.get('remove_phone_numbers', False):
-                # Remove various phone number formats
+                # Remove various phone number formats (more specific patterns)
                 phone_patterns = [
-                    r'\+?\d{1,4}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',  # International
-                    r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b',  # US format
-                    r'\b\d{4}[-.\s]?\d{3}[-.\s]?\d{3}\b',  # Some international
-                    r'\b\d{2}[-.\s]?\d{4}[-.\s]?\d{4}\b',  # Another format
+                    r'\+\d{1,4}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{4,9}',  # International with +
+                    r'\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b',  # US format with separators
+                    r'\b\d{4}[-.\s]\d{3}[-.\s]\d{3}\b',  # Some international with separators
+                    r'\b\d{2}[-.\s]\d{4}[-.\s]\d{4}\b',  # Another format with separators
+                    r'\b\d{10,15}\b',  # Long sequences of digits (10-15 digits) likely phone numbers
+                    r'\(\d{3}\)\s?\d{3}[-.\s]?\d{4}',  # Format like (123) 456-7890
                 ]
                 for pattern in phone_patterns:
                     cleaned_text = re.sub(pattern, '', cleaned_text)

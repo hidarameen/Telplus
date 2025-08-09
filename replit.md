@@ -3,7 +3,13 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 9, 2025 (TEXT CLEANING BUGS FIXED - CRITICAL FIXES)**: Fixed two critical issues in text cleaning system:
+- **August 9, 2025 (TEXT CLEANING PATTERNS IMPROVED - FINAL FIXES)**: Enhanced text cleaning patterns for better accuracy:
+  - **ENHANCED**: Link removal now catches domain patterns like `meyon.com.ye/path` using improved regex
+  - **FIXED**: Phone number detection no longer removes years like "2025" - now requires specific phone patterns
+  - **IMPROVED**: More precise phone number patterns that distinguish between phone numbers and regular numbers
+  - **ADDED**: Domain-based link detection for sites without http/https prefixes
+  - **STATUS**: Text cleaning system now accurately handles edge cases and avoids false positives
+- **August 9, 2025 (Previous - TEXT CLEANING BUGS FIXED)**: Fixed two critical issues in text cleaning system:
   - **FIXED**: Empty line removal bug - now preserves line breaks between content while removing truly empty lines
   - **FIXED**: "Add keywords" button functionality - callback handler and database functions working correctly
   - **IMPROVED**: Text cleaning algorithm now maintains proper line structure (e.g., "مرحبا\n\nكيف حالك" keeps the line break)
