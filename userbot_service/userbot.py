@@ -151,7 +151,16 @@ class UserbotService:
                     cleaned_text = '\n'.join(filtered_lines)
                     logger.debug(f"🧹 تم حذف الأسطر التي تحتوي على الكلمات المحددة من المهمة {task_id}")
 
-            # 6. Remove empty lines (but preserve line breaks between content)
+            # Clean up extra whitespace within lines first
+            lines = cleaned_text.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # Clean whitespace within each line but preserve the line structure
+                cleaned_line = re.sub(r'[ \t]+', ' ', line.strip())
+                cleaned_lines.append(cleaned_line)
+            cleaned_text = '\n'.join(cleaned_lines)
+
+            # 6. Remove empty lines AFTER all other cleaning operations
             if settings.get('remove_empty_lines', False):
                 # Split by lines and filter empty ones while preserving structure
                 lines = cleaned_text.split('\n')
@@ -167,16 +176,7 @@ class UserbotService:
                             filtered_lines.append('')
                 
                 cleaned_text = '\n'.join(filtered_lines)
-                logger.debug(f"🧹 تم حذف الأسطر الفارغة الزائدة من المهمة {task_id}")
-
-            # Clean up extra whitespace within lines only, preserve line breaks
-            lines = cleaned_text.split('\n')
-            cleaned_lines = []
-            for line in lines:
-                # Clean whitespace within each line but preserve the line structure
-                cleaned_line = re.sub(r'[ \t]+', ' ', line.strip())
-                cleaned_lines.append(cleaned_line)
-            cleaned_text = '\n'.join(cleaned_lines)
+                logger.debug(f"🧹 تم حذف الأسطر الفارغة الزائدة من المهمة {task_id} (في النهاية)")
 
             if cleaned_text != message_text:
                 logger.info(f"🧹 تم تنظيف النص للمهمة {task_id} - الطول الأصلي: {len(message_text)}, بعد التنظيف: {len(cleaned_text)}")
