@@ -6766,18 +6766,22 @@ class SimpleTelegramBot:
                 return
             
             # Update the settings
-            self.db.update_character_limit_settings(task_id, min_chars=min_chars, max_chars=max_chars)
+            success = self.db.update_character_limit_settings(task_id, min_chars=min_chars, max_chars=max_chars)
             
-            # Force refresh UserBot tasks
-            await self._refresh_userbot_tasks(user_id)
-            
-            # Clear conversation state
-            self.db.clear_conversation_state(user_id)
-            
-            await event.respond(f"✅ تم تحديث نطاق الأحرف إلى: {min_chars} - {max_chars}")
-            
-            # Show updated settings
-            await self.show_character_limit_settings(event, task_id)
+            if success:
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Clear conversation state
+                self.db.clear_conversation_state(user_id)
+                
+                await event.respond(f"✅ تم تحديث نطاق الأحرف إلى: {min_chars} - {max_chars}")
+                
+                # Show updated settings
+                await self.show_character_limit_settings(event, task_id)
+            else:
+                await event.respond("❌ حدث خطأ في تحديث إعدادات النطاق في قاعدة البيانات")
+                self.db.clear_conversation_state(user_id)
             
         except ValueError:
             await event.respond("❌ يجب إدخال أرقام صحيحة فقط\nمثال: 10-500")
@@ -6798,18 +6802,22 @@ class SimpleTelegramBot:
                 return
             
             # Update the settings
-            self.db.update_rate_limit_settings(task_id, message_count=count)
+            success = self.db.update_rate_limit_settings(task_id, message_count=count)
             
-            # Force refresh UserBot tasks
-            await self._refresh_userbot_tasks(user_id)
-            
-            # Clear conversation state
-            self.db.clear_conversation_state(user_id)
-            
-            await event.respond(f"✅ تم تحديث عدد الرسائل إلى: {count}")
-            
-            # Show updated settings
-            await self.show_rate_limit_settings(event, task_id)
+            if success:
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Clear conversation state
+                self.db.clear_conversation_state(user_id)
+                
+                await event.respond(f"✅ تم تحديث عدد الرسائل إلى: {count}")
+                
+                # Show updated settings
+                await self.show_rate_limit_settings(event, task_id)
+            else:
+                await event.respond("❌ حدث خطأ في تحديث إعدادات عدد الرسائل في قاعدة البيانات")
+                self.db.clear_conversation_state(user_id)
             
         except ValueError:
             await event.respond("❌ يجب إدخال رقم صحيح موجب\nمثال: 10")
@@ -6830,18 +6838,22 @@ class SimpleTelegramBot:
                 return
             
             # Update the settings
-            self.db.update_rate_limit_settings(task_id, time_period_seconds=period)
+            success = self.db.update_rate_limit_settings(task_id, time_period_seconds=period)
             
-            # Force refresh UserBot tasks
-            await self._refresh_userbot_tasks(user_id)
-            
-            # Clear conversation state
-            self.db.clear_conversation_state(user_id)
-            
-            await event.respond(f"✅ تم تحديث فترة الرسائل إلى: {period} ثانية")
-            
-            # Show updated settings
-            await self.show_rate_limit_settings(event, task_id)
+            if success:
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Clear conversation state
+                self.db.clear_conversation_state(user_id)
+                
+                await event.respond(f"✅ تم تحديث فترة الرسائل إلى: {period} ثانية")
+                
+                # Show updated settings
+                await self.show_rate_limit_settings(event, task_id)
+            else:
+                await event.respond("❌ حدث خطأ في تحديث إعدادات فترة الرسائل في قاعدة البيانات")
+                self.db.clear_conversation_state(user_id)
             
         except ValueError:
             await event.respond("❌ يجب إدخال رقم صحيح موجب\nمثال: 60")
@@ -6862,18 +6874,22 @@ class SimpleTelegramBot:
                 return
             
             # Update the settings
-            self.db.update_forwarding_delay_settings(task_id, delay_seconds=delay)
+            success = self.db.update_forwarding_delay_settings(task_id, delay_seconds=delay)
             
-            # Force refresh UserBot tasks
-            await self._refresh_userbot_tasks(user_id)
-            
-            # Clear conversation state
-            self.db.clear_conversation_state(user_id)
-            
-            await event.respond(f"✅ تم تحديث تأخير التوجيه إلى: {delay} ثانية")
-            
-            # Show updated settings
-            await self.show_forwarding_delay_settings(event, task_id)
+            if success:
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Clear conversation state
+                self.db.clear_conversation_state(user_id)
+                
+                await event.respond(f"✅ تم تحديث تأخير التوجيه إلى: {delay} ثانية")
+                
+                # Show updated settings
+                await self.show_forwarding_delay_settings(event, task_id)
+            else:
+                await event.respond("❌ حدث خطأ في تحديث إعدادات تأخير التوجيه في قاعدة البيانات")
+                self.db.clear_conversation_state(user_id)
             
         except ValueError:
             await event.respond("❌ يجب إدخال رقم صحيح\nمثال: 5")
@@ -6894,18 +6910,22 @@ class SimpleTelegramBot:
                 return
             
             # Update the settings
-            self.db.update_sending_interval_settings(task_id, interval_seconds=interval)
+            success = self.db.update_sending_interval_settings(task_id, interval_seconds=interval)
             
-            # Force refresh UserBot tasks
-            await self._refresh_userbot_tasks(user_id)
-            
-            # Clear conversation state
-            self.db.clear_conversation_state(user_id)
-            
-            await event.respond(f"✅ تم تحديث فاصل الإرسال إلى: {interval} ثانية")
-            
-            # Show updated settings
-            await self.show_sending_interval_settings(event, task_id)
+            if success:
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Clear conversation state
+                self.db.clear_conversation_state(user_id)
+                
+                await event.respond(f"✅ تم تحديث فاصل الإرسال إلى: {interval} ثانية")
+                
+                # Show updated settings
+                await self.show_sending_interval_settings(event, task_id)
+            else:
+                await event.respond("❌ حدث خطأ في تحديث إعدادات فاصل الإرسال في قاعدة البيانات")
+                self.db.clear_conversation_state(user_id)
             
         except ValueError:
             await event.respond("❌ يجب إدخال رقم صحيح\nمثال: 2")
