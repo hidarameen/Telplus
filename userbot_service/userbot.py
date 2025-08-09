@@ -1417,11 +1417,11 @@ class UserbotService:
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
                 # Use correct HTML spoiler tag for Telegram
-                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
+                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
-                # Use the original text as the hyperlink text
-                return f"[{cleaned_text.strip()}]({hyperlink_url})"
+                # Use HTML anchor tag for proper HTML mode
+                return f'<a href="{hyperlink_url}">{cleaned_text.strip()}</a>'
 
             return cleaned_text.strip()
 
@@ -1483,9 +1483,9 @@ class UserbotService:
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
                 # Use correct HTML spoiler tag for Telegram
-                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
+                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
-                return f"[{cleaned_text.strip()}](https://example.com)"
+                return f'<a href="https://example.com">{cleaned_text.strip()}</a>'
 
             return cleaned_text.strip()
 

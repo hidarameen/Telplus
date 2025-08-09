@@ -29,7 +29,7 @@
 <blockquote>النص المقتبس</blockquote>
 
 <!-- النص المخفي -->
-<span class="tg-spoiler">النص المخفي</span>
+<tg-spoiler>النص المخفي</tg-spoiler>
 ```
 
 ### الروابط التشعبية
