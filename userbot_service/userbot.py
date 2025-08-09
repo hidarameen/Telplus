@@ -165,7 +165,7 @@ class UserbotService:
                 # Split by lines and filter empty ones while preserving structure
                 lines = cleaned_text.split('\n')
                 filtered_lines = []
-                
+
                 for i, line in enumerate(lines):
                     if line.strip():  # Line has content
                         filtered_lines.append(line)
@@ -174,7 +174,7 @@ class UserbotService:
                         if (i > 0 and i < len(lines) - 1 and 
                             lines[i-1].strip() and lines[i+1].strip()):
                             filtered_lines.append('')
-                
+
                 cleaned_text = '\n'.join(filtered_lines)
                 logger.debug(f"🧹 تم حذف الأسطر الفارغة الزائدة من المهمة {task_id} (في النهاية)")
 
@@ -253,14 +253,14 @@ class UserbotService:
                         logger.error(f"🚨 === بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id} ===")
                         admin_allowed = self.is_admin_allowed(task_id, event.sender_id)
                         logger.error(f"🚨 === نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed} ===")
-                        
+
                         # Check media filter
                         media_allowed = self.is_media_allowed(task_id, message_media_type)
-                        
+
                         # Check word filters
                         message_text = event.message.text or ""
                         word_filter_allowed = self.is_message_allowed_by_word_filter(task_id, message_text)
-                        
+
                         # Decision is based on the primary media type, not the caption
                         # For text messages with media, we check the media type
                         # For pure text messages, we check text filter
@@ -273,9 +273,9 @@ class UserbotService:
                             # Media message (photo, video, etc.) - check admin, media filter and word filter for caption
                             is_message_allowed = admin_allowed and media_allowed and word_filter_allowed
                             filter_type = f"الوسائط ({message_media_type})"
-                        
+
                         logger.error(f"🚨 === قرار نهائي: is_message_allowed = {is_message_allowed} ===")
-                        
+
                         if is_message_allowed:
                             logger.error(f"🚨 === إضافة المهمة للقائمة المطابقة ===")
                             matching_tasks.append(task)
@@ -338,18 +338,18 @@ class UserbotService:
 
                         # Get message formatting settings for this task
                         message_settings = self.get_message_settings(task['id'])
-                        
+
                         # Apply text cleaning first, then text replacements
                         original_text = event.message.text or ""
                         cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
                         modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
-                        
+
                         # Apply text formatting
                         formatted_text = self.apply_text_formatting(task['id'], modified_text) if modified_text else modified_text
-                        
+
                         # Apply header and footer formatting
                         final_text = self.apply_message_formatting(formatted_text, message_settings)
-                        
+
                         # Check if we need to use copy mode due to formatting
                         requires_copy_mode = (
                             original_text != modified_text or  # Text replacements applied
@@ -358,7 +358,7 @@ class UserbotService:
                             message_settings['footer_enabled'] or  # Footer enabled
                             message_settings['inline_buttons_enabled']  # Inline buttons enabled
                         )
-                        
+
                         # Log changes if text was modified
                         if original_text != final_text and original_text:
                             logger.info(f"🔄 تم تطبيق تنسيق الرسالة: '{original_text}' → '{final_text}'")
@@ -374,7 +374,7 @@ class UserbotService:
 
                         # Get forwarding settings
                         forwarding_settings = self.get_forwarding_settings(task['id'])
-                        
+
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")
 
@@ -382,7 +382,7 @@ class UserbotService:
                             # Copy mode: send as new message with all formatting applied
                             if requires_copy_mode:
                                 logger.info(f"🔄 استخدام وضع النسخ بسبب التنسيق المطبق")
-                            
+
                             if event.message.media:
                                 # Check media type to handle web page separately
                                 from telethon.tl.types import MessageMediaWebPage
@@ -393,7 +393,7 @@ class UserbotService:
                                         final_text or event.message.text or "رسالة",
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='html'
+                                        parse_mode='HTML'
                                     )
                                 else:
                                     # Regular media message with caption
@@ -402,7 +402,7 @@ class UserbotService:
                                         event.message.media,
                                         caption=final_text,
                                         silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='html'
+                                        parse_mode='HTML'
                                     )
                             elif event.message.text or final_text:
                                 # Pure text message
@@ -411,7 +411,7 @@ class UserbotService:
                                     final_text or "رسالة",
                                     link_preview=forwarding_settings['link_preview_enabled'],
                                     silent=forwarding_settings['silent_notifications'],
-                                    parse_mode='html'
+                                    parse_mode='HTML'
                                 )
                             else:
                                 # Fallback to forward for other types
@@ -434,7 +434,7 @@ class UserbotService:
                                             final_text or event.message.text or "رسالة",
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='html'
+                                            parse_mode='HTML'
                                         )
                                     else:
                                         # Regular media message with caption
@@ -443,7 +443,7 @@ class UserbotService:
                                             event.message.media,
                                             caption=final_text,
                                             silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='html'
+                                            parse_mode='HTML'
                                         )
                                 else:
                                     forwarded_msg = await client.send_message(
@@ -451,7 +451,7 @@ class UserbotService:
                                         final_text or "رسالة",
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='html'
+                                        parse_mode='HTML'
                                     )
                             else:
                                 # No formatting changes, forward normally
@@ -465,7 +465,7 @@ class UserbotService:
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                             logger.info(f"✅ تم توجيه الرسالة بنجاح من {source_chat_id} إلى {target_chat_id}")
                             logger.info(f"📝 معرف الرسالة المُوجهة: {msg_id} (المهمة: {task_name})")
-                            
+
                             # Save message mapping for synchronization
                             try:
                                 self.db.save_message_mapping(
@@ -478,10 +478,10 @@ class UserbotService:
                                 logger.info(f"💾 تم حفظ تطابق الرسالة للمزامنة: {source_chat_id}:{event.message.id} → {target_chat_id}:{msg_id}")
                             except Exception as mapping_error:
                                 logger.error(f"❌ فشل في حفظ تطابق الرسالة: {mapping_error}")
-                            
+
                             # Apply post-forwarding settings
                             await self.apply_post_forwarding_settings(client, target_entity, msg_id, forwarding_settings, task['id'])
-                            
+
                             # If inline buttons are enabled, notify bot to add them
                             if inline_buttons and message_settings['inline_buttons_enabled']:
                                 await self.notify_bot_to_add_buttons(target_chat_id, msg_id, task['id'])
@@ -518,37 +518,37 @@ class UserbotService:
             try:
                 source_chat_id = event.chat_id
                 source_message_id = event.message.id
-                
+
                 logger.info(f"🔄 تم تعديل رسالة: Chat={source_chat_id}, Message={source_message_id}")
-                
+
                 # Get tasks that match this source chat
                 tasks = self.user_tasks.get(user_id, [])
                 matching_tasks = [task for task in tasks if str(task['source_chat_id']) == str(source_chat_id)]
-                
+
                 if not matching_tasks:
                     return
-                
+
                 # Check sync settings for each matching task
                 for task in matching_tasks:
                     task_id = task['id']
                     forwarding_settings = self.get_forwarding_settings(task_id)
-                    
+
                     if not forwarding_settings.get('sync_edit_enabled', False):
                         continue
-                        
+
                     logger.info(f"🔄 مزامنة التعديل مفعلة للمهمة {task_id}")
-                    
+
                     # Find all target messages that were forwarded from this source message
                     message_mappings = self.db.get_message_mappings_by_source(task_id, source_chat_id, source_message_id)
-                    
+
                     for mapping in message_mappings:
                         target_chat_id = mapping['target_chat_id']
                         target_message_id = mapping['target_message_id']
-                        
+
                         try:
                             # Get target entity
                             target_entity = await client.get_entity(int(target_chat_id))
-                            
+
                             # Update the target message with the edited content
                             await client.edit_message(
                                 target_entity, 
@@ -556,12 +556,12 @@ class UserbotService:
                                 event.message.text or event.message.message,
                                 file=None if not event.message.media else event.message.media
                             )
-                            
+
                             logger.info(f"✅ تم تحديث الرسالة المتزامنة: {target_chat_id}:{target_message_id}")
-                            
+
                         except Exception as sync_error:
                             logger.error(f"❌ فشل في مزامنة تعديل الرسالة: {sync_error}")
-                            
+
             except Exception as e:
                 logger.error(f"خطأ في معالج تعديل الرسائل للمستخدم {user_id}: {e}")
 
@@ -571,52 +571,52 @@ class UserbotService:
             try:
                 if not hasattr(event, 'chat_id') or not hasattr(event, 'deleted_ids'):
                     return
-                    
+
                 source_chat_id = event.chat_id
                 deleted_ids = event.deleted_ids
-                
+
                 logger.info(f"🗑️ تم حذف رسائل: Chat={source_chat_id}, IDs={deleted_ids}")
-                
+
                 # Get tasks that match this source chat
                 tasks = self.user_tasks.get(user_id, [])
                 matching_tasks = [task for task in tasks if str(task['source_chat_id']) == str(source_chat_id)]
-                
+
                 if not matching_tasks:
                     return
-                
+
                 # Check sync settings for each matching task and deleted message
                 for task in matching_tasks:
                     task_id = task['id']
                     forwarding_settings = self.get_forwarding_settings(task_id)
-                    
+
                     if not forwarding_settings.get('sync_delete_enabled', False):
                         continue
-                        
+
                     logger.info(f"🗑️ مزامنة الحذف مفعلة للمهمة {task_id}")
-                    
+
                     for source_message_id in deleted_ids:
                         # Find all target messages that were forwarded from this source message
                         message_mappings = self.db.get_message_mappings_by_source(task_id, source_chat_id, source_message_id)
-                        
+
                         for mapping in message_mappings:
                             target_chat_id = mapping['target_chat_id']
                             target_message_id = mapping['target_message_id']
-                            
+
                             try:
                                 # Get target entity
                                 target_entity = await client.get_entity(int(target_chat_id))
-                                
+
                                 # Delete the target message
                                 await client.delete_messages(target_entity, target_message_id)
-                                
+
                                 logger.info(f"✅ تم حذف الرسالة المتزامنة: {target_chat_id}:{target_message_id}")
-                                
+
                                 # Remove the mapping from database since message is deleted
                                 self.db.delete_message_mapping(mapping['id'])
-                                
+
                             except Exception as sync_error:
                                 logger.error(f"❌ فشل في مزامنة حذف الرسالة: {sync_error}")
-                                
+
             except Exception as e:
                 logger.error(f"خطأ في معالج حذف الرسائل للمستخدم {user_id}: {e}")
 
@@ -655,7 +655,7 @@ class UserbotService:
         try:
             import asyncio
             import json
-            
+
             # Store the message info for the bot to process
             notification_data = {
                 'chat_id': chat_id,
@@ -663,17 +663,17 @@ class UserbotService:
                 'task_id': task_id,
                 'action': 'add_inline_buttons'
             }
-            
+
             # Use a simple file-based notification system
             import tempfile
             import os
-            
+
             notification_file = f"/tmp/bot_notification_{chat_id}_{message_id}.json"
             with open(notification_file, 'w', encoding='utf-8') as f:
                 json.dump(notification_data, f, ensure_ascii=False)
-            
+
             logger.info(f"🔔 تم إرسال إشعار للبوت لإضافة أزرار إنلاين: قناة={chat_id}, رسالة={message_id}, مهمة={task_id}")
-            
+
         except Exception as e:
             logger.error(f"❌ خطأ في إشعار البوت لإضافة الأزرار: {e}")
 
@@ -726,21 +726,21 @@ class UserbotService:
         try:
             from database.database import Database
             db = Database()
-            
+
             logger.error(f"🚨 [ADMIN FILTER DEBUG] المهمة: {task_id}, المرسل: {sender_id}")
-            
+
             # Check if admin filter is enabled for this task
             admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
             logger.error(f"🚨 [ADMIN FILTER DEBUG] فلتر المشرفين مُفعل: {admin_filter_enabled}")
-            
+
             if not admin_filter_enabled:
                 logger.error(f"🚨 فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
                 return True
-            
+
             # DEBUG: Get all allowed admins for this task
             allowed_admins = db.get_task_allowed_admins(task_id)
             logger.error(f"🚨 [ADMIN FILTER DEBUG] جميع المشرفين المسموحين للمهمة {task_id}: {allowed_admins}")
-            
+
             # Check if sender is in allowed admin list
             is_allowed = db.is_admin_allowed(task_id, sender_id)
             logger.error(f"🚨 [ADMIN FILTER DEBUG] نتيجة فحص قاعدة البيانات: {is_allowed}")
@@ -815,17 +815,17 @@ class UserbotService:
         """Apply header and footer formatting to message text"""
         if not text:
             text = ""
-        
+
         final_text = text
-        
+
         # Add header if enabled
         if settings['header_enabled'] and settings['header_text']:
             final_text = settings['header_text'] + "\n\n" + final_text
-        
+
         # Add footer if enabled
         if settings['footer_enabled'] and settings['footer_text']:
             final_text = final_text + "\n\n" + settings['footer_text']
-        
+
         return final_text
 
     def build_inline_buttons(self, task_id: int):
@@ -833,16 +833,16 @@ class UserbotService:
         try:
             from database.database import Database
             from telethon import Button
-            
+
             db = Database()
             buttons_data = db.get_inline_buttons(task_id)
-            
+
             logger.info(f"🔍 فحص أزرار إنلاين للمهمة {task_id}: تم العثور على {len(buttons_data) if buttons_data else 0} زر")
-            
+
             if not buttons_data:
                 logger.warning(f"❌ لا توجد أزرار إنلاين للمهمة {task_id}")
                 return None
-            
+
             # Group buttons by row
             rows = {}
             for button in buttons_data:
@@ -850,7 +850,7 @@ class UserbotService:
                 if row not in rows:
                     rows[row] = []
                 rows[row].append(button)
-            
+
             # Build button matrix
             button_matrix = []
             for row_num in sorted(rows.keys()):
@@ -859,7 +859,7 @@ class UserbotService:
                 for button in row_buttons:
                     button_row.append(Button.url(button['button_text'], button['button_url']))
                 button_matrix.append(button_row)
-            
+
             return button_matrix
         except Exception as e:
             logger.error(f"خطأ في بناء الأزرار الإنلاين: {e}")
@@ -881,12 +881,12 @@ class UserbotService:
                 import asyncio
                 delete_time = forwarding_settings['auto_delete_time']
                 logger.info(f"⏰ جدولة حذف الرسالة {msg_id} بعد {delete_time} ثانية")
-                
+
                 # Schedule deletion in background
                 asyncio.create_task(
                     self._schedule_message_deletion(client, target_entity, msg_id, delete_time, task_id)
                 )
-                
+
         except Exception as e:
             logger.error(f"خطأ في تطبيق إعدادات ما بعد التوجيه: {e}")
 
@@ -895,13 +895,13 @@ class UserbotService:
         try:
             import asyncio
             await asyncio.sleep(delay_seconds)
-            
+
             try:
                 await client.delete_messages(target_entity, msg_id)
                 logger.info(f"🗑️ تم حذف الرسالة {msg_id} تلقائياً من {target_entity} (المهمة {task_id})")
             except Exception as delete_error:
                 logger.error(f"❌ فشل في حذف الرسالة {msg_id} تلقائياً: {delete_error}")
-                
+
         except Exception as e:
             logger.error(f"خطأ في جدولة حذف الرسالة: {e}")
 
@@ -1083,19 +1083,19 @@ class UserbotService:
             if user_id not in self.clients:
                 logger.error(f"لا توجد جلسة للمستخدم {user_id}")
                 return -1
-                
+
             client = self.clients[user_id]
             if not client or not client.is_connected():
                 logger.error(f"عميل UserBot غير متصل للمستخدم {user_id}")
                 return -1
-            
+
             # Store the request for background processing
             import time
             request_id = f"admin_fetch_{task_id}_{channel_id}_{int(time.time())}"
-            
+
             if not hasattr(self, 'admin_fetch_queue'):
                 self.admin_fetch_queue = {}
-            
+
             self.admin_fetch_queue[request_id] = {
                 'user_id': user_id,
                 'channel_id': channel_id,
@@ -1103,43 +1103,43 @@ class UserbotService:
                 'status': 'queued',
                 'timestamp': time.time()
             }
-            
+
             logger.info(f"🔄 تم جدولة طلب جلب المشرفين للقناة {channel_id}")
-            
+
             # Try to process immediately if possible
             return self._try_immediate_fetch(user_id, channel_id, task_id)
-                
+
         except Exception as e:
             logger.error(f"خطأ في جلب مشرفي القناة {channel_id}: {e}")
             return -1
-    
+
     def _try_immediate_fetch(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Try to fetch admins using a different approach"""
         try:
             import threading
             import queue
             import time
-            
+
             result_queue = queue.Queue()
-            
+
             def fetch_in_thread():
                 try:
                     # Use the client's loop directly
                     client = self.clients[user_id]
                     loop = client.loop
-                    
+
                     # Schedule the task
                     future = self._schedule_admin_fetch(user_id, channel_id, task_id)
                     result_queue.put(('success', future))
-                    
+
                 except Exception as e:
                     result_queue.put(('error', str(e)))
-            
+
             # Start background thread
             thread = threading.Thread(target=fetch_in_thread)
             thread.daemon = True
             thread.start()
-            
+
             # Wait for result with timeout
             try:
                 result_type, result_data = result_queue.get(timeout=10)
@@ -1149,15 +1149,15 @@ class UserbotService:
                 else:
                     logger.error(f"خطأ في معالجة الطلب: {result_data}")
                     return self._fetch_admins_with_fallback(user_id, channel_id, task_id)
-                    
+
             except queue.Empty:
                 logger.warning(f"انتهت مهلة الانتظار، استخدام البديل")
                 return self._fetch_admins_with_fallback(user_id, channel_id, task_id)
-                
+
         except Exception as e:
             logger.error(f"خطأ في المحاولة الفورية: {e}")
             return self._fetch_admins_with_fallback(user_id, channel_id, task_id)
-    
+
     def _schedule_admin_fetch(self, user_id: int, channel_id: str, task_id: int):
         """Schedule admin fetch in the existing event loop"""
         try:
@@ -1166,27 +1166,27 @@ class UserbotService:
                 # Add to pending tasks that will be processed by the main loop
                 if not hasattr(self, 'pending_admin_tasks'):
                     self.pending_admin_tasks = []
-                
+
                 self.pending_admin_tasks.append({
                     'user_id': user_id,
                     'channel_id': channel_id,
                     'task_id': task_id,
                     'scheduled_at': time.time()
                 })
-                
+
                 logger.info(f"📋 تم إضافة مهمة جلب المشرفين للقائمة المعلقة")
                 return True
-                
+
         except Exception as e:
             logger.error(f"خطأ في جدولة المهمة: {e}")
             return False
-    
+
     def _fetch_admins_with_fallback(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Fallback method with sample admins"""
         try:
             # Clear existing admins for this source
             self.db.clear_admin_filters_for_source(task_id, channel_id)
-            
+
             # Add sample admins for demonstration
             sample_admins = [
                 {'id': user_id, 'username': 'owner', 'first_name': 'المالك'},
@@ -1194,7 +1194,7 @@ class UserbotService:
                 {'id': 987654321, 'username': 'admin2', 'first_name': 'مساعد المشرف'},
                 {'id': 555666777, 'username': 'moderator', 'first_name': 'المشرف العام'}
             ]
-            
+
             admin_count = 0
             for admin in sample_admins:
                 try:
@@ -1209,20 +1209,20 @@ class UserbotService:
                 except Exception as e:
                     logger.error(f"خطأ في إضافة المشرف {admin['first_name']}: {e}")
                     continue
-            
+
             logger.info(f"✅ تم إضافة {admin_count} مشرف نموذجي للقناة {channel_id}")
             return admin_count
-            
+
         except Exception as e:
             logger.error(f"خطأ في البديل: {e}")
             return self._fetch_admins_simple(user_id, channel_id, task_id)
-    
+
     def _fetch_admins_simple(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Simple fallback method to add current user as admin"""
         try:
             # Clear existing admins for this source
             self.db.clear_admin_filters_for_source(task_id, channel_id)
-            
+
             # Add the user themselves as an admin
             self.db.add_admin_filter(
                 task_id=task_id,
@@ -1231,23 +1231,23 @@ class UserbotService:
                 admin_first_name="المالك",
                 is_allowed=True
             )
-            
+
             logger.info(f"✅ تم إضافة المالك كمشرف للقناة {channel_id}")
             return 1
-            
+
         except Exception as e:
             logger.error(f"خطأ في إضافة المالك كمشرف: {e}")
             return -1
-    
+
     async def process_pending_admin_tasks(self):
         """Process pending admin fetch tasks in the main event loop"""
         try:
             if not hasattr(self, 'pending_admin_tasks') or not self.pending_admin_tasks:
                 return
-                
+
             tasks_to_process = self.pending_admin_tasks.copy()
             self.pending_admin_tasks.clear()
-            
+
             for task_info in tasks_to_process:
                 try:
                     await self._fetch_admins_real(
@@ -1257,29 +1257,29 @@ class UserbotService:
                     )
                 except Exception as e:
                     logger.error(f"خطأ في معالجة مهمة المشرفين: {e}")
-                    
+
         except Exception as e:
             logger.error(f"خطأ في معالجة المهام المعلقة: {e}")
-    
+
     async def _fetch_admins_real(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Actually fetch admins from channel"""
         try:
             if user_id not in self.clients:
                 return -1
-                
+
             client = self.clients[user_id]
             if not client or not client.is_connected():
                 return -1
-            
+
             logger.info(f"🔍 جاري جلب مشرفي القناة الحقيقيين {channel_id}...")
-            
+
             # Get previous permissions before clearing
             previous_permissions = self.db.get_admin_previous_permissions(task_id)
             logger.info(f"💾 حفظ الأذونات السابقة للمهمة {task_id}: {previous_permissions}")
-            
+
             # Clear existing admins first
             self.db.clear_admin_filters_for_source(task_id, channel_id)
-            
+
             participants = []
             try:
                 # Method 1: Using iter_participants
@@ -1287,17 +1287,17 @@ class UserbotService:
                     participants.append(participant)
                     if len(participants) >= 50:  # Reasonable limit
                         break
-                        
+
                 logger.info(f"📋 تم جلب {len(participants)} مشرف باستخدام iter_participants")
-                        
+
             except Exception as e:
                 logger.error(f"خطأ في iter_participants: {e}")
-                
+
                 # Method 2: Using GetParticipantsRequest
                 try:
                     from telethon.tl.functions.channels import GetParticipantsRequest
                     from telethon.tl.types import ChannelParticipantsAdmins
-                    
+
                     result = await client(GetParticipantsRequest(
                         channel=int(channel_id),
                         filter=ChannelParticipantsAdmins(),
@@ -1307,11 +1307,11 @@ class UserbotService:
                     ))
                     participants = result.users
                     logger.info(f"📋 تم جلب {len(participants)} مشرف باستخدام GetParticipantsRequest")
-                    
+
                 except Exception as e2:
                     logger.error(f"فشل في GetParticipantsRequest: {e2}")
                     participants = []
-            
+
             # Add participants to database
             admin_count = 0
             for participant in participants:
@@ -1319,7 +1319,7 @@ class UserbotService:
                     user_id_attr = getattr(participant, 'id', None)
                     username = getattr(participant, 'username', '') or ''
                     first_name = getattr(participant, 'first_name', '') or f'مشرف {user_id_attr}'
-                    
+
                     if user_id_attr and user_id_attr != user_id:  # Don't duplicate the owner
                         self.db.add_admin_filter_with_previous_permission(
                             task_id=task_id,
@@ -1329,11 +1329,11 @@ class UserbotService:
                             previous_permissions=previous_permissions
                         )
                         admin_count += 1
-                        
+
                 except Exception as e:
                     logger.error(f"خطأ في إضافة المشرف: {e}")
                     continue
-            
+
             # Always add the owner
             self.db.add_admin_filter(
                 task_id=task_id,
@@ -1343,14 +1343,14 @@ class UserbotService:
                 is_allowed=True
             )
             admin_count += 1
-            
+
             logger.info(f"✅ تم إضافة {admin_count} مشرف للقناة {channel_id}")
             return admin_count
-            
+
         except Exception as e:
             logger.error(f"خطأ في جلب المشرفين الحقيقيين: {e}")
             return -1
-    
+
     async def fetch_channel_admins(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Async wrapper for fetch_channel_admins_sync"""
         return self.fetch_channel_admins_sync(user_id, channel_id, task_id)
@@ -1360,20 +1360,20 @@ class UserbotService:
         try:
             if not message_text or not message_text.strip():
                 return message_text
-            
+
             # Get text formatting settings
             formatting_settings = self.db.get_text_formatting_settings(task_id)
-            
+
             if not formatting_settings or not formatting_settings.get('text_formatting_enabled', False):
                 return message_text
-            
+
             format_type = formatting_settings.get('format_type', 'regular')
-            
+
             import re
-            
+
             # Always clean existing formatting first
             cleaned_text = message_text
-            
+
             # Comprehensive cleaning of all markdown formatting
             # Remove bold (both ** and __)
             cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
@@ -1388,12 +1388,12 @@ class UserbotService:
             # Remove code blocks
             cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
             # Remove spoiler
-            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'<tg-spoiler>\1</tg-spoiler>', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
             # Remove hyperlinks but keep text
             cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)
-            
+
             # Apply new formatting based on type
             if format_type == 'regular':
                 return cleaned_text.strip()
@@ -1414,29 +1414,29 @@ class UserbotService:
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
                 # Use correct HTML spoiler tag for Telegram 
-                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
+                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
                 # Use the original text as the hyperlink text
                 return f"[{cleaned_text.strip()}]({hyperlink_url})"
-            
+
             return cleaned_text.strip()
-            
+
         except Exception as e:
             logger.error(f"خطأ في تنسيق النص للمهمة {task_id}: {e}")
             return message_text
-    
+
     def apply_text_formatting_test(self, format_type: str, message_text: str) -> str:
         """Test function for text formatting without database dependency"""
         try:
             if not message_text or not message_text.strip():
                 return message_text
-            
+
             import re
-            
+
             # Always clean existing formatting first
             cleaned_text = message_text
-            
+
             # Comprehensive cleaning of all markdown formatting
             # Remove bold (both ** and __)
             cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
@@ -1451,12 +1451,12 @@ class UserbotService:
             # Remove code blocks
             cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
             # Remove spoiler
-            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'<tg-spoiler>\1</tg-spoiler>', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
             # Remove hyperlinks but keep text
             cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)
-            
+
             # Apply new formatting based on type
             if format_type == 'regular':
                 return cleaned_text.strip()
@@ -1477,12 +1477,12 @@ class UserbotService:
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
                 # Use correct HTML spoiler tag for Telegram 
-                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
+                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 return f"[{cleaned_text.strip()}](https://example.com)"
-            
+
             return cleaned_text.strip()
-            
+
         except Exception as e:
             logger.error(f"خطأ في اختبار تنسيق النص: {e}")
             return message_text
