@@ -1361,101 +1361,72 @@ class UserbotService:
                 return message_text
             
             format_type = formatting_settings.get('format_type', 'regular')
-            logger.info(f"🔧 تطبيق تنسيق '{format_type}' على النص: '{message_text[:50]}...'")
             
             # First, clean any existing Telegram formatting to ensure clean application
             import re
             cleaned_text = message_text
             
-            # Remove existing Telegram markdown formatting for all types except regular
+            # Remove existing Telegram markdown formatting
             if format_type != 'regular':
                 # Remove bold
                 cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
+                # Remove italic  
                 cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
                 # Remove underline
                 cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
-                cleaned_text = re.sub(r'_(.*?)_', r'\1', cleaned_text)
                 # Remove strikethrough
                 cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
                 # Remove code
                 cleaned_text = re.sub(r'`(.*?)`', r'\1', cleaned_text)
                 # Remove spoiler
                 cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
-                # Remove quotes (both > and < patterns)
-                cleaned_text = re.sub(r'^[><]\s*', '', cleaned_text, flags=re.MULTILINE)
+                # Remove quotes
+                cleaned_text = re.sub(r'^>', '', cleaned_text, flags=re.MULTILINE)
                 # Remove code blocks
                 cleaned_text = re.sub(r'```(.*?)```', r'\1', cleaned_text, flags=re.DOTALL)
             
             # Apply new formatting based on type
             if format_type == 'regular':
-                # For regular, remove ALL formatting and return completely clean text
+                # For regular, remove all formatting and return clean text
                 cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', message_text)
                 cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
                 cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
-                cleaned_text = re.sub(r'_(.*?)_', r'\1', cleaned_text)
                 cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
                 cleaned_text = re.sub(r'`(.*?)`', r'\1', cleaned_text)
                 cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
-                cleaned_text = re.sub(r'^[><]\s*', '', cleaned_text, flags=re.MULTILINE)
+                cleaned_text = re.sub(r'^>', '', cleaned_text, flags=re.MULTILINE)
                 cleaned_text = re.sub(r'```(.*?)```', r'\1', cleaned_text, flags=re.DOTALL)
-                logger.info(f"🧹 تم إزالة جميع التنسيقات: '{cleaned_text[:50]}...'")
                 return cleaned_text.strip()
             elif format_type == 'bold':
-                formatted_result = f"**{cleaned_text}**"
-                logger.info(f"🔤 تطبيق تنسيق عريض: '{formatted_result[:50]}...'")
-                return formatted_result
+                return f"**{cleaned_text}**"
             elif format_type == 'italic':
-                formatted_result = f"*{cleaned_text}*"  # Use single asterisk for italic
-                logger.info(f"🔤 تطبيق تنسيق مائل: '{formatted_result[:50]}...'")
-                return formatted_result
+                return f"_{cleaned_text}_"  # Use underscore for italic to avoid conflicts
             elif format_type == 'underline':
-                formatted_result = f"__{cleaned_text}__"
-                logger.info(f"🔤 تطبيق تنسيق تحته خط: '{formatted_result[:50]}...'")
-                return formatted_result
+                return f"__{cleaned_text}__"
             elif format_type == 'strikethrough':
-                formatted_result = f"~~{cleaned_text}~~"
-                logger.info(f"🔤 تطبيق تنسيق مشطوب: '{formatted_result[:50]}...'")
-                return formatted_result
+                return f"~~{cleaned_text}~~"
             elif format_type == 'code':
-                formatted_result = f"`{cleaned_text}`"
-                logger.info(f"🔤 تطبيق تنسيق كود: '{formatted_result[:50]}...'")
-                return formatted_result
+                return f"`{cleaned_text}`"
             elif format_type == 'monospace':
-                formatted_result = f"```\n{cleaned_text}\n```"
-                logger.info(f"🔤 تطبيق تنسيق كود متعدد الأسطر: '{formatted_result[:50]}...'")
-                return formatted_result
+                return f"```\n{cleaned_text}\n```"
             elif format_type == 'quote':
-                # Use simple indentation with quote styling
+                # Apply quote formatting to each non-empty line
                 lines = cleaned_text.split('\n')
                 formatted_lines = []
                 for line in lines:
                     if line.strip():
-                        # Use indentation with quote marks instead of >
-                        formatted_lines.append(f"⎮ {line}")
+                        formatted_lines.append(f"> {line}")
                     else:
-                        formatted_lines.append("")
-                formatted_result = '\n'.join(formatted_lines)
-                logger.info(f"🔤 تطبيق تنسيق اقتباس بخطوط جانبية: '{formatted_result[:50]}...'")
-                return formatted_result
+                        formatted_lines.append(line)
+                return '\n'.join(formatted_lines)
             elif format_type == 'spoiler':
-                formatted_result = f"||{cleaned_text}||"
-                logger.info(f"🔤 تطبيق تنسيق مخفي: '{formatted_result[:50]}...'")
-                return formatted_result
+                return f"||{cleaned_text}||"
             elif format_type == 'hyperlink':
-                hyperlink_text = formatting_settings.get('hyperlink_text')
+                hyperlink_text = formatting_settings.get('hyperlink_text', 'نص')
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
-                
-                # If hyperlink_text is not set, use original message text
-                if not hyperlink_text or hyperlink_text.strip() == '':
-                    link_text = cleaned_text
-                else:
-                    link_text = hyperlink_text
-                
-                formatted_result = f"[{link_text}]({hyperlink_url})"
-                logger.info(f"🔤 تطبيق تنسيق رابط: '{formatted_result[:50]}...'")
-                return formatted_result
+                # Replace the entire message with the hyperlink
+                return f"[{hyperlink_text}]({hyperlink_url})"
             
-            logger.warning(f"⚠️ نوع تنسيق غير معروف: {format_type}")
             return cleaned_text
             
         except Exception as e:
