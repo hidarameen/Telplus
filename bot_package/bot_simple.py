@@ -2844,17 +2844,15 @@ class SimpleTelegramBot:
         current_text = settings.get('hyperlink_text', 'نص')
         current_url = settings.get('hyperlink_url', 'https://example.com')
 
-        message = f"🔗 تعديل إعدادات الرابط\n"
+        message = f"🔗 تعديل رابط النص\n"
         message += f"📝 المهمة: {task_name}\n\n"
-        message += f"الإعدادات الحالية:\n"
-        message += f"• نص الرابط: {current_text}\n"
-        message += f"• عنوان الرابط: {current_url}\n\n"
-        message += "📝 أرسل الإعدادات الجديدة بالتنسيق التالي:\n\n"
-        message += "نص الرابط\n"
-        message += "https://example.com\n\n"
+        message += f"الرابط الحالي: {current_url}\n\n"
+        message += "📝 أرسل الرابط الجديد:\n\n"
         message += "مثال:\n"
-        message += "اضغط هنا\n"
-        message += "https://t.me/mychannel\n\n"
+        message += "https://t.me/mychannel\n"
+        message += "https://google.com\n"
+        message += "https://example.com/page\n\n"
+        message += "💡 ملاحظة: سيتم استخدام النص الأصلي للرسالة كنص للرابط\n"
         message += "⚠️ أرسل 'إلغاء' للخروج"
 
         buttons = [
@@ -2881,21 +2879,10 @@ class SimpleTelegramBot:
             await self.show_text_formatting(event, task_id)
             return
 
-        # Parse the input
-        lines = message_text.strip().split('\n')
+        # Parse the input - expecting only the URL
+        hyperlink_url = message_text.strip()
         
-        if len(lines) < 2:
-            await event.respond(
-                "❌ تنسيق غير صحيح\n\n"
-                "يجب إرسال سطرين:\n"
-                "السطر الأول: نص الرابط\n"
-                "السطر الثاني: عنوان الرابط\n\n"
-                "حاول مرة أخرى أو أرسل 'إلغاء'"
-            )
-            return
-
-        hyperlink_text = lines[0].strip()
-        hyperlink_url = lines[1].strip()
+        # No need for hyperlink text since we use original message text
 
         # Validate URL
         if not hyperlink_url.startswith(('http://', 'https://')):
@@ -2905,17 +2892,9 @@ class SimpleTelegramBot:
             )
             return
 
-        if not hyperlink_text:
-            await event.respond(
-                "❌ نص الرابط لا يمكن أن يكون فارغاً\n\n"
-                "حاول مرة أخرى أو أرسل 'إلغاء'"
-            )
-            return
-
-        # Update hyperlink settings
+        # Update hyperlink settings (no need to update hyperlink_text since we use original text)
         success = self.db.update_text_formatting_settings(
             task_id, 
-            hyperlink_text=hyperlink_text, 
             hyperlink_url=hyperlink_url
         )
 
@@ -2924,9 +2903,9 @@ class SimpleTelegramBot:
 
         if success:
             await event.respond(
-                f"✅ تم تحديث إعدادات الرابط بنجاح!\n\n"
-                f"• نص الرابط: {hyperlink_text}\n"
-                f"• عنوان الرابط: {hyperlink_url}"
+                f"✅ تم تحديث رابط النص بنجاح!\n\n"
+                f"• الرابط الجديد: {hyperlink_url}\n"
+                f"• سيتم استخدام النص الأصلي كنص الرابط"
             )
             
             # Force refresh UserBot tasks

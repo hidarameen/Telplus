@@ -353,6 +353,7 @@ class UserbotService:
                         # Check if we need to use copy mode due to formatting
                         requires_copy_mode = (
                             original_text != modified_text or  # Text replacements applied
+                            modified_text != formatted_text or  # Text formatting applied
                             message_settings['header_enabled'] or  # Header enabled
                             message_settings['footer_enabled'] or  # Footer enabled
                             message_settings['inline_buttons_enabled']  # Inline buttons enabled
@@ -391,7 +392,8 @@ class UserbotService:
                                         target_entity,
                                         final_text or event.message.text or "رسالة",
                                         link_preview=forwarding_settings['link_preview_enabled'],
-                                        silent=forwarding_settings['silent_notifications']
+                                        silent=forwarding_settings['silent_notifications'],
+                                        parse_mode='html'
                                     )
                                 else:
                                     # Regular media message with caption
@@ -399,7 +401,8 @@ class UserbotService:
                                         target_entity,
                                         event.message.media,
                                         caption=final_text,
-                                        silent=forwarding_settings['silent_notifications']
+                                        silent=forwarding_settings['silent_notifications'],
+                                        parse_mode='html'
                                     )
                             elif event.message.text or final_text:
                                 # Pure text message
@@ -407,7 +410,8 @@ class UserbotService:
                                     target_entity,
                                     final_text or "رسالة",
                                     link_preview=forwarding_settings['link_preview_enabled'],
-                                    silent=forwarding_settings['silent_notifications']
+                                    silent=forwarding_settings['silent_notifications'],
+                                    parse_mode='html'
                                 )
                             else:
                                 # Fallback to forward for other types
@@ -429,7 +433,8 @@ class UserbotService:
                                             target_entity,
                                             final_text or event.message.text or "رسالة",
                                             link_preview=forwarding_settings['link_preview_enabled'],
-                                            silent=forwarding_settings['silent_notifications']
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='html'
                                         )
                                     else:
                                         # Regular media message with caption
@@ -437,14 +442,16 @@ class UserbotService:
                                             target_entity,
                                             event.message.media,
                                             caption=final_text,
-                                            silent=forwarding_settings['silent_notifications']
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='html'
                                         )
                                 else:
                                     forwarded_msg = await client.send_message(
                                         target_entity,
                                         final_text or "رسالة",
                                         link_preview=forwarding_settings['link_preview_enabled'],
-                                        silent=forwarding_settings['silent_notifications']
+                                        silent=forwarding_settings['silent_notifications'],
+                                        parse_mode='html'
                                     )
                             else:
                                 # No formatting changes, forward normally
@@ -1362,75 +1369,122 @@ class UserbotService:
             
             format_type = formatting_settings.get('format_type', 'regular')
             
-            # First, clean any existing Telegram formatting to ensure clean application
             import re
+            
+            # Always clean existing formatting first
             cleaned_text = message_text
             
-            # Remove existing Telegram markdown formatting
-            if format_type != 'regular':
-                # Remove bold
-                cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
-                # Remove italic  
-                cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
-                # Remove underline
-                cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
-                # Remove strikethrough
-                cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
-                # Remove code
-                cleaned_text = re.sub(r'`(.*?)`', r'\1', cleaned_text)
-                # Remove spoiler
-                cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
-                # Remove quotes
-                cleaned_text = re.sub(r'^>', '', cleaned_text, flags=re.MULTILINE)
-                # Remove code blocks
-                cleaned_text = re.sub(r'```(.*?)```', r'\1', cleaned_text, flags=re.DOTALL)
+            # Comprehensive cleaning of all markdown formatting
+            # Remove bold (both ** and __)
+            cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
+            # Remove italic (both * and _)
+            cleaned_text = re.sub(r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'(?<!_)_(?!_)([^_]+)_(?!_)', r'\1', cleaned_text)
+            # Remove strikethrough
+            cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
+            # Remove code
+            cleaned_text = re.sub(r'`([^`]+)`', r'\1', cleaned_text)
+            # Remove code blocks
+            cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
+            # Remove spoiler
+            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
+            # Remove quotes
+            cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
+            # Remove hyperlinks but keep text
+            cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)
             
             # Apply new formatting based on type
             if format_type == 'regular':
-                # For regular, remove all formatting and return clean text
-                cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', message_text)
-                cleaned_text = re.sub(r'\*(.*?)\*', r'\1', cleaned_text)
-                cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
-                cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
-                cleaned_text = re.sub(r'`(.*?)`', r'\1', cleaned_text)
-                cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
-                cleaned_text = re.sub(r'^>', '', cleaned_text, flags=re.MULTILINE)
-                cleaned_text = re.sub(r'```(.*?)```', r'\1', cleaned_text, flags=re.DOTALL)
                 return cleaned_text.strip()
             elif format_type == 'bold':
-                return f"**{cleaned_text}**"
+                return f"<b>{cleaned_text.strip()}</b>"
             elif format_type == 'italic':
-                return f"_{cleaned_text}_"  # Use underscore for italic to avoid conflicts
+                return f"<i>{cleaned_text.strip()}</i>"
             elif format_type == 'underline':
-                return f"__{cleaned_text}__"
+                return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f"~~{cleaned_text}~~"
+                return f"<s>{cleaned_text.strip()}</s>"
             elif format_type == 'code':
-                return f"`{cleaned_text}`"
+                return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
-                return f"```\n{cleaned_text}\n```"
+                return f"<pre>{cleaned_text.strip()}</pre>"
             elif format_type == 'quote':
-                # Apply quote formatting to each non-empty line
-                lines = cleaned_text.split('\n')
-                formatted_lines = []
-                for line in lines:
-                    if line.strip():
-                        formatted_lines.append(f"> {line}")
-                    else:
-                        formatted_lines.append(line)
-                return '\n'.join(formatted_lines)
+                # Use HTML blockquote for proper Telegram quote formatting
+                return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                return f"||{cleaned_text}||"
+                # Use correct HTML spoiler tag for Telegram 
+                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
             elif format_type == 'hyperlink':
-                hyperlink_text = formatting_settings.get('hyperlink_text', 'نص')
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
-                # Replace the entire message with the hyperlink
-                return f"[{hyperlink_text}]({hyperlink_url})"
+                # Use the original text as the hyperlink text
+                return f"[{cleaned_text.strip()}]({hyperlink_url})"
             
-            return cleaned_text
+            return cleaned_text.strip()
             
         except Exception as e:
             logger.error(f"خطأ في تنسيق النص للمهمة {task_id}: {e}")
+            return message_text
+    
+    def apply_text_formatting_test(self, format_type: str, message_text: str) -> str:
+        """Test function for text formatting without database dependency"""
+        try:
+            if not message_text or not message_text.strip():
+                return message_text
+            
+            import re
+            
+            # Always clean existing formatting first
+            cleaned_text = message_text
+            
+            # Comprehensive cleaning of all markdown formatting
+            # Remove bold (both ** and __)
+            cleaned_text = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
+            # Remove italic (both * and _)
+            cleaned_text = re.sub(r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'(?<!_)_(?!_)([^_]+)_(?!_)', r'\1', cleaned_text)
+            # Remove strikethrough
+            cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
+            # Remove code
+            cleaned_text = re.sub(r'`([^`]+)`', r'\1', cleaned_text)
+            # Remove code blocks
+            cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
+            # Remove spoiler
+            cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
+            # Remove quotes
+            cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
+            # Remove hyperlinks but keep text
+            cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)
+            
+            # Apply new formatting based on type
+            if format_type == 'regular':
+                return cleaned_text.strip()
+            elif format_type == 'bold':
+                return f"<b>{cleaned_text.strip()}</b>"
+            elif format_type == 'italic':
+                return f"<i>{cleaned_text.strip()}</i>"
+            elif format_type == 'underline':
+                return f"<u>{cleaned_text.strip()}</u>"
+            elif format_type == 'strikethrough':
+                return f"<s>{cleaned_text.strip()}</s>"
+            elif format_type == 'code':
+                return f"<code>{cleaned_text.strip()}</code>"
+            elif format_type == 'monospace':
+                return f"<pre>{cleaned_text.strip()}</pre>"
+            elif format_type == 'quote':
+                # Use HTML blockquote for proper Telegram quote formatting
+                return f"<blockquote>{cleaned_text.strip()}</blockquote>"
+            elif format_type == 'spoiler':
+                # Use correct HTML spoiler tag for Telegram 
+                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
+            elif format_type == 'hyperlink':
+                return f"[{cleaned_text.strip()}](https://example.com)"
+            
+            return cleaned_text.strip()
+            
+        except Exception as e:
+            logger.error(f"خطأ في اختبار تنسيق النص: {e}")
             return message_text
 
 # Global userbot instance
