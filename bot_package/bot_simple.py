@@ -341,6 +341,15 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الأزرار: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("clear_text_clean_keywords_"):
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
+                        await self.clear_text_cleaning_keywords(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لمسح كلمات التنظيف: {e}, data='{data}'")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_forwarded_block_"): # Handler for toggle forwarded message block
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -534,6 +543,47 @@ class SimpleTelegramBot:
                         await self.show_text_replacements(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لاستبدال النصوص: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("text_cleaning_"): # Handler for text cleaning
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_text_cleaning(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتنظيف النصوص: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_text_clean_"): # Handler for toggling text cleaning settings
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        setting_type = parts[3]
+                        task_id = int(parts[4]) if len(parts) >= 5 else int(parts[3])
+                        if setting_type in ['remove', 'links', 'emojis', 'hashtags', 'phone', 'empty', 'keywords']:
+                            await self.toggle_text_cleaning_setting(event, task_id, setting_type)
+                        else:
+                            logger.error(f"نوع إعداد تنظيف النص غير صالح: {setting_type}")
+                            await event.answer("❌ نوع إعداد غير صالح")
+                    except (ValueError, IndexError) as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تنظيف النص: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("manage_text_clean_keywords_"): # Handler for managing text cleaning keywords
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
+                        await self.manage_text_cleaning_keywords(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة كلمات التنظيف: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("add_text_clean_keyword_"): # Handler for adding text cleaning keyword
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
+                        await self.start_add_text_cleaning_keyword(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة كلمة تنظيف: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_replacement_"): # Handler for toggling text replacements
                 parts = data.split("_")
@@ -921,6 +971,9 @@ class SimpleTelegramBot:
             elif state == 'adding_multiple_words': # Handle adding multiple words state
                 await self.handle_adding_multiple_words(event, state_data)
                 return
+            elif state == 'adding_text_cleaning_keywords': # Handle adding text cleaning keywords
+                await self.handle_adding_text_cleaning_keywords(event, state_data)
+                return
             elif state == 'waiting_text_replacements': # Handle adding text replacements
                 task_id = int(data)
                 await self.handle_add_replacements(event, task_id, event.text)
@@ -1026,6 +1079,7 @@ class SimpleTelegramBot:
             [Button.inline("🎬 فلاتر الوسائط", f"media_filters_{task_id}")],
             [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")],
             [Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
+            [Button.inline("🧹 تنظيف النصوص", f"text_cleaning_{task_id}")],
             [Button.inline(f"{header_status} رأس الرسالة", f"header_settings_{task_id}")],
             [Button.inline(f"{footer_status} ذيل الرسالة", f"footer_settings_{task_id}")],
             [Button.inline(f"{buttons_status} أزرار إنلاين", f"inline_buttons_{task_id}")],
@@ -2979,6 +3033,278 @@ class SimpleTelegramBot:
         ]
 
         await event.edit(message, buttons=buttons)
+
+    # ===== Text Cleaning Management =====
+
+    async def show_text_cleaning(self, event, task_id):
+        """Show text cleaning settings for task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_text_cleaning_settings(task_id)
+
+        message = f"🧹 تنظيف النصوص للمهمة: {task_name}\n\n"
+        message += "📋 إعدادات التنظيف الحالية:\n\n"
+
+        # Define cleaning options with icons
+        cleaning_options = [
+            ('remove_links', 'تنظيف الروابط', '🔗'),
+            ('remove_emojis', 'تنظيف الايموجيات', '😊'),
+            ('remove_hashtags', 'حذف الهاشتاقات', '#️⃣'),
+            ('remove_phone_numbers', 'تنظيف أرقام الهواتف', '📱'),
+            ('remove_empty_lines', 'حذف الأسطر الفارغة', '📝'),
+            ('remove_lines_with_keywords', 'حذف الأسطر بكلمات معينة', '🚫')
+        ]
+
+        buttons = []
+        enabled_count = 0
+
+        for setting_key, setting_name, icon in cleaning_options:
+            is_enabled = settings.get(setting_key, False)
+            status_icon = "✅" if is_enabled else "❌"
+            if is_enabled:
+                enabled_count += 1
+
+            message += f"{status_icon} {icon} {setting_name}\n"
+
+            # Add toggle button
+            toggle_text = "❌ تعطيل" if is_enabled else "✅ تفعيل"
+            
+            # Map setting keys to shorter callback identifiers
+            callback_map = {
+                'remove_links': 'links',
+                'remove_emojis': 'emojis', 
+                'remove_hashtags': 'hashtags',
+                'remove_phone_numbers': 'phone',
+                'remove_empty_lines': 'empty',
+                'remove_lines_with_keywords': 'keywords'
+            }
+            
+            callback_id = callback_map.get(setting_key, setting_key)
+            buttons.append([
+                Button.inline(f"{toggle_text} {setting_name}", f"toggle_text_clean_{callback_id}_{task_id}")
+            ])
+
+        message += f"\n📊 الإحصائيات: {enabled_count}/{len(cleaning_options)} مُفعل\n\n"
+
+        # Add special button for keyword management
+        if settings.get('remove_lines_with_keywords', False):
+            keywords_count = len(self.db.get_text_cleaning_keywords(task_id))
+            buttons.append([
+                Button.inline(f"🔧 إدارة الكلمات المخصصة ({keywords_count})", f"manage_text_clean_keywords_{task_id}")
+            ])
+
+        buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    async def toggle_text_cleaning_setting(self, event, task_id, setting_type):
+        """Toggle text cleaning setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Map callback identifiers back to database keys
+        setting_map = {
+            'links': 'remove_links',
+            'emojis': 'remove_emojis',
+            'hashtags': 'remove_hashtags',
+            'phone': 'remove_phone_numbers',
+            'empty': 'remove_empty_lines',
+            'keywords': 'remove_lines_with_keywords'
+        }
+
+        db_setting = setting_map.get(setting_type)
+        if not db_setting:
+            await event.answer("❌ نوع إعداد غير صالح")
+            return
+
+        settings = self.db.get_text_cleaning_settings(task_id)
+        current_status = settings.get(db_setting, False)
+        new_status = not current_status
+
+        success = self.db.update_text_cleaning_setting(task_id, db_setting, new_status)
+
+        if success:
+            setting_names = {
+                'remove_links': 'تنظيف الروابط',
+                'remove_emojis': 'تنظيف الايموجيات',
+                'remove_hashtags': 'حذف الهاشتاقات',
+                'remove_phone_numbers': 'تنظيف أرقام الهواتف',
+                'remove_empty_lines': 'حذف الأسطر الفارغة',
+                'remove_lines_with_keywords': 'حذف الأسطر بكلمات معينة'
+            }
+            
+            setting_name = setting_names.get(db_setting, db_setting)
+            status_text = "مُفعل" if new_status else "مُعطل"
+
+            await event.answer(f"✅ تم تغيير {setting_name} إلى: {status_text}")
+
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+
+            await self.show_text_cleaning(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير الإعداد")
+
+    async def manage_text_cleaning_keywords(self, event, task_id):
+        """Manage text cleaning keywords"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        keywords = self.db.get_text_cleaning_keywords(task_id)
+
+        message = f"🚫 إدارة كلمات حذف الأسطر\n"
+        message += f"📝 المهمة: {task_name}\n\n"
+
+        if not keywords:
+            message += "❌ لا توجد كلمات محددة حالياً\n\n"
+            message += "💡 عند إضافة كلمات، سيتم حذف أي سطر يحتوي على إحدى هذه الكلمات من الرسائل قبل التوجيه"
+        else:
+            message += f"📋 الكلمات المحددة ({len(keywords)}):\n\n"
+            for i, keyword in enumerate(keywords[:10], 1):  # Show max 10
+                message += f"{i}. {keyword}\n"
+            
+            if len(keywords) > 10:
+                message += f"... و {len(keywords) - 10} كلمة أخرى\n"
+
+        buttons = [
+            [Button.inline("➕ إضافة كلمات", f"add_text_clean_keyword_{task_id}")]
+        ]
+
+        if keywords:
+            buttons.append([Button.inline("🗑️ حذف كلمة", f"remove_text_clean_keyword_{task_id}")])
+            buttons.append([Button.inline("🗑️ حذف الكل", f"clear_text_clean_keywords_{task_id}")])
+
+        buttons.append([Button.inline("🔙 رجوع لتنظيف النصوص", f"text_cleaning_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    async def start_add_text_cleaning_keyword(self, event, task_id):
+        """Start adding text cleaning keywords"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+
+        message = f"➕ إضافة كلمات لحذف الأسطر\n"
+        message += f"📝 المهمة: {task_name}\n\n"
+        message += "📝 أرسل الكلمات أو الجمل التي تريد حذف الأسطر التي تحتويها:\n\n"
+        message += "📋 طرق الإدخال:\n"
+        message += "• كلمة واحدة في كل سطر\n"
+        message += "• عدة كلمات مفصولة بفواصل\n"
+        message += "• جمل كاملة\n\n"
+        message += "مثال:\n"
+        message += "إعلان\n"
+        message += "رابط، للمزيد\n"
+        message += "انقر هنا للتفاصيل\n\n"
+        message += "⚠️ أرسل 'إلغاء' للخروج"
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"manage_text_clean_keywords_{task_id}")]
+        ]
+
+        await event.edit(message, buttons=buttons)
+        
+        # Store the state for this user in database
+        state_data = {
+            'task_id': task_id,
+            'action': 'adding_text_cleaning_keywords'
+        }
+        self.db.set_conversation_state(user_id, 'adding_text_cleaning_keywords', json.dumps(state_data))
+
+    async def handle_adding_text_cleaning_keywords(self, event, state_data):
+        """Handle text cleaning keywords input from user"""
+        user_id = event.sender_id
+        state, data = state_data
+        message_text = event.text.strip()
+
+        try:
+            # Handle different data types from conversation state
+            if isinstance(data, str):
+                if data.strip():  # Check if string is not empty
+                    stored_data = json.loads(data)
+                else:
+                    raise ValueError("Empty data string")
+            elif isinstance(data, dict):
+                stored_data = data
+            else:
+                logger.error(f"Invalid data type: {type(data)}, data: {data}")
+                raise ValueError(f"Invalid data format: {type(data)}")
+            
+            task_id = stored_data.get('task_id')
+            if not task_id:
+                raise KeyError("Missing task_id in stored data")
+                
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.error(f"خطأ في تحليل بيانات المهمة: {e}, data_type: {type(data)}, data: {data}")
+            await event.respond("❌ خطأ في البيانات. حاول مرة أخرى.")
+            self.db.clear_conversation_state(user_id)
+            return
+
+        # Check if user wants to cancel
+        if message_text.lower() in ['إلغاء', 'cancel']:
+            self.db.clear_conversation_state(user_id)
+            await event.respond("❌ تم إلغاء إضافة الكلمات.")
+            await self.manage_text_cleaning_keywords(event, task_id)
+            return
+
+        # Parse the input to extract keywords
+        keywords_to_add = []
+        
+        # Split by lines first
+        lines = message_text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line:
+                # Split by comma if there are multiple keywords in a line
+                if '،' in line:  # Arabic comma
+                    keywords_in_line = [w.strip() for w in line.split('،') if w.strip()]
+                elif ',' in line:  # English comma
+                    keywords_in_line = [w.strip() for w in line.split(',') if w.strip()]
+                else:
+                    keywords_in_line = [line]
+                
+                keywords_to_add.extend(keywords_in_line)
+
+        if not keywords_to_add:
+            await event.respond("❌ لم يتم إدخال أي كلمات صالحة. حاول مرة أخرى أو أرسل 'إلغاء' للخروج.")
+            return
+
+        # Add keywords to database
+        added_count = self.db.add_text_cleaning_keywords(task_id, keywords_to_add)
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+
+        if added_count > 0:
+            await event.respond(f"✅ تم إضافة {added_count} كلمة/جملة لحذف الأسطر")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Return to keywords management
+            await self.manage_text_cleaning_keywords(event, task_id)
+        else:
+            await event.respond("⚠️ لم يتم إضافة أي كلمات جديدة (قد تكون موجودة مسبقاً)")
+            await self.manage_text_cleaning_keywords(event, task_id)
 
     async def start_add_multiple_words(self, event, task_id, filter_type):
         """Start the process to add multiple words to a filter"""
@@ -5374,6 +5700,181 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"❌ خطأ في إضافة فلتر اللغة: {e}")
             await event.respond("❌ حدث خطأ أثناء الإضافة")
+
+    async def manage_text_cleaning(self, event, task_id):
+        """Manage text cleaning settings for a task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get current text cleaning settings
+        settings = self.db.get_text_cleaning_settings(task_id)
+        
+        # Create status indicators
+        links_status = "🟢" if settings.get('remove_links', False) else "🔴"
+        emojis_status = "🟢" if settings.get('remove_emojis', False) else "🔴"
+        hashtags_status = "🟢" if settings.get('remove_hashtags', False) else "🔴"
+        phones_status = "🟢" if settings.get('remove_phone_numbers', False) else "🔴"
+        empty_lines_status = "🟢" if settings.get('remove_empty_lines', False) else "🔴"
+        keywords_status = "🟢" if settings.get('remove_lines_with_keywords', False) else "🔴"
+
+        # Get keywords count
+        keywords = self.db.get_text_cleaning_keywords(task_id)
+        keywords_count = len(keywords)
+
+        message = f"🧹 **تنظيف النصوص للمهمة: {task.get('task_name', 'مهمة بدون اسم')}**\n\n"
+        message += "📋 **إعدادات التنظيف الحالية:**\n\n"
+        message += f"{links_status} حذف الروابط\n"
+        message += f"{emojis_status} حذف الايموجيات\n"
+        message += f"{hashtags_status} حذف الهاشتاقات\n"
+        message += f"{phones_status} حذف أرقام الهواتف\n"
+        message += f"{empty_lines_status} حذف الأسطر الفارغة\n"
+        message += f"{keywords_status} حذف أسطر بكلمات محددة ({keywords_count} كلمة)\n\n"
+        message += "اختر نوع التنظيف للتفعيل/الإلغاء:"
+
+        buttons = [
+            [Button.inline(f"{links_status} الروابط", f"clean_toggle_remove_links_{task_id}")],
+            [Button.inline(f"{emojis_status} الايموجيات", f"clean_toggle_remove_emojis_{task_id}")],
+            [Button.inline(f"{hashtags_status} الهاشتاقات", f"clean_toggle_remove_hashtags_{task_id}")],
+            [Button.inline(f"{phones_status} أرقام الهواتف", f"clean_toggle_remove_phone_numbers_{task_id}")],
+            [Button.inline(f"{empty_lines_status} الأسطر الفارغة", f"clean_toggle_remove_empty_lines_{task_id}")],
+            [Button.inline(f"{keywords_status} الكلمات المحددة ({keywords_count})", f"manage_text_clean_keywords_{task_id}")],
+            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
+        ]
+
+        await event.edit(message, buttons=buttons)
+
+    async def handle_text_cleaning_toggle(self, event, data):
+        """Handle text cleaning toggle actions"""
+        try:
+            # Parse callback data: clean_toggle_setting_name_task_id
+            parts = data.split("_")
+            if len(parts) >= 4:
+                setting_name = "_".join(parts[2:-1])  # Get setting name (can contain underscores)
+                task_id = int(parts[-1])
+                
+                user_id = event.sender_id
+                task = self.db.get_task(task_id, user_id)
+                
+                if not task:
+                    await event.answer("❌ المهمة غير موجودة")
+                    return
+
+                # Get current setting value
+                settings = self.db.get_text_cleaning_settings(task_id)
+                current_value = settings.get(setting_name, False)
+                new_value = not current_value
+
+                # Update the setting
+                success = self.db.update_text_cleaning_setting(task_id, setting_name, new_value)
+                
+                if success:
+                    status_text = "تم تفعيل" if new_value else "تم إلغاء"
+                    setting_display = {
+                        'remove_links': 'حذف الروابط',
+                        'remove_emojis': 'حذف الايموجيات',
+                        'remove_hashtags': 'حذف الهاشتاقات',
+                        'remove_phone_numbers': 'حذف أرقام الهواتف',
+                        'remove_empty_lines': 'حذف الأسطر الفارغة',
+                        'remove_lines_with_keywords': 'حذف الأسطر بالكلمات المحددة'
+                    }.get(setting_name, setting_name)
+                    
+                    await event.answer(f"✅ {status_text} {setting_display}")
+                    
+                    # Force refresh UserBot tasks
+                    try:
+                        from userbot_service.userbot import userbot_instance
+                        if user_id in userbot_instance.clients:
+                            await userbot_instance.refresh_user_tasks(user_id)
+                            logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير إعدادات تنظيف النص للمهمة {task_id}")
+                    except Exception as e:
+                        logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+
+                    # Refresh the text cleaning settings display
+                    await self.manage_text_cleaning(event, task_id)
+                else:
+                    await event.answer("❌ فشل في تحديث الإعداد")
+                    
+        except Exception as e:
+            logger.error(f"خطأ في تفعيل/إلغاء إعداد تنظيف النص: {e}")
+            await event.answer("❌ حدث خطأ")
+
+    async def manage_text_cleaning_keywords(self, event, task_id):
+        """Manage text cleaning keywords for a task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get current keywords
+        keywords = self.db.get_text_cleaning_keywords(task_id)
+        
+        message = f"🧹 **إدارة كلمات تنظيف النصوص**\n"
+        message += f"المهمة: {task.get('task_name', 'مهمة بدون اسم')}\n\n"
+        
+        if not keywords:
+            message += "❌ لا توجد كلمات محددة حالياً\n\n"
+            message += "عند تفعيل هذه الميزة، سيتم حذف أي سطر يحتوي على الكلمات المحددة"
+        else:
+            message += f"📋 **الكلمات المحددة ({len(keywords)}):**\n\n"
+            for i, keyword in enumerate(keywords[:20], 1):  # Show max 20
+                message += f"{i}. {keyword}\n"
+            
+            if len(keywords) > 20:
+                message += f"\n... و {len(keywords) - 20} كلمة أخرى"
+
+        buttons = [
+            [Button.inline("➕ إضافة كلمات", f"add_text_clean_keywords_{task_id}")],
+        ]
+        
+        if keywords:
+            buttons.append([Button.inline("🗑️ مسح جميع الكلمات", f"clear_text_clean_keywords_{task_id}")])
+        
+        buttons.append([Button.inline("🔙 رجوع لتنظيف النصوص", f"text_cleaning_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    async def clear_text_cleaning_keywords(self, event, task_id):
+        """Clear all text cleaning keywords for a task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get current keywords count
+        keywords = self.db.get_text_cleaning_keywords(task_id)
+        keywords_count = len(keywords)
+
+        if keywords_count == 0:
+            await event.answer("❌ لا توجد كلمات لحذفها")
+            return
+
+        # Clear all keywords
+        success = self.db.clear_text_cleaning_keywords(task_id)
+        
+        if success:
+            await event.answer(f"✅ تم حذف جميع الكلمات ({keywords_count} كلمة)")
+            
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+                    logger.info(f"🔄 تم تحديث مهام UserBot بعد حذف كلمات تنظيف النص للمهمة {task_id}")
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+
+            # Return to keywords management
+            await self.manage_text_cleaning_keywords(event, task_id)
+        else:
+            await event.answer("❌ فشل في حذف الكلمات")
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()

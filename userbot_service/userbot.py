@@ -4,6 +4,7 @@ Uses Telethon for automated message forwarding between chats
 """
 import logging
 import asyncio
+import re
 from typing import Dict, List, Optional
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, AuthKeyUnregisteredError
@@ -61,6 +62,117 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في تشغيل UserBot للمستخدم {user_id}: {e}")
             return False
+
+    def apply_text_cleaning(self, message_text: str, task_id: int) -> str:
+        """Apply text cleaning based on task settings"""
+        if not message_text:
+            return message_text
+
+        try:
+            # Get text cleaning settings for this task
+            settings = self.db.get_text_cleaning_settings(task_id)
+            if not settings:
+                return message_text
+
+            cleaned_text = message_text
+
+            # 1. Remove links
+            if settings.get('remove_links', False):
+                # Remove HTTP/HTTPS URLs
+                cleaned_text = re.sub(r'https?://[^\s]+', '', cleaned_text)
+                # Remove Telegram links (t.me)
+                cleaned_text = re.sub(r't\.me/[^\s]+', '', cleaned_text)
+                # Remove www links
+                cleaned_text = re.sub(r'www\.[^\s]+', '', cleaned_text)
+                logger.debug(f"🧹 تم حذف الروابط من المهمة {task_id}")
+
+            # 2. Remove emojis
+            if settings.get('remove_emojis', False):
+                # Remove emojis using Unicode ranges
+                emoji_pattern = re.compile(
+                    "["
+                    "\U0001F600-\U0001F64F"  # emoticons
+                    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+                    "\U0001F680-\U0001F6FF"  # transport & map symbols
+                    "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                    "\U00002700-\U000027BF"  # dingbats
+                    "\U0001f926-\U0001f937"  # supplemental symbols
+                    "\U00010000-\U0010ffff"  # supplemental characters
+                    "\u2640-\u2642"          # gender symbols
+                    "\u2600-\u2B55"          # misc symbols
+                    "\u200d"                 # zero width joiner
+                    "\u23cf"                 # various symbols
+                    "\u23e9-\u23f3"          # symbol range
+                    "\u23f8-\u23fa"          # symbol range
+                    "\u3030"                 # wavy dash
+                    "]+", 
+                    flags=re.UNICODE
+                )
+                cleaned_text = emoji_pattern.sub('', cleaned_text)
+                logger.debug(f"🧹 تم حذف الايموجيات من المهمة {task_id}")
+
+            # 3. Remove hashtags
+            if settings.get('remove_hashtags', False):
+                # Remove hashtags (# followed by word characters)
+                cleaned_text = re.sub(r'#\w+', '', cleaned_text)
+                logger.debug(f"🧹 تم حذف الهاشتاقات من المهمة {task_id}")
+
+            # 4. Remove phone numbers
+            if settings.get('remove_phone_numbers', False):
+                # Remove various phone number formats
+                phone_patterns = [
+                    r'\+?\d{1,4}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',  # International
+                    r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b',  # US format
+                    r'\b\d{4}[-.\s]?\d{3}[-.\s]?\d{3}\b',  # Some international
+                    r'\b\d{2}[-.\s]?\d{4}[-.\s]?\d{4}\b',  # Another format
+                ]
+                for pattern in phone_patterns:
+                    cleaned_text = re.sub(pattern, '', cleaned_text)
+                logger.debug(f"🧹 تم حذف أرقام الهواتف من المهمة {task_id}")
+
+            # 5. Remove lines with specific keywords
+            if settings.get('remove_lines_with_keywords', False):
+                keywords = self.db.get_text_cleaning_keywords(task_id)
+                if keywords:
+                    lines = cleaned_text.split('\n')
+                    filtered_lines = []
+                    for line in lines:
+                        should_remove = False
+                        for keyword in keywords:
+                            if keyword.lower() in line.lower():
+                                should_remove = True
+                                break
+                        if not should_remove:
+                            filtered_lines.append(line)
+                    cleaned_text = '\n'.join(filtered_lines)
+                    logger.debug(f"🧹 تم حذف الأسطر التي تحتوي على الكلمات المحددة من المهمة {task_id}")
+
+            # 6. Remove empty lines (but preserve intentional line breaks)
+            if settings.get('remove_empty_lines', False):
+                # Remove completely empty lines but keep single line breaks
+                lines = cleaned_text.split('\n')
+                filtered_lines = []
+                for line in lines:
+                    if line.strip():  # Keep lines with content
+                        filtered_lines.append(line)
+                    elif filtered_lines and filtered_lines[-1].strip():  # Keep one empty line after content
+                        filtered_lines.append('')
+                cleaned_text = '\n'.join(filtered_lines)
+                # Remove trailing empty lines
+                cleaned_text = cleaned_text.rstrip('\n')
+                logger.debug(f"🧹 تم حذف الأسطر الفارغة من المهمة {task_id}")
+
+            # Clean up extra whitespace
+            cleaned_text = re.sub(r'\s+', ' ', cleaned_text.strip())
+
+            if cleaned_text != message_text:
+                logger.info(f"🧹 تم تنظيف النص للمهمة {task_id} - الطول الأصلي: {len(message_text)}, بعد التنظيف: {len(cleaned_text)}")
+
+            return cleaned_text
+
+        except Exception as e:
+            logger.error(f"خطأ في تنظيف النص للمهمة {task_id}: {e}")
+            return message_text
 
     async def _setup_event_handlers(self, user_id: int, client: TelegramClient):
         """Set up message forwarding event handlers"""
@@ -214,9 +326,10 @@ class UserbotService:
                         # Get message formatting settings for this task
                         message_settings = self.get_message_settings(task['id'])
                         
-                        # Apply text replacements if enabled
+                        # Apply text cleaning first, then text replacements
                         original_text = event.message.text or ""
-                        modified_text = self.apply_text_replacements(task['id'], original_text) if original_text else original_text
+                        cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
+                        modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
                         
                         # Apply header and footer formatting
                         final_text = self.apply_message_formatting(modified_text, message_settings)

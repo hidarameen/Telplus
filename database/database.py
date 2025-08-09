@@ -390,6 +390,35 @@ class Database:
                 )
             ''')
 
+            # Text cleaning settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_text_cleaning_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    remove_links BOOLEAN DEFAULT FALSE,
+                    remove_emojis BOOLEAN DEFAULT FALSE,
+                    remove_hashtags BOOLEAN DEFAULT FALSE,
+                    remove_phone_numbers BOOLEAN DEFAULT FALSE,
+                    remove_empty_lines BOOLEAN DEFAULT FALSE,
+                    remove_lines_with_keywords BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Text cleaning keywords table (for removing lines containing specific words)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_text_cleaning_keywords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    keyword TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, keyword)
+                )
+            ''')
+
             # Add new columns for synchronization if they don't exist
             try:
                 cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN sync_edit_enabled BOOLEAN DEFAULT FALSE")
@@ -2103,6 +2132,137 @@ class Database:
         except Exception as e:
             logger.error(f"خطأ في فحص إذن المشرف {user_id} للمهمة {task_id}: {e}")
             return False
+            
+    # ===== Text Cleaning Management =====
+    
+    def get_text_cleaning_settings(self, task_id: int) -> Dict:
+        """Get text cleaning settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT remove_links, remove_emojis, remove_hashtags, remove_phone_numbers,
+                       remove_empty_lines, remove_lines_with_keywords
+                FROM task_text_cleaning_settings WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'remove_links': bool(result['remove_links']),
+                    'remove_emojis': bool(result['remove_emojis']),
+                    'remove_hashtags': bool(result['remove_hashtags']),
+                    'remove_phone_numbers': bool(result['remove_phone_numbers']),
+                    'remove_empty_lines': bool(result['remove_empty_lines']),
+                    'remove_lines_with_keywords': bool(result['remove_lines_with_keywords'])
+                }
+            else:
+                # Create default settings
+                self.create_default_text_cleaning_settings(task_id)
+                return {
+                    'remove_links': False,
+                    'remove_emojis': False,
+                    'remove_hashtags': False,
+                    'remove_phone_numbers': False,
+                    'remove_empty_lines': False,
+                    'remove_lines_with_keywords': False
+                }
+                
+    def create_default_text_cleaning_settings(self, task_id: int):
+        """Create default text cleaning settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_text_cleaning_settings (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            conn.commit()
+            
+    def update_text_cleaning_setting(self, task_id: int, setting_type: str, enabled: bool):
+        """Update a specific text cleaning setting"""
+        valid_settings = {
+            'remove_links': 'remove_links',
+            'remove_emojis': 'remove_emojis',
+            'remove_hashtags': 'remove_hashtags',
+            'remove_phone_numbers': 'remove_phone_numbers',
+            'remove_empty_lines': 'remove_empty_lines',
+            'remove_lines_with_keywords': 'remove_lines_with_keywords'
+        }
+        
+        if setting_type not in valid_settings:
+            logger.error(f"نوع إعداد تنظيف النص غير صالح: {setting_type}")
+            return False
+            
+        column_name = valid_settings[setting_type]
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Create record if doesn't exist
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_text_cleaning_settings (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            
+            # Update the specific setting
+            cursor.execute(f'''
+                UPDATE task_text_cleaning_settings 
+                SET {column_name} = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = ?
+            ''', (enabled, task_id))
+            
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    def get_text_cleaning_keywords(self, task_id: int) -> List[str]:
+        """Get text cleaning keywords for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT keyword FROM task_text_cleaning_keywords 
+                WHERE task_id = ? ORDER BY keyword
+            ''', (task_id,))
+            
+            return [row['keyword'] for row in cursor.fetchall()]
+            
+    def add_text_cleaning_keyword(self, task_id: int, keyword: str):
+        """Add a text cleaning keyword"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_text_cleaning_keywords (task_id, keyword)
+                VALUES (?, ?)
+            ''', (task_id, keyword.strip()))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    def remove_text_cleaning_keyword(self, task_id: int, keyword: str):
+        """Remove a text cleaning keyword"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM task_text_cleaning_keywords 
+                WHERE task_id = ? AND keyword = ?
+            ''', (task_id, keyword))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    def clear_text_cleaning_keywords(self, task_id: int):
+        """Clear all text cleaning keywords for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM task_text_cleaning_keywords WHERE task_id = ?
+            ''', (task_id,))
+            conn.commit()
+            return cursor.rowcount
+            
+    def add_multiple_text_cleaning_keywords(self, task_id: int, keywords: List[str]) -> int:
+        """Add multiple text cleaning keywords"""
+        added_count = 0
+        for keyword in keywords:
+            keyword = keyword.strip()
+            if keyword and self.add_text_cleaning_keyword(task_id, keyword):
+                added_count += 1
+        return added_count
             
     # ===== Duplicate Detection Management =====
     

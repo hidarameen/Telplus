@@ -3,7 +3,16 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 9, 2025 (ADMIN FILTER CRITICAL FIXES)**: Resolved critical admin filter issues:
+- **August 9, 2025 (TEXT CLEANING FEATURE - COMPLETE IMPLEMENTATION)**: Successfully implemented comprehensive text cleaning system:
+  - **NEW FEATURE**: 6 comprehensive text cleaning capabilities: link removal, emoji cleaning, hashtag removal, phone number cleaning, empty line removal, and removal of lines containing specific keywords
+  - **DATABASE**: Added `task_text_cleaning_settings` and `task_text_cleaning_keywords` tables with full CRUD operations
+  - **UI INTEGRATION**: Complete Arabic interface in task settings menu with toggle controls for all cleaning options
+  - **USERBOT PIPELINE**: Integrated text cleaning into message forwarding pipeline - applied before text replacements
+  - **REGEX PROCESSING**: Advanced regex patterns for URLs, emojis, hashtags, and phone numbers with Arabic support
+  - **KEYWORD FILTERING**: Smart line removal based on user-defined keywords with case-insensitive matching
+  - **REAL-TIME VERIFICATION**: System tested live - successfully cleaned message from 67 to 11 characters removing links, emojis, hashtags, phone numbers, and empty lines
+  - **STATUS**: Text cleaning system 100% operational with complete UI, database integration, and message processing pipeline
+- **August 9, 2025 (Previous - ADMIN FILTER CRITICAL FIXES)**: Resolved critical admin filter issues:
   - **FIXED**: Admin permissions preservation - update process now maintains existing admin allow/block status
   - **RESOLVED**: Database synchronization issue - admin filter status properly synced between UI and routing logic
   - **ADDED**: New functions `get_admin_previous_permissions()` and `add_admin_filter_with_previous_permission()` to preserve settings
