@@ -4875,6 +4875,10 @@ class SimpleTelegramBot:
     async def fetch_channel_admins_with_bot(self, task_id: int, channel_id: str) -> int:
         """Fetch channel admins using Bot API instead of UserBot"""
         try:
+            # Get previous permissions before clearing
+            previous_permissions = self.db.get_admin_previous_permissions(task_id)
+            logger.info(f"💾 حفظ الأذونات السابقة للمهمة {task_id}: {previous_permissions}")
+            
             # Clear existing admins for this source first
             self.db.clear_admin_filters_for_source(task_id, channel_id)
             
@@ -4926,13 +4930,13 @@ class SimpleTelegramBot:
                         username = getattr(user, 'username', '') or ''
                         first_name = getattr(user, 'first_name', '') or f'مشرف {user_id}'
                         
-                        # Add admin to database
-                        self.db.add_admin_filter(
+                        # Add admin to database with previous permissions
+                        self.db.add_admin_filter_with_previous_permission(
                             task_id=task_id,
                             admin_user_id=user_id,
                             admin_username=username,
                             admin_first_name=first_name,
-                            is_allowed=True
+                            previous_permissions=previous_permissions
                         )
                         admin_count += 1
                         

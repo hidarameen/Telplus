@@ -2007,6 +2007,33 @@ class Database:
             conn.commit()
             return cursor.rowcount
             
+    def get_admin_previous_permissions(self, task_id: int) -> Dict[int, bool]:
+        """Get previous admin permissions before refresh"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT admin_user_id, is_allowed FROM task_admin_filters WHERE task_id = ?
+            ''', (task_id,))
+            
+            permissions = {}
+            for row in cursor.fetchall():
+                permissions[row['admin_user_id']] = bool(row['is_allowed'])
+            return permissions
+            
+    def add_admin_filter_with_previous_permission(self, task_id: int, admin_user_id: int, 
+                                                 admin_username: str = None, admin_first_name: str = None, 
+                                                 previous_permissions: Dict[int, bool] = None):
+        """Add admin filter while preserving previous permissions if they exist"""
+        # Check if this admin had previous permissions
+        if previous_permissions and admin_user_id in previous_permissions:
+            is_allowed = previous_permissions[admin_user_id]
+            logger.info(f"🔄 الحفاظ على إذن سابق للمشرف {admin_user_id}: {is_allowed}")
+        else:
+            is_allowed = True  # Default for new admins
+            logger.info(f"✅ مشرف جديد {admin_user_id}: إذن افتراضي = True")
+            
+        return self.add_admin_filter(task_id, admin_user_id, admin_username, admin_first_name, is_allowed)
+            
     def is_advanced_filter_enabled(self, task_id: int, filter_type: str) -> bool:
         """Check if an advanced filter is enabled for a task"""
         try:

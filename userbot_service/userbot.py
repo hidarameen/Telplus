@@ -1137,6 +1137,10 @@ class UserbotService:
             
             logger.info(f"🔍 جاري جلب مشرفي القناة الحقيقيين {channel_id}...")
             
+            # Get previous permissions before clearing
+            previous_permissions = self.db.get_admin_previous_permissions(task_id)
+            logger.info(f"💾 حفظ الأذونات السابقة للمهمة {task_id}: {previous_permissions}")
+            
             # Clear existing admins first
             self.db.clear_admin_filters_for_source(task_id, channel_id)
             
@@ -1181,12 +1185,12 @@ class UserbotService:
                     first_name = getattr(participant, 'first_name', '') or f'مشرف {user_id_attr}'
                     
                     if user_id_attr and user_id_attr != user_id:  # Don't duplicate the owner
-                        self.db.add_admin_filter(
+                        self.db.add_admin_filter_with_previous_permission(
                             task_id=task_id,
                             admin_user_id=user_id_attr,
                             admin_username=username,
                             admin_first_name=first_name,
-                            is_allowed=True
+                            previous_permissions=previous_permissions
                         )
                         admin_count += 1
                         
