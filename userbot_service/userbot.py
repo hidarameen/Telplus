@@ -1416,8 +1416,8 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct Telethon HTML spoiler tag
-                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
+                # Use correct HTML spoiler format for Telethon
+                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
                 # Use HTML anchor tag for proper HTML mode
@@ -1482,8 +1482,8 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct Telethon HTML spoiler tag
-                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
+                # Use correct HTML spoiler format for Telethon
+                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
             elif format_type == 'hyperlink':
                 return f'<a href="https://example.com">{cleaned_text.strip()}</a>'
 
