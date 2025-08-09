@@ -5,10 +5,11 @@ Uses Telethon for automated message forwarding between chats
 import logging
 import asyncio
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, AuthKeyUnregisteredError
 from telethon.sessions import StringSession
+from telethon.tl.types import MessageEntitySpoiler
 from database.database import Database
 from bot_package.config import API_ID, API_HASH
 import time
@@ -388,13 +389,28 @@ class UserbotService:
                                 from telethon.tl.types import MessageMediaWebPage
                                 if isinstance(event.message.media, MessageMediaWebPage):
                                     # Web page - send as text message
-                                    forwarded_msg = await client.send_message(
-                                        target_entity,
-                                        final_text or event.message.text or "رسالة",
-                                        link_preview=forwarding_settings['link_preview_enabled'],
-                                        silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='HTML'
-                                    )
+                                    # Process spoiler entities if present
+                                    message_text = final_text or event.message.text or "رسالة"
+                                    processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                    
+                                    if spoiler_entities:
+                                        # Send with spoiler entities
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            formatting_entities=spoiler_entities
+                                        )
+                                    else:
+                                        # Send normally
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML'
+                                        )
                                 else:
                                     # Regular media message with caption
                                     forwarded_msg = await client.send_file(
@@ -406,13 +422,28 @@ class UserbotService:
                                     )
                             elif event.message.text or final_text:
                                 # Pure text message
-                                forwarded_msg = await client.send_message(
-                                    target_entity,
-                                    final_text or "رسالة",
-                                    link_preview=forwarding_settings['link_preview_enabled'],
-                                    silent=forwarding_settings['silent_notifications'],
-                                    parse_mode='HTML'
-                                )
+                                # Process spoiler entities if present
+                                message_text = final_text or "رسالة"
+                                processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                
+                                if spoiler_entities:
+                                    # Send with spoiler entities
+                                    forwarded_msg = await client.send_message(
+                                        target_entity,
+                                        processed_text,
+                                        link_preview=forwarding_settings['link_preview_enabled'],
+                                        silent=forwarding_settings['silent_notifications'],
+                                        formatting_entities=spoiler_entities
+                                    )
+                                else:
+                                    # Send normally
+                                    forwarded_msg = await client.send_message(
+                                        target_entity,
+                                        processed_text,
+                                        link_preview=forwarding_settings['link_preview_enabled'],
+                                        silent=forwarding_settings['silent_notifications'],
+                                        parse_mode='HTML'
+                                    )
                             else:
                                 # Fallback to forward for other types
                                 forwarded_msg = await client.forward_messages(
@@ -429,13 +460,28 @@ class UserbotService:
                                     from telethon.tl.types import MessageMediaWebPage
                                     if isinstance(event.message.media, MessageMediaWebPage):
                                         # Web page - send as text message
-                                        forwarded_msg = await client.send_message(
-                                            target_entity,
-                                            final_text or event.message.text or "رسالة",
-                                            link_preview=forwarding_settings['link_preview_enabled'],
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML'
-                                        )
+                                        # Process spoiler entities if present
+                                        message_text = final_text or event.message.text or "رسالة"
+                                        processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                        
+                                        if spoiler_entities:
+                                            # Send with spoiler entities
+                                            forwarded_msg = await client.send_message(
+                                                target_entity,
+                                                processed_text,
+                                                link_preview=forwarding_settings['link_preview_enabled'],
+                                                silent=forwarding_settings['silent_notifications'],
+                                                formatting_entities=spoiler_entities
+                                            )
+                                        else:
+                                            # Send normally
+                                            forwarded_msg = await client.send_message(
+                                                target_entity,
+                                                processed_text,
+                                                link_preview=forwarding_settings['link_preview_enabled'],
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML'
+                                            )
                                     else:
                                         # Regular media message with caption
                                         forwarded_msg = await client.send_file(
@@ -446,13 +492,28 @@ class UserbotService:
                                             parse_mode='HTML'
                                         )
                                 else:
-                                    forwarded_msg = await client.send_message(
-                                        target_entity,
-                                        final_text or "رسالة",
-                                        link_preview=forwarding_settings['link_preview_enabled'],
-                                        silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='HTML'
-                                    )
+                                    # Process spoiler entities if present
+                                    message_text = final_text or "رسالة"
+                                    processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                    
+                                    if spoiler_entities:
+                                        # Send with spoiler entities
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            formatting_entities=spoiler_entities
+                                        )
+                                    else:
+                                        # Send normally
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML'
+                                        )
                             else:
                                 # No formatting changes, forward normally
                                 forwarded_msg = await client.forward_messages(
@@ -1416,8 +1477,8 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct Telethon spoiler tag
-                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
+                # For Telethon, spoiler needs MessageEntitySpoiler, return special marker
+                return f'TELETHON_SPOILER_START{cleaned_text.strip()}TELETHON_SPOILER_END'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
                 # Use HTML anchor tag for proper HTML mode
@@ -1482,8 +1543,8 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct Telethon spoiler tag
-                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
+                # For Telethon, spoiler needs MessageEntitySpoiler, return special marker
+                return f'TELETHON_SPOILER_START{cleaned_text.strip()}TELETHON_SPOILER_END'
             elif format_type == 'hyperlink':
                 return f'<a href="https://example.com">{cleaned_text.strip()}</a>'
 
@@ -1492,6 +1553,48 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في اختبار تنسيق النص: {e}")
             return message_text
+    
+    def _process_spoiler_entities(self, text: str) -> Tuple[str, List]:
+        """
+        معالجة علامات spoiler وتحويلها إلى MessageEntitySpoiler
+        Process spoiler markers and convert them to MessageEntitySpoiler entities
+        """
+        entities = []
+        processed_text = text
+        
+        # البحث عن جميع علامات spoiler
+        pattern = r'TELETHON_SPOILER_START(.*?)TELETHON_SPOILER_END'
+        matches = list(re.finditer(pattern, text))
+        
+        if not matches:
+            return text, []
+        
+        # معالجة المطابقات بترتيب عكسي للحفاظ على الفهارس
+        offset_adjustment = 0
+        for match in reversed(matches):
+            start_pos = match.start()
+            end_pos = match.end()
+            spoiler_text = match.group(1)
+            
+            # استبدال العلامة بالنص العادي أولاً
+            processed_text = processed_text[:start_pos] + spoiler_text + processed_text[end_pos:]
+        
+        # الآن إضافة الكيانات بالمواضع الصحيحة
+        offset = 0
+        for match in re.finditer(pattern, text):
+            spoiler_text = match.group(1)
+            entity = MessageEntitySpoiler(
+                offset=match.start() - offset,
+                length=len(spoiler_text)
+            )
+            entities.append(entity)
+            # تحديث الفهرس بطول العلامات المُزالة
+            marker_length = len('TELETHON_SPOILER_START') + len('TELETHON_SPOILER_END')
+            offset += marker_length
+        
+        logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler في النص")
+        
+        return processed_text, entities
 
 # Global userbot instance
 userbot_instance = UserbotService()
