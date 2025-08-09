@@ -147,23 +147,32 @@ class UserbotService:
                     cleaned_text = '\n'.join(filtered_lines)
                     logger.debug(f"🧹 تم حذف الأسطر التي تحتوي على الكلمات المحددة من المهمة {task_id}")
 
-            # 6. Remove empty lines (but preserve intentional line breaks)
+            # 6. Remove empty lines (but preserve line breaks between content)
             if settings.get('remove_empty_lines', False):
-                # Remove completely empty lines but keep single line breaks
+                # Split by lines and filter empty ones while preserving structure
                 lines = cleaned_text.split('\n')
                 filtered_lines = []
-                for line in lines:
-                    if line.strip():  # Keep lines with content
+                
+                for i, line in enumerate(lines):
+                    if line.strip():  # Line has content
                         filtered_lines.append(line)
-                    elif filtered_lines and filtered_lines[-1].strip():  # Keep one empty line after content
-                        filtered_lines.append('')
+                    else:  # Empty line
+                        # Only keep empty line if it's between two content lines
+                        if (i > 0 and i < len(lines) - 1 and 
+                            lines[i-1].strip() and lines[i+1].strip()):
+                            filtered_lines.append('')
+                
                 cleaned_text = '\n'.join(filtered_lines)
-                # Remove trailing empty lines
-                cleaned_text = cleaned_text.rstrip('\n')
-                logger.debug(f"🧹 تم حذف الأسطر الفارغة من المهمة {task_id}")
+                logger.debug(f"🧹 تم حذف الأسطر الفارغة الزائدة من المهمة {task_id}")
 
-            # Clean up extra whitespace
-            cleaned_text = re.sub(r'\s+', ' ', cleaned_text.strip())
+            # Clean up extra whitespace within lines only, preserve line breaks
+            lines = cleaned_text.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # Clean whitespace within each line but preserve the line structure
+                cleaned_line = re.sub(r'[ \t]+', ' ', line.strip())
+                cleaned_lines.append(cleaned_line)
+            cleaned_text = '\n'.join(cleaned_lines)
 
             if cleaned_text != message_text:
                 logger.info(f"🧹 تم تنظيف النص للمهمة {task_id} - الطول الأصلي: {len(message_text)}, بعد التنظيف: {len(cleaned_text)}")

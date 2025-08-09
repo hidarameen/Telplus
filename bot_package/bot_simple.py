@@ -576,14 +576,14 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة كلمات التنظيف: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("add_text_clean_keyword_"): # Handler for adding text cleaning keyword
+            elif data.startswith("add_text_clean_keywords_"): # Handler for adding text cleaning keywords
                 parts = data.split("_")
                 if len(parts) >= 5:
                     try:
                         task_id = int(parts[4])
-                        await self.start_add_text_cleaning_keyword(event, task_id)
+                        await self.start_adding_text_cleaning_keywords(event, task_id)
                     except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة كلمة تنظيف: {e}, data='{data}', parts={parts}")
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة كلمات تنظيف: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_replacement_"): # Handler for toggling text replacements
                 parts = data.split("_")
@@ -3182,7 +3182,7 @@ class SimpleTelegramBot:
                 message += f"... و {len(keywords) - 10} كلمة أخرى\n"
 
         buttons = [
-            [Button.inline("➕ إضافة كلمات", f"add_text_clean_keyword_{task_id}")]
+            [Button.inline("➕ إضافة كلمات", f"add_text_clean_keywords_{task_id}")]
         ]
 
         if keywords:
@@ -3193,7 +3193,7 @@ class SimpleTelegramBot:
 
         await event.edit(message, buttons=buttons)
 
-    async def start_add_text_cleaning_keyword(self, event, task_id):
+    async def start_adding_text_cleaning_keywords(self, event, task_id):
         """Start adding text cleaning keywords"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)

@@ -2409,6 +2409,72 @@ class Database:
             conn.commit()
             return True
 
+    # ===== Text Cleaning Functions =====
+    
+    def get_text_cleaning_keywords(self, task_id):
+        """Get text cleaning keywords for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT keyword FROM task_text_cleaning_keywords
+                WHERE task_id = ?
+                ORDER BY keyword
+            """, (task_id,))
+            
+            results = cursor.fetchall()
+            return [row[0] for row in results]
+
+    def add_text_cleaning_keywords(self, task_id, keywords):
+        """Add text cleaning keywords for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            added_count = 0
+            
+            for keyword in keywords:
+                keyword = keyword.strip()
+                if keyword:
+                    # Check if keyword already exists
+                    cursor.execute("""
+                        SELECT keyword FROM task_text_cleaning_keywords
+                        WHERE task_id = ? AND keyword = ?
+                    """, (task_id, keyword))
+                    
+                    if not cursor.fetchone():
+                        # Add new keyword
+                        cursor.execute("""
+                            INSERT INTO task_text_cleaning_keywords (task_id, keyword)
+                            VALUES (?, ?)
+                        """, (task_id, keyword))
+                        added_count += 1
+            
+            conn.commit()
+            return added_count
+
+    def remove_text_cleaning_keyword(self, task_id, keyword):
+        """Remove a text cleaning keyword"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM task_text_cleaning_keywords
+                WHERE task_id = ? AND keyword = ?
+            """, (task_id, keyword))
+            
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def clear_text_cleaning_keywords(self, task_id):
+        """Clear all text cleaning keywords for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM task_text_cleaning_keywords
+                WHERE task_id = ?
+            """, (task_id,))
+            
+            deleted_count = cursor.rowcount
+            conn.commit()
+            return deleted_count
+
     # ===== Cleanup Functions =====
     
     def cleanup_old_forwarded_messages_log(self, days_old: int = 7):
