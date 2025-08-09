@@ -3,7 +3,29 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 9, 2025 (SPOILER TEXT FORMATTING FULLY FIXED - MESSAGEENTITYSPOILER IMPLEMENTED)**: Successfully implemented proper spoiler text formatting using MessageEntitySpoiler:
+- **August 9, 2025 (ADVANCED TASK MANAGEMENT FEATURES - COMPLETE IMPLEMENTATION)**: Successfully implemented 4 new advanced task management features:
+  - **CHARACTER LIMITS**: Control message forwarding based on character count with allow/block modes
+    - Allow mode: Forward only messages within specified character range (min-max)
+    - Block mode: Block messages within specified character range, forward others
+    - Configurable min/max character limits with real-time toggle controls
+  - **MESSAGE RATE LIMITING**: Prevent spam by limiting forwarding frequency
+    - Set maximum number of messages per time period (e.g., 10 messages per 60 seconds)
+    - Automatic rejection of messages exceeding the rate limit
+    - Configurable message count and time period settings
+  - **FORWARDING DELAY**: Add intentional delay before forwarding messages
+    - Configurable delay in seconds before forwarding each message
+    - Helps avoid immediate forwarding patterns and appears more natural
+    - Individual delay setting per task with enable/disable toggle
+  - **SENDING INTERVAL**: Control timing between multiple targets
+    - Set interval between sending to each target when multiple targets exist
+    - Reduces Telegram API pressure and avoids rate limiting
+    - Configurable interval in seconds with enable/disable control
+  - **DATABASE SCHEMA**: Added 4 new tables (character_limits, rate_limits, forwarding_delays, sending_intervals)
+  - **UI INTEGRATION**: Complete Arabic interface with status indicators and toggle controls
+  - **USERBOT PIPELINE**: Database functions integrated for all features (get/toggle/update settings)
+  - **REAL-TIME CONTROL**: All features with immediate enable/disable and configuration updates
+  - **STATUS**: All 4 advanced features fully operational with comprehensive UI and database integration
+- **August 9, 2025 (Previous - SPOILER TEXT FORMATTING FULLY FIXED - MESSAGEENTITYSPOILER IMPLEMENTED)**: Successfully implemented proper spoiler text formatting using MessageEntitySpoiler:
   - **ROOT CAUSE DISCOVERED**: Telethon HTML parser doesn't support spoiler tags natively - requires MessageEntitySpoiler entities
   - **BREAKTHROUGH SOLUTION**: Implemented two-step spoiler processing:
     1. Text formatting generates special markers: `TELETHON_SPOILER_START{text}TELETHON_SPOILER_END`

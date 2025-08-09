@@ -226,6 +226,96 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة للفلاتر المتقدمة: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("advanced_features_"): # Handler for advanced features
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_advanced_features(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للميزات المتقدمة: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("character_limit_"): # Handler for character limit settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_character_limit_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات حد الأحرف: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("rate_limit_"): # Handler for rate limit settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_rate_limit_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات حد الرسائل: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("forwarding_delay_"): # Handler for forwarding delay settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_forwarding_delay_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات تأخير التوجيه: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("sending_interval_"): # Handler for sending interval settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_sending_interval_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات فاصل الإرسال: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_char_limit_"): # Toggle character limit
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_character_limit(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حد الأحرف: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_char_mode_"): # Toggle character limit mode
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_character_limit_mode(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع حد الأحرف: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_rate_limit_"): # Toggle rate limit
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_rate_limit(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حد الرسائل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_forwarding_delay_"): # Toggle forwarding delay
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_forwarding_delay(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تأخير التوجيه: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_sending_interval_"): # Toggle sending interval
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_sending_interval(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فاصل الإرسال: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("day_filters_"): # Handler for day filters
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1130,6 +1220,7 @@ class SimpleTelegramBot:
             [Button.inline(f"{footer_status} ذيل الرسالة", f"footer_settings_{task_id}")],
             [Button.inline(f"{buttons_status} أزرار إنلاين", f"inline_buttons_{task_id}")],
             [Button.inline("🅰️ الفلاتر المتقدمة", f"advanced_filters_{task_id}")],
+            [Button.inline("⚡ الميزات المتقدمة", f"advanced_features_{task_id}")],
             [Button.inline("🔙 رجوع لتفاصيل المهمة", f"task_manage_{task_id}")]
         ]
 
@@ -6135,6 +6226,318 @@ class SimpleTelegramBot:
             await self.manage_text_cleaning_keywords(event, task_id)
         else:
             await event.answer("❌ فشل في حذف الكلمات")
+
+    # ===== Advanced Features Management =====
+    
+    async def show_advanced_features(self, event, task_id):
+        """Show advanced features menu for task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get current settings status
+        char_limit = self.db.get_character_limit_settings(task_id)
+        rate_limit = self.db.get_rate_limit_settings(task_id)
+        forwarding_delay = self.db.get_forwarding_delay_settings(task_id)
+        sending_interval = self.db.get_sending_interval_settings(task_id)
+        
+        char_status = "🟢" if char_limit['enabled'] else "🔴"
+        rate_status = "🟢" if rate_limit['enabled'] else "🔴"
+        delay_status = "🟢" if forwarding_delay['enabled'] else "🔴"
+        interval_status = "🟢" if sending_interval['enabled'] else "🔴"
+
+        buttons = [
+            [Button.inline(f"{char_status} حد الأحرف", f"character_limit_{task_id}")],
+            [Button.inline(f"{rate_status} حد الرسائل", f"rate_limit_{task_id}")],
+            [Button.inline(f"{delay_status} تأخير التوجيه", f"forwarding_delay_{task_id}")],
+            [Button.inline(f"{interval_status} فاصل الإرسال", f"sending_interval_{task_id}")],
+            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
+        ]
+
+        message = f"⚡ الميزات المتقدمة للمهمة: {task_name}\n\n"
+        message += "📋 الميزات المتاحة:\n\n"
+        message += f"{char_status} **حد الأحرف**: "
+        if char_limit['enabled']:
+            message += f"مفعل ({char_limit['mode']}: {char_limit['min_chars']}-{char_limit['max_chars']} حرف)\n"
+        else:
+            message += "معطل\n"
+            
+        message += f"{rate_status} **حد الرسائل**: "
+        if rate_limit['enabled']:
+            message += f"مفعل ({rate_limit['message_count']} رسائل/{rate_limit['time_period_seconds']} ثانية)\n"
+        else:
+            message += "معطل\n"
+            
+        message += f"{delay_status} **تأخير التوجيه**: "
+        if forwarding_delay['enabled']:
+            message += f"مفعل ({forwarding_delay['delay_seconds']} ثواني)\n"
+        else:
+            message += "معطل\n"
+            
+        message += f"{interval_status} **فاصل الإرسال**: "
+        if sending_interval['enabled']:
+            message += f"مفعل ({sending_interval['interval_seconds']} ثواني بين الأهداف)\n"
+        else:
+            message += "معطل\n"
+
+        await event.edit(message, buttons=buttons)
+
+    async def show_character_limit_settings(self, event, task_id):
+        """Show character limit settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_character_limit_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        status = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        mode_text = "سماح" if settings['mode'] == 'allow' else "حظر"
+        
+        buttons = [
+            [Button.inline(f"{'❌ تعطيل' if settings['enabled'] else '✅ تفعيل'}", f"toggle_char_limit_{task_id}")],
+        ]
+        
+        if settings['enabled']:
+            buttons.extend([
+                [Button.inline(f"🔄 تغيير الوضع ({mode_text})", f"toggle_char_mode_{task_id}")],
+                [Button.inline(f"📏 تعديل النطاق ({settings['min_chars']}-{settings['max_chars']})", f"edit_char_range_{task_id}")],
+            ])
+        
+        buttons.append([Button.inline("🔙 رجوع للميزات المتقدمة", f"advanced_features_{task_id}")])
+
+        message = f"📏 حد الأحرف للمهمة: {task_name}\n\n"
+        message += f"📊 **الحالة**: {status}\n"
+        if settings['enabled']:
+            message += f"⚙️ **الوضع**: {mode_text}\n"
+            message += f"📐 **النطاق**: {settings['min_chars']} - {settings['max_chars']} حرف\n\n"
+        message += "\n💡 **وصف الميزة**:\n"
+        message += "• السماح: توجيه الرسائل ضمن النطاق المحدد فقط\n"
+        message += "• الحظر: منع الرسائل ضمن النطاق المحدد\n"
+        message += "• يتم حساب النص بدون المسافات والتنسيق"
+
+        await event.edit(message, buttons=buttons)
+
+    async def show_rate_limit_settings(self, event, task_id):
+        """Show rate limit settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_rate_limit_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        status = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"{'❌ تعطيل' if settings['enabled'] else '✅ تفعيل'}", f"toggle_rate_limit_{task_id}")],
+        ]
+        
+        if settings['enabled']:
+            buttons.extend([
+                [Button.inline(f"📊 تعديل العدد ({settings['message_count']})", f"edit_rate_count_{task_id}")],
+                [Button.inline(f"⏱️ تعديل الفترة ({settings['time_period_seconds']}ث)", f"edit_rate_period_{task_id}")],
+            ])
+        
+        buttons.append([Button.inline("🔙 رجوع للميزات المتقدمة", f"advanced_features_{task_id}")])
+
+        message = f"📊 حد الرسائل للمهمة: {task_name}\n\n"
+        message += f"📊 **الحالة**: {status}\n"
+        if settings['enabled']:
+            message += f"📈 **الحد الأقصى**: {settings['message_count']} رسائل\n"
+            message += f"⏰ **الفترة الزمنية**: {settings['time_period_seconds']} ثانية\n\n"
+        message += "\n💡 **وصف الميزة**:\n"
+        message += "• تحديد عدد أقصى من الرسائل خلال فترة زمنية معينة\n"
+        message += "• منع إرسال الرسائل الزائدة عن الحد المحدد\n"
+        message += "• يساعد في تجنب التبليغ عن الإرسال المكثف"
+
+        await event.edit(message, buttons=buttons)
+
+    async def show_forwarding_delay_settings(self, event, task_id):
+        """Show forwarding delay settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_forwarding_delay_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        status = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"{'❌ تعطيل' if settings['enabled'] else '✅ تفعيل'}", f"toggle_forwarding_delay_{task_id}")],
+        ]
+        
+        if settings['enabled']:
+            buttons.append([Button.inline(f"⏱️ تعديل التأخير ({settings['delay_seconds']}ث)", f"edit_forwarding_delay_{task_id}")])
+        
+        buttons.append([Button.inline("🔙 رجوع للميزات المتقدمة", f"advanced_features_{task_id}")])
+
+        message = f"⏱️ تأخير التوجيه للمهمة: {task_name}\n\n"
+        message += f"📊 **الحالة**: {status}\n"
+        if settings['enabled']:
+            message += f"⏰ **التأخير**: {settings['delay_seconds']} ثانية\n\n"
+        message += "\n💡 **وصف الميزة**:\n"
+        message += "• تأخير زمني بعد استلام الرسالة من المصدر قبل التوجيه\n"
+        message += "• يساعد في تجنب التوجيه الفوري المشبوه\n"
+        message += "• مفيد للرسائل الحساسة أو المهمة"
+
+        await event.edit(message, buttons=buttons)
+
+    async def show_sending_interval_settings(self, event, task_id):
+        """Show sending interval settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_sending_interval_settings(task_id)
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        status = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"{'❌ تعطيل' if settings['enabled'] else '✅ تفعيل'}", f"toggle_sending_interval_{task_id}")],
+        ]
+        
+        if settings['enabled']:
+            buttons.append([Button.inline(f"⏱️ تعديل الفاصل ({settings['interval_seconds']}ث)", f"edit_sending_interval_{task_id}")])
+        
+        buttons.append([Button.inline("🔙 رجوع للميزات المتقدمة", f"advanced_features_{task_id}")])
+
+        message = f"⏱️ فاصل الإرسال للمهمة: {task_name}\n\n"
+        message += f"📊 **الحالة**: {status}\n"
+        if settings['enabled']:
+            message += f"⏰ **الفاصل**: {settings['interval_seconds']} ثانية بين كل هدف\n\n"
+        message += "\n💡 **وصف الميزة**:\n"
+        message += "• فترة انتظار بين إرسال الرسالة لكل هدف\n"
+        message += "• يقلل الضغط على تليجرام ويتجنب التبليغ\n"
+        message += "• مثال: إرسال للهدف الأول، انتظار، ثم إرسال للهدف الثاني"
+
+        await event.edit(message, buttons=buttons)
+
+    # ===== Advanced Features Toggle & Edit Functions =====
+    
+    async def toggle_character_limit(self, event, task_id):
+        """Toggle character limit on/off"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle the setting
+        new_enabled = self.db.toggle_character_limit(task_id)
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        status_text = "تم تفعيل" if new_enabled else "تم تعطيل"
+        await event.answer(f"✅ {status_text} حد الأحرف")
+        
+        # Show updated settings
+        await self.show_character_limit_settings(event, task_id)
+
+    async def toggle_character_limit_mode(self, event, task_id):
+        """Toggle character limit mode between allow/block"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle the mode
+        new_mode = self.db.toggle_character_limit_mode(task_id)
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        mode_text = "سماح" if new_mode == 'allow' else "حظر"
+        await event.answer(f"✅ تم تغيير الوضع إلى: {mode_text}")
+        
+        # Show updated settings
+        await self.show_character_limit_settings(event, task_id)
+
+    async def toggle_rate_limit(self, event, task_id):
+        """Toggle rate limit on/off"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle the setting
+        new_enabled = self.db.toggle_rate_limit(task_id)
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        status_text = "تم تفعيل" if new_enabled else "تم تعطيل"
+        await event.answer(f"✅ {status_text} حد الرسائل")
+        
+        # Show updated settings
+        await self.show_rate_limit_settings(event, task_id)
+
+    async def toggle_forwarding_delay(self, event, task_id):
+        """Toggle forwarding delay on/off"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle the setting
+        new_enabled = self.db.toggle_forwarding_delay(task_id)
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        status_text = "تم تفعيل" if new_enabled else "تم تعطيل"
+        await event.answer(f"✅ {status_text} تأخير التوجيه")
+        
+        # Show updated settings
+        await self.show_forwarding_delay_settings(event, task_id)
+
+    async def toggle_sending_interval(self, event, task_id):
+        """Toggle sending interval on/off"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle the setting
+        new_enabled = self.db.toggle_sending_interval(task_id)
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        status_text = "تم تفعيل" if new_enabled else "تم تعطيل"
+        await event.answer(f"✅ {status_text} فاصل الإرسال")
+        
+        # Show updated settings
+        await self.show_sending_interval_settings(event, task_id)
 
 # Create bot instance
 simple_bot = SimpleTelegramBot()

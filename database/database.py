@@ -446,8 +446,78 @@ class Database:
             except Exception:
                 pass  # Column already exists
 
+            # Task character limit settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_character_limit_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    mode TEXT DEFAULT 'allow' CHECK (mode IN ('allow', 'block')),
+                    min_chars INTEGER DEFAULT 0,
+                    max_chars INTEGER DEFAULT 4000,
+                    use_range BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Task message rate limit settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_rate_limit_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    message_count INTEGER DEFAULT 5,
+                    time_period_seconds INTEGER DEFAULT 60,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Task forwarding delay settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_forwarding_delay_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    delay_seconds INTEGER DEFAULT 5,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Task sending interval settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_sending_interval_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    interval_seconds INTEGER DEFAULT 3,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Rate limit tracking table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS rate_limit_tracking (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
-            logger.info("✅ تم تهيئة جداول SQLite بنجاح مع الفلاتر المتقدمة")
+            logger.info("✅ تم تهيئة جداول SQLite بنجاح مع الفلاتر المتقدمة والميزات الجديدة")
 
     # User Session Management
     def save_user_session(self, user_id: int, phone_number: str, session_string: str):
@@ -2583,3 +2653,494 @@ class Database:
             if deleted_count > 0:
                 logger.info(f"🧹 تم حذف {deleted_count} سجل رسالة قديم من سجل التكرار (أكثر من {days_old} أيام)")
             return deleted_count
+
+    # ===== Character Limit Settings =====
+    
+    def save_character_limit_settings(self, task_id: int, enabled: bool = False, mode: str = 'allow',
+                                    min_chars: int = 0, max_chars: int = 4000, use_range: bool = True) -> bool:
+        """Save character limit settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_character_limit_settings 
+                    (task_id, enabled, mode, min_chars, max_chars, use_range, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled, mode, min_chars, max_chars, use_range))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في حفظ إعدادات حد الأحرف: {e}")
+            return False
+
+    def get_character_limit_settings(self, task_id: int) -> Dict:
+        """Get character limit settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT enabled, mode, min_chars, max_chars, use_range
+                FROM task_character_limit_settings 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'enabled': bool(result['enabled']),
+                    'mode': result['mode'],
+                    'min_chars': result['min_chars'],
+                    'max_chars': result['max_chars'],
+                    'use_range': bool(result['use_range'])
+                }
+            return {
+                'enabled': False,
+                'mode': 'allow',
+                'min_chars': 0,
+                'max_chars': 4000,
+                'use_range': True
+            }
+
+    def update_character_limit_settings(self, task_id: int, **kwargs) -> bool:
+        """Update character limit settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                updates = []
+                params = []
+                
+                for key, value in kwargs.items():
+                    if key in ['enabled', 'mode', 'min_chars', 'max_chars', 'use_range']:
+                        updates.append(f"{key} = ?")
+                        params.append(value)
+                
+                if not updates:
+                    return False
+                
+                params.append(task_id)
+                cursor.execute(f'''
+                    UPDATE task_character_limit_settings 
+                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', params)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات حد الأحرف: {e}")
+            return False
+
+    # ===== Rate Limit Settings =====
+    
+    def save_rate_limit_settings(self, task_id: int, enabled: bool = False, 
+                               message_count: int = 5, time_period_seconds: int = 60) -> bool:
+        """Save rate limit settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_rate_limit_settings 
+                    (task_id, enabled, message_count, time_period_seconds, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled, message_count, time_period_seconds))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في حفظ إعدادات حد الرسائل: {e}")
+            return False
+
+    def get_rate_limit_settings(self, task_id: int) -> Dict:
+        """Get rate limit settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT enabled, message_count, time_period_seconds
+                FROM task_rate_limit_settings 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'enabled': bool(result['enabled']),
+                    'message_count': result['message_count'],
+                    'time_period_seconds': result['time_period_seconds']
+                }
+            return {
+                'enabled': False,
+                'message_count': 5,
+                'time_period_seconds': 60
+            }
+
+    def update_rate_limit_settings(self, task_id: int, **kwargs) -> bool:
+        """Update rate limit settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                updates = []
+                params = []
+                
+                for key, value in kwargs.items():
+                    if key in ['enabled', 'message_count', 'time_period_seconds']:
+                        updates.append(f"{key} = ?")
+                        params.append(value)
+                
+                if not updates:
+                    return False
+                
+                params.append(task_id)
+                cursor.execute(f'''
+                    UPDATE task_rate_limit_settings 
+                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', params)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات حد الرسائل: {e}")
+            return False
+
+    def track_message_for_rate_limit(self, task_id: int) -> bool:
+        """Track a message for rate limiting"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO rate_limit_tracking (task_id)
+                    VALUES (?)
+                ''', (task_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تتبع الرسالة لحد الرسائل: {e}")
+            return False
+
+    def check_rate_limit(self, task_id: int) -> bool:
+        """Check if task has exceeded rate limit"""
+        settings = self.get_rate_limit_settings(task_id)
+        if not settings['enabled']:
+            return False  # No rate limit enabled
+        
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT COUNT(*) as count
+                    FROM rate_limit_tracking 
+                    WHERE task_id = ? 
+                    AND timestamp > datetime('now', '-{} seconds')
+                '''.format(settings['time_period_seconds']), (task_id,))
+                result = cursor.fetchone()
+                current_count = result['count'] if result else 0
+                return current_count >= settings['message_count']
+        except Exception as e:
+            logger.error(f"خطأ في فحص حد الرسائل: {e}")
+            return False
+
+    def cleanup_old_rate_limit_tracking(self, hours_old: int = 24):
+        """Clean up old rate limit tracking records"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM rate_limit_tracking 
+                    WHERE timestamp < datetime('now', '-{} hours')
+                '''.format(hours_old))
+                deleted_count = cursor.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    logger.info(f"🧹 تم حذف {deleted_count} سجل قديم من تتبع حد الرسائل")
+                return deleted_count
+        except Exception as e:
+            logger.error(f"خطأ في تنظيف سجلات حد الرسائل: {e}")
+            return 0
+
+    # ===== Forwarding Delay Settings =====
+    
+    def save_forwarding_delay_settings(self, task_id: int, enabled: bool = False, delay_seconds: int = 5) -> bool:
+        """Save forwarding delay settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_forwarding_delay_settings 
+                    (task_id, enabled, delay_seconds, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled, delay_seconds))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في حفظ إعدادات تأخير التوجيه: {e}")
+            return False
+
+    def get_forwarding_delay_settings(self, task_id: int) -> Dict:
+        """Get forwarding delay settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT enabled, delay_seconds
+                FROM task_forwarding_delay_settings 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'enabled': bool(result['enabled']),
+                    'delay_seconds': result['delay_seconds']
+                }
+            return {
+                'enabled': False,
+                'delay_seconds': 5
+            }
+
+    def update_forwarding_delay_settings(self, task_id: int, **kwargs) -> bool:
+        """Update forwarding delay settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                updates = []
+                params = []
+                
+                for key, value in kwargs.items():
+                    if key in ['enabled', 'delay_seconds']:
+                        updates.append(f"{key} = ?")
+                        params.append(value)
+                
+                if not updates:
+                    return False
+                
+                params.append(task_id)
+                cursor.execute(f'''
+                    UPDATE task_forwarding_delay_settings 
+                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', params)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات تأخير التوجيه: {e}")
+            return False
+
+    # ===== Sending Interval Settings =====
+    
+    def save_sending_interval_settings(self, task_id: int, enabled: bool = False, interval_seconds: int = 3) -> bool:
+        """Save sending interval settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_sending_interval_settings 
+                    (task_id, enabled, interval_seconds, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled, interval_seconds))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في حفظ إعدادات فاصل الإرسال: {e}")
+            return False
+
+    def get_sending_interval_settings(self, task_id: int) -> Dict:
+        """Get sending interval settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT enabled, interval_seconds
+                FROM task_sending_interval_settings 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'enabled': bool(result['enabled']),
+                    'interval_seconds': result['interval_seconds']
+                }
+            return {
+                'enabled': False,
+                'interval_seconds': 3
+            }
+
+    def update_sending_interval_settings(self, task_id: int, **kwargs) -> bool:
+        """Update sending interval settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                updates = []
+                params = []
+                
+                for key, value in kwargs.items():
+                    if key in ['enabled', 'interval_seconds']:
+                        updates.append(f"{key} = ?")
+                        params.append(value)
+                
+                if not updates:
+                    return False
+                
+                params.append(task_id)
+                cursor.execute(f'''
+                    UPDATE task_sending_interval_settings 
+                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', params)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات فاصل الإرسال: {e}")
+            return False
+
+    # ===== Advanced Features Toggle Functions =====
+    
+    def toggle_character_limit(self, task_id: int) -> bool:
+        """Toggle character limit on/off for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current status
+                cursor.execute('SELECT enabled FROM task_character_limit_settings WHERE task_id = ?', (task_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    new_enabled = not result[0]
+                    cursor.execute('''
+                        UPDATE task_character_limit_settings 
+                        SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ?
+                    ''', (new_enabled, task_id))
+                else:
+                    # Create default settings if not exists
+                    new_enabled = True
+                    cursor.execute('''
+                        INSERT INTO task_character_limit_settings 
+                        (task_id, enabled, mode, min_chars, max_chars)
+                        VALUES (?, ?, 'allow', 10, 1000)
+                    ''', (task_id, new_enabled))
+                
+                conn.commit()
+                return new_enabled
+        except Exception as e:
+            logger.error(f"خطأ في تبديل حد الأحرف: {e}")
+            return False
+
+    def toggle_character_limit_mode(self, task_id: int) -> str:
+        """Toggle character limit mode between allow/block"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current mode
+                cursor.execute('SELECT mode FROM task_character_limit_settings WHERE task_id = ?', (task_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    new_mode = 'block' if result[0] == 'allow' else 'allow'
+                    cursor.execute('''
+                        UPDATE task_character_limit_settings 
+                        SET mode = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ?
+                    ''', (new_mode, task_id))
+                    conn.commit()
+                    return new_mode
+                else:
+                    # Create default if not exists
+                    cursor.execute('''
+                        INSERT INTO task_character_limit_settings 
+                        (task_id, enabled, mode, min_chars, max_chars)
+                        VALUES (?, 1, 'allow', 10, 1000)
+                    ''', (task_id,))
+                    conn.commit()
+                    return 'allow'
+        except Exception as e:
+            logger.error(f"خطأ في تبديل وضع حد الأحرف: {e}")
+            return 'allow'
+
+    def toggle_rate_limit(self, task_id: int) -> bool:
+        """Toggle rate limit on/off for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current status
+                cursor.execute('SELECT enabled FROM task_rate_limit_settings WHERE task_id = ?', (task_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    new_enabled = not result[0]
+                    cursor.execute('''
+                        UPDATE task_rate_limit_settings 
+                        SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ?
+                    ''', (new_enabled, task_id))
+                else:
+                    # Create default settings if not exists
+                    new_enabled = True
+                    cursor.execute('''
+                        INSERT INTO task_rate_limit_settings 
+                        (task_id, enabled, message_count, time_period_seconds)
+                        VALUES (?, ?, 10, 60)
+                    ''', (task_id, new_enabled))
+                
+                conn.commit()
+                return new_enabled
+        except Exception as e:
+            logger.error(f"خطأ في تبديل حد الرسائل: {e}")
+            return False
+
+    def toggle_forwarding_delay(self, task_id: int) -> bool:
+        """Toggle forwarding delay on/off for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current status
+                cursor.execute('SELECT enabled FROM task_forwarding_delay_settings WHERE task_id = ?', (task_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    new_enabled = not result[0]
+                    cursor.execute('''
+                        UPDATE task_forwarding_delay_settings 
+                        SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ?
+                    ''', (new_enabled, task_id))
+                else:
+                    # Create default settings if not exists
+                    new_enabled = True
+                    cursor.execute('''
+                        INSERT INTO task_forwarding_delay_settings 
+                        (task_id, enabled, delay_seconds)
+                        VALUES (?, ?, 2)
+                    ''', (task_id, new_enabled))
+                
+                conn.commit()
+                return new_enabled
+        except Exception as e:
+            logger.error(f"خطأ في تبديل تأخير التوجيه: {e}")
+            return False
+
+    def toggle_sending_interval(self, task_id: int) -> bool:
+        """Toggle sending interval on/off for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current status
+                cursor.execute('SELECT enabled FROM task_sending_interval_settings WHERE task_id = ?', (task_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    new_enabled = not result[0]
+                    cursor.execute('''
+                        UPDATE task_sending_interval_settings 
+                        SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ?
+                    ''', (new_enabled, task_id))
+                else:
+                    # Create default settings if not exists
+                    new_enabled = True
+                    cursor.execute('''
+                        INSERT INTO task_sending_interval_settings 
+                        (task_id, enabled, interval_seconds)
+                        VALUES (?, ?, 3)
+                    ''', (task_id, new_enabled))
+                
+                conn.commit()
+                return new_enabled
+        except Exception as e:
+            logger.error(f"خطأ في تبديل فاصل الإرسال: {e}")
+            return False
