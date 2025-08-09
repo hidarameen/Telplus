@@ -104,7 +104,7 @@ class Database:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-                
+
                 # Task text formatting settings table
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS task_text_formatting_settings (
@@ -663,7 +663,47 @@ class Database:
 
                 conn.commit()
                 return cursor.rowcount > 0
-
         except Exception as e:
             logger.error(f"خطأ في تحديث إعدادات تنسيق النص: {e}")
             return False
+
+    def get_text_formatting_settings(self, task_id: int) -> dict:
+        """Get text formatting settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT text_formatting_enabled, format_type, hyperlink_text, hyperlink_url
+                    FROM task_text_formatting_settings 
+                    WHERE task_id = %s
+                ''', (task_id,))
+                result = cursor.fetchone()
+
+                if result:
+                    return {
+                        'text_formatting_enabled': bool(result['text_formatting_enabled']),
+                        'format_type': result['format_type'] or 'regular',
+                        'hyperlink_text': result['hyperlink_text'],
+                        'hyperlink_url': result['hyperlink_url']
+                    }
+                else:
+                    # Create default settings
+                    cursor.execute('''
+                        INSERT INTO task_text_formatting_settings (task_id, format_type, text_formatting_enabled)
+                        VALUES (%s, 'regular', FALSE)
+                    ''', (task_id,))
+                    conn.commit()
+                    return {
+                        'text_formatting_enabled': False,
+                        'format_type': 'regular',
+                        'hyperlink_text': None,
+                        'hyperlink_url': None
+                    }
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على إعدادات تنسيق النص: {e}")
+            return {
+                'text_formatting_enabled': False,
+                'format_type': 'regular',
+                'hyperlink_text': None,
+                'hyperlink_url': None
+            }
