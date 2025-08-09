@@ -30,7 +30,7 @@ def test_fixed_formatting():
     if '<tg-spoiler>' in spoiler_result and '</tg-spoiler>' in spoiler_result:
         print("✅ تنسيق spoiler صحيح - يستخدم <tg-spoiler>")
     elif '<span class="tg-spoiler">' in spoiler_result:
-        print("❌ تنسيق spoiler خاطئ - ما زال يستخدم <span>")
+        print("❌ تنسيق spoiler خاطئ - يستخدم <span> بدلاً من <tg-spoiler>")
     else:
         print("❓ تنسيق spoiler غير متوقع")
     

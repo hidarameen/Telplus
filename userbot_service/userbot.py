@@ -739,7 +739,7 @@ class UserbotService:
 
             # DEBUG: Get all allowed admins for this task
             allowed_admins = db.get_task_allowed_admins(task_id)
-            logger.error(f"🚨 [ADMIN FILTER DEBUG] جميع المشرفين المسموحين للمهمة {task_id}: {allowed_admins}")
+            logger.error(f"🚨 [ADMIN FILTER DEBUG] جميع المشرفين المسموح لهم للمهمة {task_id}: {allowed_admins}")
 
             # Check if sender is in allowed admin list
             is_allowed = db.is_admin_allowed(task_id, sender_id)
@@ -1416,7 +1416,7 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct HTML spoiler tag for Telegram
+                # Use correct Telethon HTML spoiler tag
                 return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
@@ -1482,7 +1482,7 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct HTML spoiler tag for Telegram
+                # Use correct Telethon HTML spoiler tag
                 return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 return f'<a href="https://example.com">{cleaned_text.strip()}</a>'

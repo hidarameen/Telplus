@@ -18,7 +18,7 @@ def test_telegram_html_formats():
         'كود': f'<code>{test_text}</code>',
         'كود متعدد': f'<pre>{test_text}</pre>',
         'اقتباس': f'<blockquote>{test_text}</blockquote>',
-        'مخفي': f'<span class="tg-spoiler">{test_text}</span>',
+        'مخفي': f'<tg-spoiler>{test_text}</tg-spoiler>',
         'رابط': f'<a href="https://t.me/mychannel">{test_text}</a>'
     }
     
@@ -37,7 +37,7 @@ def test_telegram_html_formats():
                 print("   ❌ تنسيق HTML خاطئ للرابط")
                 
         elif format_name == 'مخفي':
-            if '<span class="tg-spoiler">' in formatted_text:
+            if '<tg-spoiler>' in formatted_text and '</tg-spoiler>' in formatted_text:
                 print("   ✅ تنسيق HTML صحيح للنص المخفي")
             else:
                 print("   ❌ تنسيق HTML خاطئ للنص المخفي")
