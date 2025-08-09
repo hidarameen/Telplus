@@ -1417,7 +1417,7 @@ class UserbotService:
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
                 # Use correct HTML spoiler tag for Telegram
-                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
+                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
                 # Use the original text as the hyperlink text
@@ -1483,7 +1483,7 @@ class UserbotService:
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
                 # Use correct HTML spoiler tag for Telegram
-                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
+                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
             elif format_type == 'hyperlink':
                 return f"[{cleaned_text.strip()}](https://example.com)"
 
