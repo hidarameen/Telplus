@@ -419,6 +419,21 @@ class Database:
                 )
             ''')
 
+            # Text formatting settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_text_formatting_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    text_formatting_enabled BOOLEAN DEFAULT FALSE,
+                    format_type TEXT DEFAULT 'regular' CHECK (format_type IN ('regular', 'bold', 'italic', 'underline', 'strikethrough', 'code', 'monospace', 'quote', 'spoiler', 'hyperlink')),
+                    hyperlink_text TEXT,
+                    hyperlink_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             # Add new columns for synchronization if they don't exist
             try:
                 cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN sync_edit_enabled BOOLEAN DEFAULT FALSE")
@@ -2474,6 +2489,64 @@ class Database:
             deleted_count = cursor.rowcount
             conn.commit()
             return deleted_count
+
+    # ===== Text Formatting Settings =====
+    
+    def get_text_formatting_settings(self, task_id: int) -> Dict:
+        """Get text formatting settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT text_formatting_enabled, format_type, hyperlink_text, hyperlink_url
+                FROM task_text_formatting_settings WHERE task_id = ?
+            ''', (task_id,))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'text_formatting_enabled': bool(result['text_formatting_enabled']),
+                    'format_type': result['format_type'],
+                    'hyperlink_text': result['hyperlink_text'],
+                    'hyperlink_url': result['hyperlink_url']
+                }
+            return {
+                'text_formatting_enabled': False,
+                'format_type': 'regular',
+                'hyperlink_text': None,
+                'hyperlink_url': None
+            }
+    
+    def update_text_formatting_settings(self, task_id: int, text_formatting_enabled: bool = None,
+                                      format_type: str = None, hyperlink_text: str = None, 
+                                      hyperlink_url: str = None):
+        """Update text formatting settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get current settings
+            current = self.get_text_formatting_settings(task_id)
+            
+            # Use current values if new ones not provided
+            enabled = text_formatting_enabled if text_formatting_enabled is not None else current['text_formatting_enabled']
+            fmt_type = format_type if format_type is not None else current['format_type']
+            link_text = hyperlink_text if hyperlink_text is not None else current['hyperlink_text']
+            link_url = hyperlink_url if hyperlink_url is not None else current['hyperlink_url']
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_text_formatting_settings 
+                (task_id, text_formatting_enabled, format_type, hyperlink_text, hyperlink_url, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (task_id, enabled, fmt_type, link_text, link_url))
+            
+            conn.commit()
+            return True
+    
+    def toggle_text_formatting(self, task_id: int) -> bool:
+        """Toggle text formatting on/off for a task"""
+        current_settings = self.get_text_formatting_settings(task_id)
+        new_enabled = not current_settings['text_formatting_enabled']
+        self.update_text_formatting_settings(task_id, text_formatting_enabled=new_enabled)
+        return new_enabled
 
     # ===== Cleanup Functions =====
     

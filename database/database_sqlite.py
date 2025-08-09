@@ -182,6 +182,21 @@ class Database:
                 )
             ''')
 
+            # Text formatting settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_text_formatting_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    text_formatting_enabled BOOLEAN DEFAULT FALSE,
+                    format_type TEXT DEFAULT 'regular' CHECK (format_type IN ('regular', 'bold', 'italic', 'underline', 'strikethrough', 'code', 'monospace', 'quote', 'spoiler', 'hyperlink')),
+                    hyperlink_text TEXT,
+                    hyperlink_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح")
 
@@ -1008,3 +1023,76 @@ class Database:
             return False
         finally:
             cursor.close()
+
+    # ===== Text Formatting Settings =====
+    
+    def get_text_formatting_settings(self, task_id: int):
+        """Get text formatting settings for a task"""
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute('''
+                SELECT text_formatting_enabled, format_type, hyperlink_text, hyperlink_url
+                FROM task_text_formatting_settings WHERE task_id = ?
+            ''', (task_id,))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'text_formatting_enabled': bool(result[0]),
+                    'format_type': result[1],
+                    'hyperlink_text': result[2],
+                    'hyperlink_url': result[3]
+                }
+            return {
+                'text_formatting_enabled': False,
+                'format_type': 'regular',
+                'hyperlink_text': None,
+                'hyperlink_url': None
+            }
+        except Exception as e:
+            logger.error(f"خطأ في جلب إعدادات تنسيق النصوص: {e}")
+            return {
+                'text_formatting_enabled': False,
+                'format_type': 'regular',
+                'hyperlink_text': None,
+                'hyperlink_url': None
+            }
+        finally:
+            cursor.close()
+    
+    def update_text_formatting_settings(self, task_id: int, text_formatting_enabled: bool = None,
+                                      format_type: str = None, hyperlink_text: str = None, 
+                                      hyperlink_url: str = None):
+        """Update text formatting settings for a task"""
+        cursor = self.connection.cursor()
+        try:
+            # Get current settings
+            current = self.get_text_formatting_settings(task_id)
+            
+            # Use current values if new ones not provided
+            enabled = text_formatting_enabled if text_formatting_enabled is not None else current['text_formatting_enabled']
+            fmt_type = format_type if format_type is not None else current['format_type']
+            link_text = hyperlink_text if hyperlink_text is not None else current['hyperlink_text']
+            link_url = hyperlink_url if hyperlink_url is not None else current['hyperlink_url']
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_text_formatting_settings 
+                (task_id, text_formatting_enabled, format_type, hyperlink_text, hyperlink_url, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (task_id, enabled, fmt_type, link_text, link_url))
+            
+            self.connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات تنسيق النصوص: {e}")
+            self.connection.rollback()
+            return False
+        finally:
+            cursor.close()
+    
+    def toggle_text_formatting(self, task_id: int):
+        """Toggle text formatting on/off for a task"""
+        current_settings = self.get_text_formatting_settings(task_id)
+        new_enabled = not current_settings['text_formatting_enabled']
+        self.update_text_formatting_settings(task_id, text_formatting_enabled=new_enabled)
+        return new_enabled

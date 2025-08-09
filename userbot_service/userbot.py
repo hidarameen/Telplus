@@ -344,8 +344,11 @@ class UserbotService:
                         cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
                         modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
                         
+                        # Apply text formatting
+                        formatted_text = self.apply_text_formatting(task['id'], modified_text) if modified_text else modified_text
+                        
                         # Apply header and footer formatting
-                        final_text = self.apply_message_formatting(modified_text, message_settings)
+                        final_text = self.apply_message_formatting(formatted_text, message_settings)
                         
                         # Check if we need to use copy mode due to formatting
                         requires_copy_mode = (
@@ -1344,6 +1347,53 @@ class UserbotService:
     async def fetch_channel_admins(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Async wrapper for fetch_channel_admins_sync"""
         return self.fetch_channel_admins_sync(user_id, channel_id, task_id)
+
+    def apply_text_formatting(self, task_id: int, message_text: str) -> str:
+        """Apply text formatting to message based on task settings"""
+        try:
+            if not message_text or not message_text.strip():
+                return message_text
+            
+            # Get text formatting settings
+            formatting_settings = self.db.get_text_formatting_settings(task_id)
+            
+            if not formatting_settings or not formatting_settings.get('text_formatting_enabled', False):
+                return message_text
+            
+            format_type = formatting_settings.get('format_type', 'regular')
+            
+            # Apply formatting based on type
+            if format_type == 'regular':
+                return message_text
+            elif format_type == 'bold':
+                return f"**{message_text}**"
+            elif format_type == 'italic':
+                return f"*{message_text}*"
+            elif format_type == 'underline':
+                return f"__{message_text}__"
+            elif format_type == 'strikethrough':
+                return f"~~{message_text}~~"
+            elif format_type == 'code':
+                return f"`{message_text}`"
+            elif format_type == 'monospace':
+                return f"```{message_text}```"
+            elif format_type == 'quote':
+                # Apply quote formatting to each line
+                lines = message_text.split('\n')
+                formatted_lines = [f">{line}" for line in lines]
+                return '\n'.join(formatted_lines)
+            elif format_type == 'spoiler':
+                return f"||{message_text}||"
+            elif format_type == 'hyperlink':
+                hyperlink_text = formatting_settings.get('hyperlink_text', 'نص')
+                hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
+                return f"[{hyperlink_text}]({hyperlink_url})"
+            
+            return message_text
+            
+        except Exception as e:
+            logger.error(f"خطأ في تنسيق النص للمهمة {task_id}: {e}")
+            return message_text
 
 # Global userbot instance
 userbot_instance = UserbotService()

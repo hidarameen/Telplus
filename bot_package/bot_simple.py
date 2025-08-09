@@ -350,6 +350,34 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لمسح كلمات التنظيف: {e}, data='{data}'")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("text_formatting_"): # Handler for text formatting
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_text_formatting(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتنسيق النصوص: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_text_formatting_"): # Handler for toggling text formatting
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_text_formatting(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تنسيق النص: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_text_format_"): # Handler for setting text format type
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        format_type = parts[3]
+                        task_id = int(parts[4])
+                        await self.set_text_format_type(event, task_id, format_type)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد نوع التنسيق: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_forwarded_block_"): # Handler for toggle forwarded message block
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1070,6 +1098,10 @@ class SimpleTelegramBot:
         header_status = "🟢" if message_settings['header_enabled'] else "🔴"
         footer_status = "🟢" if message_settings['footer_enabled'] else "🔴"
         buttons_status = "🟢" if message_settings['inline_buttons_enabled'] else "🔴"
+        
+        # Get text formatting settings for status display
+        formatting_settings = self.db.get_text_formatting_settings(task_id)
+        formatting_status = "🟢" if formatting_settings['text_formatting_enabled'] else "🔴"
 
         buttons = [
             [Button.inline(f"🔄 تغيير وضع التوجيه ({forward_mode_text})", f"toggle_forward_mode_{task_id}")],
@@ -1080,6 +1112,7 @@ class SimpleTelegramBot:
             [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")],
             [Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
             [Button.inline("🧹 تنظيف النصوص", f"text_cleaning_{task_id}")],
+            [Button.inline(f"{formatting_status} تنسيق النصوص", f"text_formatting_{task_id}")],
             [Button.inline(f"{header_status} رأس الرسالة", f"header_settings_{task_id}")],
             [Button.inline(f"{footer_status} ذيل الرسالة", f"footer_settings_{task_id}")],
             [Button.inline(f"{buttons_status} أزرار إنلاين", f"inline_buttons_{task_id}")],
@@ -3305,6 +3338,132 @@ class SimpleTelegramBot:
         else:
             await event.respond("⚠️ لم يتم إضافة أي كلمات جديدة (قد تكون موجودة مسبقاً)")
             await self.manage_text_cleaning_keywords(event, task_id)
+
+    async def show_text_formatting(self, event, task_id):
+        """Show text formatting settings for task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_text_formatting_settings(task_id)
+
+        message = f"✨ تنسيق النصوص للمهمة: {task_name}\n\n"
+        
+        is_enabled = settings.get('text_formatting_enabled', False)
+        current_format = settings.get('format_type', 'regular')
+        
+        if is_enabled:
+            message += "🟢 تنسيق النصوص: مُفعل\n"
+            message += f"📝 التنسيق الحالي: {self._get_format_name(current_format)}\n\n"
+        else:
+            message += "🔴 تنسيق النصوص: معطل\n\n"
+
+        message += "🎨 أنواع التنسيق المتاحة:\n\n"
+
+        # Format types with examples
+        format_types = [
+            ('regular', 'عادي', 'نص عادي'),
+            ('bold', 'عريض', '**نص عريض**'),
+            ('italic', 'مائل', '*نص مائل*'),
+            ('underline', 'تحته خط', '__نص تحته خط__'),
+            ('strikethrough', 'مخطوط', '~~نص مخطوط~~'),
+            ('code', 'كود', '`نص كود`'),
+            ('monospace', 'خط ثابت', '```نص بخط ثابت```'),
+            ('quote', 'اقتباس', '>نص مقتبس'),
+            ('spoiler', 'مخفي', '||نص مخفي||'),
+            ('hyperlink', 'رابط', '[نص](رابط)')
+        ]
+
+        buttons = []
+        
+        # Toggle enable/disable button
+        toggle_text = "❌ تعطيل" if is_enabled else "✅ تفعيل"
+        buttons.append([Button.inline(f"{toggle_text} تنسيق النصوص", f"toggle_text_formatting_{task_id}")])
+
+        if is_enabled:
+            # Format type selection buttons
+            for fmt_type, fmt_name, example in format_types:
+                is_current = fmt_type == current_format
+                status_icon = "✅" if is_current else "⚪"
+                buttons.append([Button.inline(f"{status_icon} {fmt_name} - {example}", f"set_text_format_{fmt_type}_{task_id}")])
+
+            # Special handling for hyperlink format
+            if current_format == 'hyperlink':
+                link_text = settings.get('hyperlink_text', 'نص')
+                link_url = settings.get('hyperlink_url', 'https://example.com')
+                message += f"\n🔗 إعدادات الرابط:\n"
+                message += f"• النص: {link_text}\n"
+                message += f"• الرابط: {link_url}\n"
+                buttons.append([Button.inline("🔧 تعديل إعدادات الرابط", f"edit_hyperlink_{task_id}")])
+
+        buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    def _get_format_name(self, format_type):
+        """Get Arabic name for format type"""
+        format_names = {
+            'regular': 'عادي',
+            'bold': 'عريض',
+            'italic': 'مائل',
+            'underline': 'تحته خط',
+            'strikethrough': 'مخطوط',
+            'code': 'كود',
+            'monospace': 'خط ثابت',
+            'quote': 'اقتباس',
+            'spoiler': 'مخفي',
+            'hyperlink': 'رابط'
+        }
+        return format_names.get(format_type, format_type)
+
+    async def toggle_text_formatting(self, event, task_id):
+        """Toggle text formatting on/off for a task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle the setting
+        new_enabled = self.db.toggle_text_formatting(task_id)
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        status_text = "مُفعل" if new_enabled else "معطل"
+        await event.answer(f"✅ تم تحديث تنسيق النصوص: {status_text}")
+        
+        # Show updated settings
+        await self.show_text_formatting(event, task_id)
+
+    async def set_text_format_type(self, event, task_id, format_type):
+        """Set the text format type for a task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Update format type
+        success = self.db.update_text_formatting_settings(task_id, format_type=format_type)
+        
+        if success:
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            format_name = self._get_format_name(format_type)
+            await event.answer(f"✅ تم تحديد نوع التنسيق: {format_name}")
+            
+            # Show updated settings
+            await self.show_text_formatting(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث نوع التنسيق")
 
     async def start_add_multiple_words(self, event, task_id, filter_type):
         """Start the process to add multiple words to a filter"""

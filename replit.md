@@ -3,7 +3,16 @@
 This is a Telegram message forwarding automation system built entirely with Telethon, featuring a Telegram bot interface for managing forwarding tasks and a userbot service for automatic message forwarding between Telegram chats. The system provides a complete Arabic-language bot interface with phone number authentication and multi-threaded service architecture. **Status: Fully operational and tested (August 8, 2025).**
 
 ## Recent Changes
-- **August 9, 2025 (TEXT CLEANING SEQUENCE OPTIMIZED)**: Reordered text cleaning operations for better results:
+- **August 9, 2025 (TEXT FORMATTING FEATURE - COMPLETE IMPLEMENTATION)**: Successfully implemented comprehensive text formatting system with 10 formatting options:
+  - **NEW FEATURE**: Complete text formatting capabilities: regular, bold, italic, underline, strikethrough, code, monospace, quote, spoiler, and hyperlink with custom URL support
+  - **DATABASE**: Added `task_text_formatting_settings` table with format type selection and hyperlink configuration
+  - **UI INTEGRATION**: Arabic interface in task settings menu with format type selection and status indicators
+  - **USERBOT PIPELINE**: Integrated text formatting into message processing pipeline between text replacements and header/footer formatting
+  - **FORMAT TYPES**: Support for 10 Telegram markdown formats including special handling for quote (line-by-line) and hyperlink (custom text/URL)
+  - **DATABASE COMPATIBILITY**: Full implementation for both SQLite and PostgreSQL database systems
+  - **REAL-TIME CONTROL**: Enable/disable toggle with immediate UserBot task refresh for instant formatting changes
+  - **STATUS**: Text formatting system 100% operational with complete UI, database integration, and message processing pipeline
+- **August 9, 2025 (Previous - TEXT CLEANING SEQUENCE OPTIMIZED)**: Reordered text cleaning operations for better results:
   - **REORDERED**: Empty line removal now happens AFTER all other cleaning operations
   - **IMPROVED**: Keywords removal no longer leaves unwanted empty lines in the middle of text
   - **LOGICAL SEQUENCE**: 1) Links → 2) Emojis → 3) Hashtags → 4) Phone numbers → 5) Keyword lines → 6) Whitespace cleanup → 7) Empty lines removal
