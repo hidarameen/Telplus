@@ -2007,6 +2007,76 @@ class Database:
             conn.commit()
             return cursor.rowcount
             
+    def is_advanced_filter_enabled(self, task_id: int, filter_type: str) -> bool:
+        """Check if an advanced filter is enabled for a task"""
+        try:
+            settings = self.get_advanced_filters_settings(task_id)
+            
+            filter_mapping = {
+                'admin': 'admin_filter_enabled',
+                'admin_filter': 'admin_filter_enabled',
+                'day': 'day_filter_enabled',
+                'day_filter': 'day_filter_enabled',
+                'working_hours': 'working_hours_enabled',
+                'language': 'language_filter_enabled',
+                'language_filter': 'language_filter_enabled',
+                'duplicate': 'duplicate_filter_enabled',
+                'duplicate_filter': 'duplicate_filter_enabled',
+                'inline_button': 'inline_button_filter_enabled',
+                'inline_button_filter': 'inline_button_filter_enabled',
+                'forwarded_message': 'forwarded_message_filter_enabled',
+                'forwarded_message_filter': 'forwarded_message_filter_enabled'
+            }
+            
+            setting_key = filter_mapping.get(filter_type.lower())
+            if setting_key:
+                return settings.get(setting_key, False)
+            else:
+                logger.error(f"نوع فلتر غير معروف: {filter_type}")
+                return False
+        except Exception as e:
+            logger.error(f"خطأ في فحص حالة الفلتر المتقدم: {e}")
+            return False
+            
+    def get_task_allowed_admins(self, task_id: int) -> List[int]:
+        """Get list of allowed admin user IDs for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT admin_user_id FROM task_admin_filters 
+                    WHERE task_id = ? AND is_allowed = TRUE
+                ''', (task_id,))
+                
+                allowed_admins = [row['admin_user_id'] for row in cursor.fetchall()]
+                logger.info(f"المشرفين المسموحين للمهمة {task_id}: {allowed_admins}")
+                return allowed_admins
+        except Exception as e:
+            logger.error(f"خطأ في جلب المشرفين المسموحين للمهمة {task_id}: {e}")
+            return []
+            
+    def is_admin_allowed(self, task_id: int, user_id: int) -> bool:
+        """Check if a user is allowed by admin filters for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT is_allowed FROM task_admin_filters 
+                    WHERE task_id = ? AND admin_user_id = ?
+                ''', (task_id, user_id))
+                
+                result = cursor.fetchone()
+                if result:
+                    is_allowed = bool(result['is_allowed'])
+                    logger.info(f"فحص المشرف {user_id} للمهمة {task_id}: مسموح={is_allowed}")
+                    return is_allowed
+                else:
+                    logger.info(f"المشرف {user_id} غير موجود في قائمة المهمة {task_id} - غير مسموح")
+                    return False
+        except Exception as e:
+            logger.error(f"خطأ في فحص إذن المشرف {user_id} للمهمة {task_id}: {e}")
+            return False
+            
     # ===== Duplicate Detection Management =====
     
     def get_duplicate_settings(self, task_id: int) -> Dict:
