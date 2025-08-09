@@ -1389,8 +1389,8 @@ class UserbotService:
             cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
             # Remove spoiler (both markdown and HTML)
             cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
-            cleaned_text = re.sub(r'<span class="tg-spoiler">(.*?)</span>', r'\1', cleaned_text)
             cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<span class="tg-spoiler">(.*?)</span>', r'\1', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
             # Remove hyperlinks but keep text (both markdown and HTML)
@@ -1416,8 +1416,8 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct HTML spoiler format for Telethon
-                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
+                # Use correct Telethon spoiler tag
+                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
                 # Use HTML anchor tag for proper HTML mode
@@ -1455,8 +1455,8 @@ class UserbotService:
             cleaned_text = re.sub(r"```(.*?)```", r"\1", cleaned_text, flags=re.DOTALL)
             # Remove spoiler (both markdown and HTML)
             cleaned_text = re.sub(r'\|\|(.*?)\|\|', r'\1', cleaned_text)
-            cleaned_text = re.sub(r'<span class="tg-spoiler">(.*?)</span>', r'\1', cleaned_text)
             cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
+            cleaned_text = re.sub(r'<span class="tg-spoiler">(.*?)</span>', r'\1', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
             # Remove hyperlinks but keep text (both markdown and HTML)
@@ -1482,8 +1482,8 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # Use correct HTML spoiler format for Telethon
-                return f'<span class="tg-spoiler">{cleaned_text.strip()}</span>'
+                # Use correct Telethon spoiler tag
+                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 return f'<a href="https://example.com">{cleaned_text.strip()}</a>'
 
