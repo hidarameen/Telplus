@@ -442,13 +442,25 @@ class UserbotService:
                                             parse_mode='HTML'
                                         )
                                 else:
-                                    # Regular media message with caption
+                                    # Regular media message with caption handling
+                                    # Check if caption should be removed
+                                    caption_text = final_text
+                                    text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                                    if text_cleaning_settings and text_cleaning_settings.get('remove_caption', False):
+                                        caption_text = None
+                                        logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
+                                    
+                                    # Check if album should be split
+                                    force_single_media = forwarding_settings.get('split_album_enabled', False)
+                                    
                                     forwarded_msg = await client.send_file(
                                         target_entity,
                                         event.message.media,
-                                        caption=final_text,
+                                        caption=caption_text,
                                         silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='HTML'
+                                        parse_mode='HTML' if caption_text else None,
+                                        force_document=False,
+                                        as_album=not force_single_media  # Split album if enabled
                                     )
                             elif event.message.text or final_text:
                                 # Pure text message
@@ -513,13 +525,25 @@ class UserbotService:
                                                 parse_mode='HTML'
                                             )
                                     else:
-                                        # Regular media message with caption
+                                        # Regular media message with caption handling
+                                        # Check if caption should be removed
+                                        caption_text = final_text
+                                        text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                                        if text_cleaning_settings and text_cleaning_settings.get('remove_caption', False):
+                                            caption_text = None
+                                            logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
+                                        
+                                        # Check if album should be split
+                                        force_single_media = forwarding_settings.get('split_album_enabled', False)
+                                        
                                         forwarded_msg = await client.send_file(
                                             target_entity,
                                             event.message.media,
-                                            caption=final_text,
+                                            caption=caption_text,
                                             silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML'
+                                            parse_mode='HTML' if caption_text else None,
+                                            force_document=False,
+                                            as_album=not force_single_media  # Split album if enabled
                                         )
                                 else:
                                     # Process spoiler entities if present
@@ -545,12 +569,58 @@ class UserbotService:
                                             parse_mode='HTML'
                                         )
                             else:
-                                # No formatting changes, forward normally
-                                forwarded_msg = await client.forward_messages(
-                                    target_entity,
-                                    event.message,
-                                    silent=forwarding_settings['silent_notifications']
-                                )
+                                # Check if we need copy mode for caption removal or album splitting on media
+                                text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                                needs_copy_for_caption = (event.message.media and 
+                                                        text_cleaning_settings and 
+                                                        text_cleaning_settings.get('remove_caption', False))
+                                needs_copy_for_album = (event.message.media and 
+                                                      forwarding_settings.get('split_album_enabled', False))
+                                
+                                if needs_copy_for_caption or needs_copy_for_album:
+                                    # Use copy mode for media modifications
+                                    if event.message.media:
+                                        from telethon.tl.types import MessageMediaWebPage
+                                        if isinstance(event.message.media, MessageMediaWebPage):
+                                            # Web page - send as text message
+                                            forwarded_msg = await client.send_message(
+                                                target_entity,
+                                                event.message.text or "رسالة",
+                                                link_preview=forwarding_settings['link_preview_enabled'],
+                                                silent=forwarding_settings['silent_notifications']
+                                            )
+                                        else:
+                                            # Regular media message with caption handling
+                                            caption_text = event.message.text
+                                            if needs_copy_for_caption:
+                                                caption_text = None
+                                                logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
+                                            
+                                            # Check if album should be split
+                                            force_single_media = needs_copy_for_album
+                                            
+                                            forwarded_msg = await client.send_file(
+                                                target_entity,
+                                                event.message.media,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                force_document=False,
+                                                as_album=not force_single_media  # Split album if enabled
+                                            )
+                                    else:
+                                        # Regular text forward
+                                        forwarded_msg = await client.forward_messages(
+                                            target_entity,
+                                            event.message,
+                                            silent=forwarding_settings['silent_notifications']
+                                        )
+                                else:
+                                    # No formatting changes, forward normally
+                                    forwarded_msg = await client.forward_messages(
+                                        target_entity,
+                                        event.message,
+                                        silent=forwarding_settings['silent_notifications']
+                                    )
 
                         if forwarded_msg:
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
@@ -900,8 +970,9 @@ class UserbotService:
             # Detect language if source is auto
             if source_lang == 'auto':
                 detected = translator.detect(message_text)
-                detected_lang = detected.lang
-                logger.info(f"🔍 تم اكتشاف اللغة: {detected_lang} (ثقة: {detected.confidence:.2f})")
+                detected_lang = getattr(detected, 'lang', 'unknown')
+                confidence = getattr(detected, 'confidence', 0.0)
+                logger.info(f"🔍 تم اكتشاف اللغة: {detected_lang} (ثقة: {confidence:.2f})")
                 
                 # Skip translation if detected language is same as target
                 if detected_lang == target_lang:
@@ -910,7 +981,7 @@ class UserbotService:
 
             # Translate the text
             result = translator.translate(message_text, src=source_lang, dest=target_lang)
-            translated_text = result.text
+            translated_text = getattr(result, 'text', message_text)
 
             if translated_text and translated_text != message_text:
                 logger.info(f"🌐 تم ترجمة النص بنجاح للمهمة {task_id}: '{message_text[:50]}...' → '{translated_text[:50]}...'")
