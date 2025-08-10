@@ -6609,7 +6609,7 @@ class SimpleTelegramBot:
             return
             
         # Get advanced filter status
-        advanced_settings = self.db.get_advanced_filter_settings(task_id)
+        advanced_settings = self.db.get_advanced_filters_settings(task_id)
         enabled = advanced_settings.get('working_hours_enabled', False)
         
         # Get working hours configuration
@@ -6739,7 +6739,7 @@ class SimpleTelegramBot:
             
         success = self.db.toggle_advanced_filter(task_id, 'working_hours')
         if success:
-            status = self.db.get_advanced_filter_settings(task_id)
+            status = self.db.get_advanced_filters_settings(task_id)
             enabled = status.get('working_hours_enabled', False)
             status_text = "تم تفعيل" if enabled else "تم إيقاف"
             await event.answer(f"✅ {status_text} فلتر ساعات العمل")
@@ -7045,7 +7045,7 @@ class SimpleTelegramBot:
             languages = language_data['languages']
             
             # Get advanced filter status
-            advanced_settings = self.db.get_advanced_filter_settings(task_id)
+            advanced_settings = self.db.get_advanced_filters_settings(task_id)
             enabled = advanced_settings.get('language_filter_enabled', False)
             
             status_text = "🟢 مُفَعَّل" if enabled else "🔴 مُعطل"
