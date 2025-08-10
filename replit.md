@@ -8,6 +8,20 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 10, 2025
 
+- **ENHANCED WORKING HOURS SYSTEM**: Completely redesigned working hours with advanced scheduling:
+  - **TOGGLE FUNCTIONALITY**: Enable/disable working hours filter with one click
+  - **DUAL MODES**: Work hours mode (works only during selected hours) vs Sleep hours mode (stops during selected hours)
+  - **24-HOUR SCHEDULE**: Visual hourly grid interface for precise hour selection
+  - **BULK OPERATIONS**: Select all/clear all hours with single button clicks
+  - **SMART INTERFACE**: Real-time hour ranges display and visual indicators
+  - **DATABASE REDESIGN**: New table structure with task_working_hours and task_working_hours_schedule
+  - **USERBOT INTEGRATION**: Complete integration with message filtering logic
+
+- **LANGUAGE FILTER IMPROVEMENTS**: Fixed critical issues and enhanced user experience:
+  - **MESSAGE DISPLAY FIX**: Resolved "حدث خطأ أثناء الإضافة" error when adding custom languages
+  - **IMPROVED ERROR HANDLING**: Better conversation state management and error recovery
+  - **ENHANCED MENU SYSTEM**: Proper message sending after language addition
+
 - **LANGUAGE FILTER MAJOR UPGRADE**: Completely redesigned language filter with advanced allow/block modes:
   - **ALLOW/BLOCK MODES**: Toggle between allowing specific languages or blocking specific languages
   - **QUICK LANGUAGE SELECTION**: One-click addition of 10 common languages (Arabic, English, French, etc.)
@@ -21,13 +35,6 @@ Preferred communication style: Simple, everyday language.
   - **DATABASE COLUMNS**: Added missing similarity_threshold and time_window_hours columns
   - **USER INPUT HANDLING**: Added proper user state management for threshold and time window input
   - **FULLY FUNCTIONAL**: All buttons respond correctly and filtering works as expected
-
-- **LANGUAGE FILTER FIXES COMPLETED**: Fixed critical issues preventing language filter from working:
-  - **USERBOT INTEGRATION**: Added language filter check to _check_message_advanced_filters function
-  - **LANGUAGE DETECTION**: Implemented smart language detection based on character analysis (Arabic, English, Russian, etc.)
-  - **BLOCK/ALLOW LOGIC**: Properly implemented filter logic for both allow and block modes
-  - **CUSTOM LANGUAGE INPUT**: Fixed bot handler to properly respond to custom language codes (en, ar, etc.)
-  - **TESTING VERIFIED**: Language filter now blocks English messages in block mode as expected
 
 - **TRANSLATION BYPASS FOR FORWARD MODE**: Added intelligent translation bypass when forwarding mode is set to "forward" (not copy):
   - **FORWARD MODE**: Skips translation completely and sends message as-is to preserve original content

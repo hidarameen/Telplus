@@ -1115,6 +1115,61 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد ساعات العمل: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_working_hours_"): # Handler for toggling working hours filter
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_working_hours(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل ساعات العمل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_working_hours_mode_"): # Handler for toggling working hours mode
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
+                        await self.toggle_working_hours_mode(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع ساعات العمل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("schedule_working_hours_"): # Handler for schedule working hours
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.schedule_working_hours(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لجدولة ساعات العمل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_hour_"): # Handler for toggling specific hour
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[2])
+                        hour = int(parts[3])
+                        await self.toggle_hour(event, task_id, hour)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة أو الساعة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("select_all_hours_"): # Handler for selecting all hours
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.select_all_hours(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد جميع الساعات: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("clear_all_hours_"): # Handler for clearing all hours
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.clear_all_hours(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإلغاء جميع الساعات: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("add_language_") or data.startswith("add_custom_language_"): # Handler for adding language
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -6544,13 +6599,231 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في تعديل النافذة الزمنية: {e}")
             await event.respond("❌ حدث خطأ في تحديث النافذة الزمنية")
     
-    async def start_set_working_hours(self, event, task_id):
-        """Start conversation to set working hours"""
-        await event.edit("⏰ تحديد ساعات العمل\n\nأرسل الساعات بالصيغة: ساعة_البداية:دقيقة-ساعة_النهاية:دقيقة\nمثال: 09:00-17:30")
-        
-        # Set conversation state using database system
+    async def show_working_hours_filter(self, event, task_id):
+        """Show working hours filter configuration"""
         user_id = event.sender_id
-        self.db.set_conversation_state(user_id, 'set_working_hours', json.dumps({'task_id': task_id}))
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get advanced filter status
+        advanced_settings = self.db.get_advanced_filter_settings(task_id)
+        enabled = advanced_settings.get('working_hours_enabled', False)
+        
+        # Get working hours configuration
+        working_hours = self.db.get_working_hours(task_id)
+        
+        if not working_hours:
+            # Initialize default configuration
+            self.db.set_working_hours_mode(task_id, 'work_hours', 0)
+            self.db.initialize_working_hours_schedule(task_id)
+            working_hours = self.db.get_working_hours(task_id)
+        
+        mode = working_hours.get('mode', 'work_hours')
+        enabled_hours = working_hours.get('enabled_hours', [])
+        
+        status_text = "🟢 مُفَعَّل" if enabled else "🔴 مُعطل"
+        mode_text = "ساعات العمل" if mode == 'work_hours' else "ساعات النوم"
+        
+        enabled_count = len(enabled_hours)
+        
+        message = f"⏰ **فلتر ساعات العمل: {task.get('task_name', 'مهمة بدون اسم')}**\n\n"
+        message += f"📊 **الحالة**: {status_text}\n"
+        message += f"⚙️ **الوضع**: {mode_text}\n"
+        message += f"🕐 **الساعات المُحددة**: {enabled_count}/24\n\n"
+        
+        if mode == 'work_hours':
+            message += "🟢 **وضع ساعات العمل**: البوت يعمل فقط في الساعات المُحددة\n"
+        else:
+            message += "🔴 **وضع ساعات النوم**: البوت يتوقف في الساعات المُحددة ويعمل في الباقي\n"
+        
+        message += f"\n💡 **الساعات المُحددة حالياً**: "
+        if enabled_hours:
+            hour_ranges = self._format_hour_ranges(enabled_hours)
+            message += hour_ranges
+        else:
+            message += "لا توجد ساعات محددة"
+
+        # Create buttons
+        buttons = [
+            [Button.inline(f"{'🔴 إيقاف' if enabled else '🟢 تفعيل'}", f"toggle_working_hours_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع: {mode_text}", f"toggle_working_hours_mode_{task_id}")],
+            [Button.inline("🕐 جدولة الساعات", f"schedule_working_hours_{task_id}")],
+            [Button.inline("✅ تحديد الكل", f"select_all_hours_{task_id}"),
+             Button.inline("❌ إلغاء الكل", f"clear_all_hours_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        await event.edit(message, buttons=buttons)
+
+    def _format_hour_ranges(self, hours):
+        """Format list of hours into readable ranges"""
+        if not hours:
+            return "لا توجد"
+            
+        hours = sorted(hours)
+        ranges = []
+        start = hours[0]
+        end = hours[0]
+        
+        for i in range(1, len(hours)):
+            if hours[i] == end + 1:
+                end = hours[i]
+            else:
+                if start == end:
+                    ranges.append(f"{start:02d}:00")
+                else:
+                    ranges.append(f"{start:02d}:00-{end:02d}:59")
+                start = end = hours[i]
+        
+        # Add the last range
+        if start == end:
+            ranges.append(f"{start:02d}:00")
+        else:
+            ranges.append(f"{start:02d}:00-{end:02d}:59")
+            
+        return ", ".join(ranges)
+
+    async def schedule_working_hours(self, event, task_id):
+        """Show hourly schedule interface"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        working_hours = self.db.get_working_hours(task_id)
+        if not working_hours:
+            self.db.set_working_hours_mode(task_id, 'work_hours', 0)
+            self.db.initialize_working_hours_schedule(task_id)
+            working_hours = self.db.get_working_hours(task_id)
+            
+        schedule = working_hours.get('schedule', {})
+        mode = working_hours.get('mode', 'work_hours')
+        
+        message = f"🕐 **جدولة ساعات العمل: {task.get('task_name', 'مهمة بدون اسم')}**\n\n"
+        message += f"⚙️ **الوضع الحالي**: {'ساعات العمل' if mode == 'work_hours' else 'ساعات النوم'}\n\n"
+        message += "انقر على الساعة لتفعيلها/تعطيلها:\n\n"
+        
+        # Create 4 rows of 6 hours each
+        buttons = []
+        for row in range(4):
+            button_row = []
+            for col in range(6):
+                hour = row * 6 + col
+                is_enabled = schedule.get(hour, False)
+                emoji = "🟢" if is_enabled else "⚫"
+                button_row.append(Button.inline(f"{emoji} {hour:02d}", f"toggle_hour_{task_id}_{hour}"))
+            buttons.append(button_row)
+        
+        # Add control buttons
+        buttons.append([
+            Button.inline("✅ تحديد الكل", f"select_all_hours_{task_id}"),
+            Button.inline("❌ إلغاء الكل", f"clear_all_hours_{task_id}")
+        ])
+        buttons.append([Button.inline("🔙 رجوع لساعات العمل", f"working_hours_filter_{task_id}")])
+        
+        await event.edit(message, buttons=buttons)
+
+    async def toggle_working_hours(self, event, task_id):
+        """Toggle working hours filter on/off"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        success = self.db.toggle_advanced_filter(task_id, 'working_hours')
+        if success:
+            status = self.db.get_advanced_filter_settings(task_id)
+            enabled = status.get('working_hours_enabled', False)
+            status_text = "تم تفعيل" if enabled else "تم إيقاف"
+            await event.answer(f"✅ {status_text} فلتر ساعات العمل")
+            await self.show_working_hours_filter(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير حالة الفلتر")
+
+    async def toggle_working_hours_mode(self, event, task_id):
+        """Toggle between work_hours and sleep_hours mode"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        working_hours = self.db.get_working_hours(task_id)
+        if not working_hours:
+            self.db.set_working_hours_mode(task_id, 'work_hours', 0)
+            self.db.initialize_working_hours_schedule(task_id)
+            current_mode = 'work_hours'
+        else:
+            current_mode = working_hours.get('mode', 'work_hours')
+        
+        new_mode = 'sleep_hours' if current_mode == 'work_hours' else 'work_hours'
+        success = self.db.set_working_hours_mode(task_id, new_mode)
+        
+        if success:
+            mode_text = "ساعات النوم" if new_mode == 'sleep_hours' else "ساعات العمل"
+            await event.answer(f"✅ تم تغيير الوضع إلى: {mode_text}")
+            await self.show_working_hours_filter(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير الوضع")
+
+    async def toggle_hour(self, event, task_id, hour):
+        """Toggle specific hour on/off"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        new_state = self.db.toggle_working_hour(task_id, hour)
+        status_text = "تم تفعيل" if new_state else "تم إيقاف"
+        await event.answer(f"✅ {status_text} الساعة {hour:02d}:00")
+        await self.schedule_working_hours(event, task_id)
+
+    async def select_all_hours(self, event, task_id):
+        """Enable all 24 hours"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        success = self.db.set_all_working_hours(task_id, True)
+        if success:
+            await event.answer("✅ تم تفعيل جميع الساعات")
+            await self.schedule_working_hours(event, task_id)
+        else:
+            await event.answer("❌ فشل في تفعيل الساعات")
+
+    async def clear_all_hours(self, event, task_id):
+        """Disable all 24 hours"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        success = self.db.set_all_working_hours(task_id, False)
+        if success:
+            await event.answer("✅ تم إيقاف جميع الساعات")
+            await self.schedule_working_hours(event, task_id)
+        else:
+            await event.answer("❌ فشل في إيقاف الساعات")
+
+    # Legacy function - keep for backward compatibility
+    async def start_set_working_hours(self, event, task_id):
+        """Legacy: Start conversation to set working hours"""
+        await self.show_working_hours_filter(event, task_id)
     
     async def start_add_language(self, event, task_id):
         """Start conversation to add language filter"""
@@ -6736,7 +7009,14 @@ class SimpleTelegramBot:
                 await event.respond(f"✅ تم إضافة فلتر اللغة: {lang_name}")
                 user_id = event.sender_id
                 self.db.clear_conversation_state(user_id)
-                await self.show_language_filters(event, task_id)
+                
+                # Send language filters menu as a new message
+                try:
+                    # Create a minimal callback event-like object to reuse the display function
+                    await self._send_language_filters_menu(event.chat_id, task_id)
+                except Exception as e:
+                    logger.error(f"خطأ في عرض قائمة فلاتر اللغة: {e}")
+                    await event.respond("✅ تم إضافة الفلتر بنجاح")
             else:
                 await event.respond("❌ فشل في إضافة فلتر اللغة أو أنها موجودة مسبقاً")
                 # Clear conversation state even on failure to avoid getting stuck
@@ -6749,6 +7029,60 @@ class SimpleTelegramBot:
             # Clear conversation state on error
             user_id = event.sender_id
             self.db.clear_conversation_state(user_id)
+
+    async def _send_language_filters_menu(self, chat_id, task_id):
+        """Send language filters menu as a new message"""
+        try:
+            user_id = chat_id  # Assume chat_id is the user_id for private chats
+            task = self.db.get_task(task_id, user_id)
+            
+            if not task:
+                return
+                
+            # Get language filters and create message content
+            language_data = self.db.get_language_filters(task_id)
+            filter_mode = language_data['mode']  # 'allow' or 'block'
+            languages = language_data['languages']
+            
+            # Get advanced filter status
+            advanced_settings = self.db.get_advanced_filter_settings(task_id)
+            enabled = advanced_settings.get('language_filter_enabled', False)
+            
+            status_text = "🟢 مُفَعَّل" if enabled else "🔴 مُعطل"
+            mode_text = "السماح" if filter_mode == 'allow' else "الحظر"
+            
+            message = f"🌍 **فلتر اللغة: {task.get('task_name', 'مهمة بدون اسم')}**\n\n"
+            message += f"📊 **الحالة**: {status_text}\n"
+            message += f"⚙️ **الوضع**: {mode_text}\n"
+            message += f"📝 **عدد اللغات**: {len(languages)}\n\n"
+            
+            if filter_mode == 'allow':
+                message += "🟢 **وضع السماح**: يسمح فقط بالرسائل باللغات المُحددة\n"
+            else:
+                message += "🔴 **وضع الحظر**: يحظر الرسائل باللغات المُحددة\n"
+            
+            # Show languages
+            if languages:
+                message += "\n📋 **اللغات المُحددة**:\n"
+                for i, lang in enumerate(languages, 1):
+                    selection_status = "✅" if lang['is_allowed'] else "❌"
+                    message += f"{i}. {selection_status} {lang['language_name']} ({lang['language_code']})\n"
+            else:
+                message += "\n❌ لا توجد لغات محددة"
+            
+            # Create buttons
+            buttons = [
+                [Button.inline(f"{'🔴 إيقاف' if enabled else '🟢 تفعيل'}", f"toggle_language_filter_{task_id}")],
+                [Button.inline(f"⚙️ تغيير الوضع: {mode_text}", f"toggle_language_mode_{task_id}")],
+                [Button.inline("➕ إضافة لغة مخصصة", f"add_custom_language_{task_id}")],
+                [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+            ]
+            
+            # Send the message
+            await self.client.send_message(chat_id, message, buttons=buttons)
+            
+        except Exception as e:
+            logger.error(f"خطأ في إرسال قائمة فلاتر اللغة: {e}")
 
     async def manage_text_cleaning(self, event, task_id):
         """Manage text cleaning settings for a task"""

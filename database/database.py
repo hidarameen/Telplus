@@ -278,19 +278,29 @@ class Database:
                 )
             ''')
 
-            # Working hours table - for time-based filtering
+            # Working hours table - for time-based filtering with enhanced modes
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_working_hours (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
-                    start_hour INTEGER DEFAULT 0 CHECK (start_hour >= 0 AND start_hour <= 23),
-                    start_minute INTEGER DEFAULT 0 CHECK (start_minute >= 0 AND start_minute <= 59),
-                    end_hour INTEGER DEFAULT 23 CHECK (end_hour >= 0 AND end_hour <= 23),
-                    end_minute INTEGER DEFAULT 59 CHECK (end_minute >= 0 AND end_minute <= 59),
+                    mode TEXT DEFAULT 'work_hours' CHECK (mode IN ('work_hours', 'sleep_hours')),
                     timezone_offset INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Working hours schedule table - for defining specific hours
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_working_hours_schedule (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    hour INTEGER NOT NULL CHECK (hour >= 0 AND hour <= 23),
+                    is_enabled BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, hour)
                 )
             ''')
 
@@ -2009,32 +2019,131 @@ class Database:
         """Get working hours for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            
+            # Get working hours configuration
             cursor.execute('''
-                SELECT start_hour, start_minute, end_hour, end_minute, timezone_offset
+                SELECT mode, timezone_offset
                 FROM task_working_hours WHERE task_id = ?
             ''', (task_id,))
-            result = cursor.fetchone()
+            config = cursor.fetchone()
+            
+            if not config:
+                return None
+            
+            # Get enabled hours
+            cursor.execute('''
+                SELECT hour, is_enabled
+                FROM task_working_hours_schedule 
+                WHERE task_id = ? ORDER BY hour
+            ''', (task_id,))
+            schedule_results = cursor.fetchall()
+            
+            enabled_hours = [row['hour'] for row in schedule_results if row['is_enabled']]
+            
+            return {
+                'mode': config['mode'],
+                'timezone_offset': config['timezone_offset'],
+                'enabled_hours': enabled_hours,
+                'schedule': {row['hour']: row['is_enabled'] for row in schedule_results}
+            }
 
-            if result:
-                return {
-                    'start_hour': result['start_hour'],
-                    'start_minute': result['start_minute'], 
-                    'end_hour': result['end_hour'],
-                    'end_minute': result['end_minute'],
-                    'timezone_offset': result['timezone_offset']
-                }
-            return None
-
-    def set_working_hours(self, task_id: int, start_hour: int, start_minute: int, 
-                         end_hour: int, end_minute: int, timezone_offset: int = 0):
-        """Set working hours for a task"""
+    def set_working_hours_mode(self, task_id: int, mode: str = 'work_hours', timezone_offset: int = 0):
+        """Set working hours mode for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO task_working_hours 
-                (task_id, start_hour, start_minute, end_hour, end_minute, timezone_offset)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (task_id, start_hour, start_minute, end_hour, end_minute, timezone_offset))
+                (task_id, mode, timezone_offset)
+                VALUES (?, ?, ?)
+            ''', (task_id, mode, timezone_offset))
+            conn.commit()
+            return True
+
+    def set_working_hour_schedule(self, task_id: int, hour: int, is_enabled: bool):
+        """Set specific hour schedule for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_working_hours_schedule 
+                (task_id, hour, is_enabled)
+                VALUES (?, ?, ?)
+            ''', (task_id, hour, is_enabled))
+            conn.commit()
+            return True
+
+    def initialize_working_hours_schedule(self, task_id: int):
+        """Initialize 24-hour schedule for a task (all disabled by default)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for hour in range(24):
+                cursor.execute('''
+                    INSERT OR IGNORE INTO task_working_hours_schedule 
+                    (task_id, hour, is_enabled)
+                    VALUES (?, ?, ?)
+                ''', (task_id, hour, False))
+            conn.commit()
+            return True
+
+    def set_all_working_hours(self, task_id: int, is_enabled: bool):
+        """Enable or disable all hours for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for hour in range(24):
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_working_hours_schedule 
+                    (task_id, hour, is_enabled)
+                    VALUES (?, ?, ?)
+                ''', (task_id, hour, is_enabled))
+            conn.commit()
+            return True
+
+    def toggle_working_hour(self, task_id: int, hour: int):
+        """Toggle specific hour for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Get current state
+            cursor.execute('''
+                SELECT is_enabled FROM task_working_hours_schedule 
+                WHERE task_id = ? AND hour = ?
+            ''', (task_id, hour))
+            result = cursor.fetchone()
+            
+            if result:
+                new_state = not bool(result['is_enabled'])
+            else:
+                new_state = True
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_working_hours_schedule 
+                (task_id, hour, is_enabled)
+                VALUES (?, ?, ?)
+            ''', (task_id, hour, new_state))
+            conn.commit()
+            return new_state
+
+    # Legacy function for compatibility
+    def set_working_hours(self, task_id: int, start_hour: int, start_minute: int, 
+                         end_hour: int, end_minute: int, timezone_offset: int = 0):
+        """Legacy: Set working hours for a task (converts to new system)"""
+        # Initialize the new system
+        self.set_working_hours_mode(task_id, 'work_hours', timezone_offset)
+        self.initialize_working_hours_schedule(task_id)
+        
+        # Enable hours in the range
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for hour in range(24):
+                is_in_range = False
+                if start_hour <= end_hour:
+                    is_in_range = start_hour <= hour <= end_hour
+                else:  # spans midnight
+                    is_in_range = hour >= start_hour or hour <= end_hour
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_working_hours_schedule 
+                    (task_id, hour, is_enabled)
+                    VALUES (?, ?, ?)
+                ''', (task_id, hour, is_in_range))
             conn.commit()
             return True
 

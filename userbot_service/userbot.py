@@ -1573,11 +1573,69 @@ class UserbotService:
                     logger.info(f"🌍 رسالة محظورة بواسطة فلتر اللغة")
                     should_block = True
             
+            # Check working hours filter
+            if not should_block and advanced_settings.get('working_hours_enabled', False):
+                working_hours_blocked = self._check_working_hours_filter(task_id)
+                if working_hours_blocked:
+                    logger.info(f"⏰ رسالة محظورة بواسطة فلتر ساعات العمل")
+                    should_block = True
+            
             return should_block, should_remove_buttons, should_remove_forward
             
         except Exception as e:
             logger.error(f"خطأ في فحص الفلاتر المتقدمة: {e}")
             return False, False, False
+
+    def _check_working_hours_filter(self, task_id: int) -> bool:
+        """Check if current time is within working hours configuration"""
+        try:
+            import datetime
+            
+            # Get working hours configuration
+            working_hours = self.db.get_working_hours(task_id)
+            if not working_hours:
+                logger.debug(f"⏰ لا توجد إعدادات ساعات العمل للمهمة {task_id}")
+                return False
+            
+            mode = working_hours.get('mode', 'work_hours')  # 'work_hours' or 'sleep_hours'
+            enabled_hours = working_hours.get('enabled_hours', [])
+            timezone_offset = working_hours.get('timezone_offset', 0)
+            
+            # If no hours are configured, don't block
+            if not enabled_hours:
+                logger.debug(f"⏰ لا توجد ساعات محددة في فلتر ساعات العمل للمهمة {task_id}")
+                return False
+            
+            # Get current time with timezone offset
+            now = datetime.datetime.now() + datetime.timedelta(hours=timezone_offset)
+            current_hour = now.hour
+            
+            logger.info(f"⏰ فحص ساعات العمل للمهمة {task_id}: الساعة الحالية={current_hour:02d}, الوضع={mode}")
+            logger.info(f"⏰ الساعات المُحددة: {sorted(enabled_hours)}")
+            
+            # Check if current hour is in enabled hours
+            is_in_enabled_hours = current_hour in enabled_hours
+            
+            if mode == 'work_hours':
+                # Work hours mode: Block if NOT in working hours
+                should_block = not is_in_enabled_hours
+                if should_block:
+                    logger.info(f"⏰ وضع ساعات العمل: الساعة الحالية {current_hour:02d} خارج ساعات العمل - سيتم حظر الرسالة")
+                else:
+                    logger.info(f"⏰ وضع ساعات العمل: الساعة الحالية {current_hour:02d} في ساعات العمل - سيتم توجيه الرسالة")
+            else:  # sleep_hours
+                # Sleep hours mode: Block if IN sleep hours
+                should_block = is_in_enabled_hours
+                if should_block:
+                    logger.info(f"⏰ وضع ساعات النوم: الساعة الحالية {current_hour:02d} في ساعات النوم - سيتم حظر الرسالة")
+                else:
+                    logger.info(f"⏰ وضع ساعات النوم: الساعة الحالية {current_hour:02d} خارج ساعات النوم - سيتم توجيه الرسالة")
+            
+            return should_block
+            
+        except Exception as e:
+            logger.error(f"خطأ في فحص فلتر ساعات العمل: {e}")
+            return False
 
     async def _check_duplicate_message(self, task_id: int, message) -> bool:
         """Check if message is duplicate based on settings"""
