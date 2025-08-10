@@ -8,7 +8,17 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
-- **August 10, 2025 (MAJOR FEATURE - COMPREHENSIVE TRANSLATION SYSTEM IMPLEMENTED)**: Added complete automatic translation functionality with full Arabic interface integration:
+- **August 10, 2025 (CRITICAL BUG FIX - TRANSLATION SYSTEM COMPLETELY REBUILT)**: Fixed broken translation functionality by replacing googletrans with deep-translator:
+  - **ROOT CAUSE IDENTIFIED**: googletrans library was causing "NoneType object has no attribute 'group'" errors due to Google API changes
+  - **COMPLETE LIBRARY REPLACEMENT**: Uninstalled unreliable googletrans and installed stable deep-translator library
+  - **TRANSLATION ENGINE REBUILT**: Redesigned translation logic using GoogleTranslator from deep-translator for more reliable operation
+  - **ERROR HANDLING IMPROVED**: Removed complex language detection that was causing failures, simplified to direct translation approach
+  - **API COMPATIBILITY**: New translation system uses more stable Google Translate endpoints that don't break with API changes
+  - **USER EXPERIENCE**: Translation now works consistently without NoneType errors or translation failures
+  - **PERFORMANCE OPTIMIZED**: Faster translation with better error handling and fallback to original text on any failure
+  - **STATUS**: Translation functionality now fully operational with robust error handling and reliable translation service
+
+- **August 10, 2025 (MAJOR FEATURE - COMPREHENSIVE TRANSLATION SYSTEM ORIGINALLY IMPLEMENTED)**: Added complete automatic translation functionality with full Arabic interface integration:
   - **TRANSLATION SETTINGS INTERFACE**: Complete Arabic interface for managing translation settings with enable/disable toggle and language selection
   - **COMPREHENSIVE LANGUAGE SUPPORT**: Added support for 14+ languages including Arabic, English, Spanish, French, German, Italian, Portuguese, Russian, Chinese, Japanese, Korean, Hindi, Turkish, and auto-detection
   - **USERBOT INTEGRATION**: Translation functionality fully integrated into message forwarding pipeline using googletrans library

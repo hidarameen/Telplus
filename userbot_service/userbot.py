@@ -15,13 +15,13 @@ from bot_package.config import API_ID, API_HASH
 import time
 from collections import defaultdict
 
-# Import translation service
+# Import translation service  
 try:
-    from googletrans import Translator
+    from deep_translator import GoogleTranslator
     TRANSLATION_AVAILABLE = True
 except ImportError:
     TRANSLATION_AVAILABLE = False
-    logger.warning("⚠️ googletrans غير متوفر - الترجمة معطلة")
+    Translator = None
 
 logger = logging.getLogger(__name__)
 
@@ -1074,7 +1074,7 @@ class UserbotService:
             return message_text  # Return original text on error
 
     async def apply_translation(self, task_id: int, message_text: str) -> str:
-        """Apply translation to message text if enabled"""
+        """Apply translation to message text if enabled using deep-translator"""
         if not message_text or not TRANSLATION_AVAILABLE:
             return message_text
 
@@ -1093,57 +1093,26 @@ class UserbotService:
                 logger.debug(f"🌐 تجاهل الترجمة: اللغة المصدر والهدف متشابهة ({source_lang})")
                 return message_text
 
-            # Create translator instance
-            if not TRANSLATION_AVAILABLE:
-                logger.warning(f"⚠️ الترجمة غير متوفرة")
-                return message_text
-                
-            translator = Translator()
-            
-            # Perform translation
             logger.info(f"🌐 بدء ترجمة النص من {source_lang} إلى {target_lang} للمهمة {task_id}")
             
-            # Detect language if source is auto
-            if source_lang == 'auto':
-                try:
-                    detected = translator.detect(message_text)
-                    if detected and hasattr(detected, 'lang'):
-                        detected_lang = detected.lang
-                        confidence = getattr(detected, 'confidence', 0.0)
-                        logger.info(f"🔍 تم اكتشاف اللغة: {detected_lang} (ثقة: {confidence:.2f})")
-                        
-                        # Skip translation if detected language is same as target
-                        if detected_lang == target_lang:
-                            logger.info(f"🌐 تجاهل الترجمة: النص بالفعل باللغة المطلوبة ({target_lang})")
-                            return message_text
-                    else:
-                        logger.warning(f"🌐 فشل في اكتشاف اللغة، الاستمرار بالترجمة")
-                except Exception as detect_error:
-                    logger.warning(f"⚠️ مشكلة في اكتشاف اللغة: {detect_error}, الاستمرار بالترجمة")
-
-            # Translate the text
             try:
-                result = translator.translate(message_text, src=source_lang, dest=target_lang)
-                if result and hasattr(result, 'text') and result.text:
-                    translated_text = result.text
-                    logger.info(f"🌐 تمت الترجمة بنجاح")
+                # Use deep-translator for more reliable translation
+                translator = GoogleTranslator(source=source_lang, target=target_lang)
+                translated_text = translator.translate(message_text)
+                
+                if translated_text and translated_text != message_text:
+                    logger.info(f"🌐 تم ترجمة النص بنجاح للمهمة {task_id}: '{message_text[:30]}...' → '{translated_text[:30]}...'")
+                    return translated_text
                 else:
-                    logger.warning(f"🌐 فشل في الترجمة، إرجاع النص الأصلي")
-                    translated_text = message_text
+                    logger.debug(f"🌐 لم تتم الترجمة: النص مطابق أو فارغ")
+                    return message_text
+                    
             except Exception as translate_error:
-                logger.warning(f"⚠️ مشكلة في الترجمة: {translate_error}, إرجاع النص الأصلي")
-                translated_text = message_text
-
-            if translated_text and translated_text != message_text:
-                logger.info(f"🌐 تم ترجمة النص بنجاح للمهمة {task_id}: '{message_text[:50]}...' → '{translated_text[:50]}...'")
-                return translated_text
-            else:
-                logger.debug(f"🌐 لم تتم الترجمة: النص مطابق أو فارغ")
+                logger.error(f"❌ مشكلة في الترجمة: {translate_error}")
                 return message_text
 
         except Exception as e:
             logger.error(f"❌ خطأ في ترجمة النص للمهمة {task_id}: {e}")
-            # Return original text on translation error
             return message_text
 
     async def _process_album_delayed(self, user_id: int, group_id: int, client: TelegramClient):

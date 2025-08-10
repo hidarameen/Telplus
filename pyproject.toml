@@ -5,8 +5,8 @@ description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
     "asyncio-mqtt>=0.16.2",
+    "deep-translator>=1.11.4",
     "flask>=3.1.1",
-    "googletrans>=2.4.0",
     "psycopg2-binary>=2.9.10",
     "python-telegram-bot==20.8",
     "telegram>=0.0.1",
