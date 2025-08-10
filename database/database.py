@@ -2446,6 +2446,34 @@ class Database:
             conn.commit()
             return True
 
+    def update_duplicate_text_check(self, task_id: int, enabled: bool):
+        """Update text similarity check setting"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure default settings exist first
+            cursor.execute('INSERT OR IGNORE INTO task_duplicate_settings (task_id) VALUES (?)', (task_id,))
+            cursor.execute('''
+                UPDATE task_duplicate_settings 
+                SET check_text_similarity = ?
+                WHERE task_id = ?
+            ''', (enabled, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_duplicate_media_check(self, task_id: int, enabled: bool):
+        """Update media similarity check setting"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure default settings exist first
+            cursor.execute('INSERT OR IGNORE INTO task_duplicate_settings (task_id) VALUES (?)', (task_id,))
+            cursor.execute('''
+                UPDATE task_duplicate_settings 
+                SET check_media_similarity = ?
+                WHERE task_id = ?
+            ''', (enabled, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def log_forwarded_message(self, task_id: int, source_chat_id: str, source_message_id: int,
                              message_text: str = None, message_hash: str = None, 
                              media_type: str = None, media_hash: str = None):

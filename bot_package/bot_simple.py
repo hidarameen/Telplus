@@ -24,6 +24,7 @@ class SimpleTelegramBot:
     def __init__(self):
         self.db = Database()
         self.bot = None
+        self.conversation_states = {}
 
     async def start(self):
         """Start the bot"""
@@ -449,6 +450,15 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلتر التكرار: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("duplicate_settings_"): # Handler for duplicate settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_duplicate_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التكرار: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("inline_button_filter_"): # Handler for inline button filter
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -583,6 +593,24 @@ class SimpleTelegramBot:
                         await self.show_media_filters(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر الوسائط: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_media_check_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_media_check(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فحص الوسائط: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_text_check_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_text_check(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فحص النص: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_media_"):
                 parts = data.split("_")
@@ -6001,19 +6029,21 @@ class SimpleTelegramBot:
         inline_button_setting = self.db.get_inline_button_filter_setting(task_id)
         
         enabled_status = "🟢 مُفَعَّل" if advanced_settings['inline_button_filter_enabled'] else "🔴 غير مُفَعَّل"
-        block_status = "🚫 يحظر" if inline_button_setting else "✅ يسمح"
+        mode_status = "🚫 حظر الرسالة" if inline_button_setting else "🗑️ حذف الأزرار"
         
         buttons = [
-            [Button.inline(f"🔄 تبديل الحظر ({block_status})", f"toggle_inline_block_{task_id}")],
             [Button.inline(f"🔄 {enabled_status}", f"toggle_advanced_filter_inline_button_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع: {mode_status}", f"toggle_inline_block_{task_id}")],
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
         await event.edit(
             f"🔘 فلتر الأزرار الشفافة: {task_name}\n\n"
             f"📊 حالة الفلتر: {enabled_status}\n"
-            f"🎯 وضع الحظر: {block_status}\n\n"
-            f"💡 ملاحظة: عند تفعيل هذا الفلتر، سيتم حظر/السماح بالرسائل التي تحتوي على أزرار إنلاين حسب الإعداد المحدد",
+            f"⚙️ وضع المعالجة: {mode_status}\n\n"
+            f"💡 الأوضاع المتاحة:\n"
+            f"• 🚫 وضع الحظر: يمنع توجيه الرسائل التي تحتوي على أزرار شفافة\n"
+            f"• 🗑️ وضع الحذف: يحذف الأزرار ويوجه الرسالة فقط",
             buttons=buttons
         )
     
@@ -6033,19 +6063,21 @@ class SimpleTelegramBot:
         forwarded_setting = self.db.get_forwarded_message_filter_setting(task_id)
         
         enabled_status = "🟢 مُفَعَّل" if advanced_settings['forwarded_message_filter_enabled'] else "🔴 غير مُفَعَّل"
-        block_status = "🚫 يحظر" if forwarded_setting else "✅ يسمح"
+        mode_status = "🚫 حظر الرسالة" if forwarded_setting else "📋 إرسال كنسخة"
         
         buttons = [
-            [Button.inline(f"🔄 تبديل الحظر ({block_status})", f"toggle_forwarded_block_{task_id}")],
             [Button.inline(f"🔄 {enabled_status}", f"toggle_advanced_filter_forwarded_message_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع: {mode_status}", f"toggle_forwarded_block_{task_id}")],
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
         await event.edit(
             f"↗️ فلتر الرسائل المعاد توجيهها: {task_name}\n\n"
             f"📊 حالة الفلتر: {enabled_status}\n"
-            f"🎯 وضع الحظر: {block_status}\n\n"
-            f"💡 ملاحظة: عند تفعيل هذا الفلتر، سيتم حظر/السماح بالرسائل التي تم توجيهها من قنوات أخرى إلى المصدر",
+            f"⚙️ وضع المعالجة: {mode_status}\n\n"
+            f"💡 الأوضاع المتاحة:\n"
+            f"• 🚫 وضع الحظر: يمنع توجيه الرسائل المعاد توجيهها\n"
+            f"• 📋 وضع النسخ: يحذف علامة التوجيه ويرسل الرسالة كنسخة جديدة",
             buttons=buttons
         )
     
@@ -6113,11 +6145,11 @@ class SimpleTelegramBot:
         else:
             await event.answer("❌ فشل في تحديث الفلتر")
     
-    async def toggle_inline_button_block(self, event, task_id):
-        """Toggle inline button block setting"""
+    async def toggle_inline_button_mode(self, event, task_id):
+        """Toggle inline button filter mode between remove and block"""
         user_id = event.sender_id
         
-        # Get current setting
+        # Get current setting (True = block, False = remove)
         current_setting = self.db.get_inline_button_filter_setting(task_id)
         new_setting = not current_setting
         
@@ -6125,17 +6157,17 @@ class SimpleTelegramBot:
         success = self.db.set_inline_button_filter(task_id, new_setting)
         
         if success:
-            status_text = "تم تفعيل حظر" if new_setting else "تم إلغاء حظر"
-            await event.answer(f"✅ {status_text} الرسائل التي تحتوي على أزرار")
+            mode_text = "حظر الرسائل" if new_setting else "حذف الأزرار وتوجيه الرسالة"
+            await event.answer(f"✅ تم تغيير وضع الفلتر إلى: {mode_text}")
             await self.show_inline_button_filter(event, task_id)
         else:
             await event.answer("❌ فشل في تحديث الإعداد")
     
-    async def toggle_forwarded_message_block(self, event, task_id):
-        """Toggle forwarded message block setting"""
+    async def toggle_forwarded_message_mode(self, event, task_id):
+        """Toggle forwarded message filter mode between remove and block"""
         user_id = event.sender_id
         
-        # Get current setting
+        # Get current setting (True = block, False = remove forward mark)
         current_setting = self.db.get_forwarded_message_filter_setting(task_id)
         new_setting = not current_setting
         
@@ -6143,9 +6175,45 @@ class SimpleTelegramBot:
         success = self.db.set_forwarded_message_filter(task_id, new_setting)
         
         if success:
-            status_text = "تم تفعيل حظر" if new_setting else "تم إلغاء حظر"
-            await event.answer(f"✅ {status_text} الرسائل المعاد توجيهها")
+            mode_text = "حظر الرسائل المعاد توجيهها" if new_setting else "حذف علامة التوجيه وإرسال كنسخة"
+            await event.answer(f"✅ تم تغيير وضع الفلتر إلى: {mode_text}")
             await self.show_forwarded_message_filter(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث الإعداد")
+
+    async def toggle_text_check(self, event, task_id):
+        """Toggle text similarity check for duplicate filter"""
+        user_id = event.sender_id
+        
+        # Get current settings
+        settings = self.db.get_duplicate_settings(task_id)
+        new_status = not settings['check_text_similarity']
+        
+        # Update setting
+        success = self.db.update_duplicate_text_check(task_id, new_status)
+        
+        if success:
+            status_text = "تم تفعيل" if new_status else "تم إلغاء"
+            await event.answer(f"✅ {status_text} فحص تشابه النص")
+            await self.show_duplicate_settings(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث الإعداد")
+
+    async def toggle_media_check(self, event, task_id):
+        """Toggle media similarity check for duplicate filter"""
+        user_id = event.sender_id
+        
+        # Get current settings
+        settings = self.db.get_duplicate_settings(task_id)
+        new_status = not settings['check_media_similarity']
+        
+        # Update setting
+        success = self.db.update_duplicate_media_check(task_id, new_status)
+        
+        if success:
+            status_text = "تم تفعيل" if new_status else "تم إلغاء"
+            await event.answer(f"✅ {status_text} فحص تشابه الوسائط")
+            await self.show_duplicate_settings(event, task_id)
         else:
             await event.answer("❌ فشل في تحديث الإعداد")
     

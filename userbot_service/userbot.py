@@ -382,6 +382,16 @@ class UserbotService:
                 
                 album_collector = self.album_collectors[user_id]
 
+                # Check advanced filters before forwarding to any targets
+                message = event.message
+                should_block, should_remove_buttons, should_remove_forward = await self._check_message_advanced_filters(
+                    first_task['id'], message
+                )
+                
+                if should_block:
+                    logger.info(f"🚫 الرسالة محظورة بواسطة فلاتر متقدمة - تم رفضها لجميع الأهداف")
+                    return
+
                 # Forward message to all target chats
                 for i, task in enumerate(matching_tasks):
                     try:
@@ -393,6 +403,12 @@ class UserbotService:
                         forwarding_settings = self.get_forwarding_settings(task['id'])
                         split_album_enabled = forwarding_settings.get('split_album_enabled', False)
                         mode_text = "نسخ" if forward_mode == 'copy' else "توجيه"
+                        
+                        # Apply forwarded message filter mode
+                        if should_remove_forward:
+                            forward_mode = 'copy'  # Force copy mode to remove forwarded header
+                            mode_text = "نسخ (بدون علامة التوجيه)"
+                            logger.info(f"📋 تم تحويل إلى وضع النسخ لإزالة علامة التوجيه")
 
                         logger.info(f"🔄 بدء {mode_text} رسالة من {source_chat_id} إلى {target_chat_id} (المهمة: {task_name})")
                         logger.info(f"📤 تفاصيل الإرسال: مصدر='{source_chat_id}', هدف='{target_chat_id}', وضع={mode_text}, تقسيم_ألبوم={split_album_enabled}, مستخدم={user_id}")
@@ -473,14 +489,16 @@ class UserbotService:
                         if original_text != final_text and original_text:
                             logger.info(f"🔄 تم تطبيق تنسيق الرسالة: '{original_text}' → '{final_text}'")
 
-                        # Prepare inline buttons if enabled
+                        # Prepare inline buttons if enabled and not filtered out
                         inline_buttons = None
-                        if message_settings['inline_buttons_enabled']:
+                        if message_settings['inline_buttons_enabled'] and not should_remove_buttons:
                             inline_buttons = self.build_inline_buttons(task['id'])
                             if inline_buttons:
                                 logger.info(f"🔘 تم بناء {len(inline_buttons)} صف من الأزرار الإنلاين للمهمة {task['id']}")
                             else:
                                 logger.warning(f"⚠️ فشل في بناء الأزرار الإنلاين للمهمة {task['id']}")
+                        elif should_remove_buttons and message_settings['inline_buttons_enabled']:
+                            logger.info(f"🗑️ تم تجاهل الأزرار الشفافة بسبب إعدادات الفلتر للمهمة {task['id']}")
 
                         # Get forwarding settings
                         forwarding_settings = self.get_forwarding_settings(task['id'])
@@ -567,22 +585,24 @@ class UserbotService:
                                 processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
                                 
                                 if spoiler_entities:
-                                    # Send with spoiler entities
+                                    # Send with spoiler entities and buttons
                                     forwarded_msg = await client.send_message(
                                         target_entity,
                                         processed_text,
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
-                                        formatting_entities=spoiler_entities
+                                        formatting_entities=spoiler_entities,
+                                        buttons=inline_buttons
                                     )
                                 else:
-                                    # Send normally
+                                    # Send normally with buttons
                                     forwarded_msg = await client.send_message(
                                         target_entity,
                                         processed_text,
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='HTML'
+                                        parse_mode='HTML',
+                                        buttons=inline_buttons
                                     )
                             else:
                                 # Fallback to forward for other types
@@ -1487,6 +1507,57 @@ class UserbotService:
 
         except Exception as e:
             logger.error(f"خطأ في تطبيق فاصل الإرسال: {e}")
+
+    async def _check_message_advanced_filters(self, task_id: int, message) -> tuple:
+        """Check advanced filters for forwarded messages and inline buttons
+        Returns: (should_block, should_remove_buttons, should_remove_forward)
+        """
+        try:
+            # Get advanced filter settings
+            advanced_settings = self.db.get_advanced_filters_settings(task_id)
+            
+            should_block = False
+            should_remove_buttons = False  
+            should_remove_forward = False
+            
+            # Check forwarded message filter
+            if advanced_settings.get('forwarded_message_filter_enabled', False):
+                forwarded_setting = self.db.get_forwarded_message_filter_setting(task_id)
+                
+                # Check if message is forwarded
+                is_forwarded = (hasattr(message, 'forward') and message.forward is not None)
+                
+                if is_forwarded:
+                    if forwarded_setting:  # True = block mode
+                        logger.info(f"🚫 رسالة معاد توجيهها - سيتم حظرها (وضع الحظر)")
+                        should_block = True
+                    else:  # False = remove forward mode
+                        logger.info(f"📋 رسالة معاد توجيهها - سيتم إرسالها كنسخة (وضع حذف علامة التوجيه)")
+                        should_remove_forward = True
+            
+            # Check inline button filter 
+            if not should_block and advanced_settings.get('inline_button_filter_enabled', False):
+                inline_button_setting = self.db.get_inline_button_filter_setting(task_id)
+                
+                # Check if message has inline buttons
+                has_buttons = (hasattr(message, 'reply_markup') and 
+                             message.reply_markup is not None and
+                             hasattr(message.reply_markup, 'rows') and
+                             message.reply_markup.rows)
+                
+                if has_buttons:
+                    if inline_button_setting:  # True = block mode
+                        logger.info(f"🚫 رسالة تحتوي على أزرار شفافة - سيتم حظرها (وضع الحظر)")
+                        should_block = True
+                    else:  # False = remove buttons mode
+                        logger.info(f"🗑️ رسالة تحتوي على أزرار شفافة - سيتم حذف الأزرار (وضع الحذف)")
+                        should_remove_buttons = True
+            
+            return should_block, should_remove_buttons, should_remove_forward
+            
+        except Exception as e:
+            logger.error(f"خطأ في فحص الفلاتر المتقدمة: {e}")
+            return False, False, False
 
     async def stop_user(self, user_id: int):
         """Stop userbot for specific user"""
