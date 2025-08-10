@@ -451,17 +451,42 @@ class UserbotService:
                                         logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
                                     
                                     # Check if album should be split
-                                    force_single_media = forwarding_settings.get('split_album_enabled', False)
+                                    split_album_enabled = forwarding_settings.get('split_album_enabled', False)
                                     
-                                    forwarded_msg = await client.send_file(
-                                        target_entity,
-                                        event.message.media,
-                                        caption=caption_text,
-                                        silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='HTML' if caption_text else None,
-                                        force_document=False,
-                                        as_album=not force_single_media  # Split album if enabled
-                                    )
+                                    # Handle album splitting logic
+                                    if split_album_enabled:
+                                        # Split album: send each media individually
+                                        logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                        forwarded_msg = await client.send_file(
+                                            target_entity,
+                                            event.message.media,
+                                            caption=caption_text,
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML' if caption_text else None,
+                                            force_document=False
+                                        )
+                                    else:
+                                        # Keep album grouped: send as original album
+                                        logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']}")
+                                        # For grouped albums, we need to handle them differently
+                                        # Check if this is part of an album group
+                                        if hasattr(event.message, 'grouped_id') and event.message.grouped_id:
+                                            # This is part of an album - forward the entire album at once
+                                            forwarded_msg = await client.forward_messages(
+                                                target_entity,
+                                                event.message,
+                                                silent=forwarding_settings['silent_notifications']
+                                            )
+                                        else:
+                                            # Single media, send normally
+                                            forwarded_msg = await client.send_file(
+                                                target_entity,
+                                                event.message.media,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                force_document=False
+                                            )
                             elif event.message.text or final_text:
                                 # Pure text message
                                 # Process spoiler entities if present
@@ -534,17 +559,39 @@ class UserbotService:
                                             logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
                                         
                                         # Check if album should be split
-                                        force_single_media = forwarding_settings.get('split_album_enabled', False)
+                                        split_album_enabled = forwarding_settings.get('split_album_enabled', False)
                                         
-                                        forwarded_msg = await client.send_file(
-                                            target_entity,
-                                            event.message.media,
-                                            caption=caption_text,
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML' if caption_text else None,
-                                            force_document=False,
-                                            as_album=not force_single_media  # Split album if enabled
-                                        )
+                                        # Handle album splitting logic
+                                        if split_album_enabled:
+                                            # Split album: send each media individually
+                                            logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                            forwarded_msg = await client.send_file(
+                                                target_entity,
+                                                event.message.media,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                force_document=False
+                                            )
+                                        else:
+                                            # Keep album grouped: send as original album
+                                            logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']}")
+                                            # For grouped albums, we need to handle them differently
+                                            if hasattr(event.message, 'grouped_id') and event.message.grouped_id:
+                                                # This is part of an album - forward the entire album at once
+                                                forwarded_msg = await client.forward_messages(
+                                                    target_entity,
+                                                    event.message,
+                                                    silent=forwarding_settings['silent_notifications']
+                                                )
+                                            else:
+                                                # Single media, send normally
+                                                forwarded_msg = await client.send_file(
+                                                    target_entity,
+                                                    event.message.media,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    force_document=False
+                                                )
                                 else:
                                     # Process spoiler entities if present
                                     message_text = final_text or "رسالة"
@@ -596,17 +643,36 @@ class UserbotService:
                                                 caption_text = None
                                                 logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
                                             
-                                            # Check if album should be split
-                                            force_single_media = needs_copy_for_album
-                                            
-                                            forwarded_msg = await client.send_file(
-                                                target_entity,
-                                                event.message.media,
-                                                caption=caption_text,
-                                                silent=forwarding_settings['silent_notifications'],
-                                                force_document=False,
-                                                as_album=not force_single_media  # Split album if enabled
-                                            )
+                                            # Handle album splitting logic
+                                            if needs_copy_for_album:
+                                                # Split album: send each media individually
+                                                logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                                forwarded_msg = await client.send_file(
+                                                    target_entity,
+                                                    event.message.media,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    force_document=False
+                                                )
+                                            else:
+                                                # Keep album grouped
+                                                logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']}")
+                                                if hasattr(event.message, 'grouped_id') and event.message.grouped_id:
+                                                    # Forward as album
+                                                    forwarded_msg = await client.forward_messages(
+                                                        target_entity,
+                                                        event.message,
+                                                        silent=forwarding_settings['silent_notifications']
+                                                    )
+                                                else:
+                                                    # Single media
+                                                    forwarded_msg = await client.send_file(
+                                                        target_entity,
+                                                        event.message.media,
+                                                        caption=caption_text,
+                                                        silent=forwarding_settings['silent_notifications'],
+                                                        force_document=False
+                                                    )
                                     else:
                                         # Regular text forward
                                         forwarded_msg = await client.forward_messages(
@@ -969,19 +1035,37 @@ class UserbotService:
             
             # Detect language if source is auto
             if source_lang == 'auto':
-                detected = translator.detect(message_text)
-                detected_lang = getattr(detected, 'lang', 'unknown')
-                confidence = getattr(detected, 'confidence', 0.0)
-                logger.info(f"🔍 تم اكتشاف اللغة: {detected_lang} (ثقة: {confidence:.2f})")
-                
-                # Skip translation if detected language is same as target
-                if detected_lang == target_lang:
-                    logger.info(f"🌐 تجاهل الترجمة: النص بالفعل باللغة المطلوبة ({target_lang})")
-                    return message_text
+                try:
+                    detected = translator.detect(message_text)
+                    if detected is None:
+                        logger.warning(f"🌐 فشل في اكتشاف اللغة، استخدام الإعداد الافتراضي")
+                        detected_lang = 'unknown'
+                        confidence = 0.0
+                    else:
+                        detected_lang = getattr(detected, 'lang', 'unknown')
+                        confidence = getattr(detected, 'confidence', 0.0)
+                    
+                    logger.info(f"🔍 تم اكتشاف اللغة: {detected_lang} (ثقة: {confidence:.2f})")
+                    
+                    # Skip translation if detected language is same as target
+                    if detected_lang == target_lang:
+                        logger.info(f"🌐 تجاهل الترجمة: النص بالفعل باللغة المطلوبة ({target_lang})")
+                        return message_text
+                except Exception as detect_error:
+                    logger.error(f"❌ خطأ في اكتشاف اللغة: {detect_error}")
+                    # Continue with translation attempt using original source_lang
 
             # Translate the text
-            result = translator.translate(message_text, src=source_lang, dest=target_lang)
-            translated_text = getattr(result, 'text', message_text)
+            try:
+                result = translator.translate(message_text, src=source_lang, dest=target_lang)
+                if result is None:
+                    logger.warning(f"🌐 فشل في الترجمة، إرجاع النص الأصلي")
+                    translated_text = message_text
+                else:
+                    translated_text = getattr(result, 'text', message_text)
+            except Exception as translate_error:
+                logger.error(f"❌ خطأ في ترجمة النص: {translate_error}")
+                translated_text = message_text
 
             if translated_text and translated_text != message_text:
                 logger.info(f"🌐 تم ترجمة النص بنجاح للمهمة {task_id}: '{message_text[:50]}...' → '{translated_text[:50]}...'")
