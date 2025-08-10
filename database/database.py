@@ -1910,6 +1910,32 @@ class Database:
             ''', (task_id,))
             conn.commit()
 
+    def toggle_advanced_filter(self, task_id: int, filter_type: str) -> bool:
+        """Toggle a specific advanced filter on/off"""
+        # Get current settings
+        settings = self.get_advanced_filters_settings(task_id)
+        
+        # Map filter types to column names
+        filter_mapping = {
+            'working_hours': 'working_hours_enabled',
+            'language': 'language_filter_enabled',
+            'day': 'day_filter_enabled',
+            'admin': 'admin_filter_enabled',
+            'duplicate': 'duplicate_filter_enabled',
+            'inline_button': 'inline_button_filter_enabled',
+            'forwarded_message': 'forwarded_message_filter_enabled'
+        }
+        
+        if filter_type not in filter_mapping:
+            return False
+            
+        column_name = filter_mapping[filter_type]
+        current_value = settings.get(column_name, False)
+        new_value = not current_value
+        
+        # Update the setting
+        return self.update_advanced_filter_setting(task_id, filter_type, new_value)
+
     def update_advanced_filter_setting(self, task_id: int, filter_type: str, enabled: bool):
         """Update a specific advanced filter setting"""
         valid_filters = {

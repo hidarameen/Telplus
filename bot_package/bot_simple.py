@@ -1126,7 +1126,7 @@ class SimpleTelegramBot:
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_working_hours_mode_"): # Handler for toggling working hours mode
                 parts = data.split("_")
-                if len(parts) >= 5:
+                if len(parts) >= 5 and parts[4] != 'mode':
                     try:
                         task_id = int(parts[4])
                         await self.toggle_working_hours_mode(event, task_id)
@@ -6697,7 +6697,7 @@ class SimpleTelegramBot:
             
         working_hours = self.db.get_working_hours(task_id)
         if not working_hours:
-            self.db.set_working_hours_mode(task_id, 'work_hours', 0)
+            self.db.set_working_hours_mode(task_id, 'work_hours')
             self.db.initialize_working_hours_schedule(task_id)
             working_hours = self.db.get_working_hours(task_id)
             
@@ -6726,7 +6726,19 @@ class SimpleTelegramBot:
         ])
         buttons.append([Button.inline("🔙 رجوع لساعات العمل", f"working_hours_filter_{task_id}")])
         
-        await event.edit(message, buttons=buttons)
+        # Send/Edit message with error handling
+        try:
+            await event.edit(message, buttons=buttons)
+        except Exception as e:
+            if "MessageNotModifiedError" in str(e) or "Content of the message was not modified" in str(e):
+                # Message content is the same, just answer the callback
+                await event.answer("✅ تم التحديث")
+            else:
+                logger.error(f"خطأ في تحديث رسالة جدولة ساعات العمل: {e}")
+                try:
+                    await event.respond(message, buttons=buttons)
+                except:
+                    await event.answer("❌ خطأ في تحديث الواجهة")
 
     async def toggle_working_hours(self, event, task_id):
         """Toggle working hours filter on/off"""
@@ -6758,7 +6770,7 @@ class SimpleTelegramBot:
             
         working_hours = self.db.get_working_hours(task_id)
         if not working_hours:
-            self.db.set_working_hours_mode(task_id, 'work_hours', 0)
+            self.db.set_working_hours_mode(task_id, 'work_hours')
             self.db.initialize_working_hours_schedule(task_id)
             current_mode = 'work_hours'
         else:
