@@ -6548,23 +6548,17 @@ class SimpleTelegramBot:
         """Start conversation to set working hours"""
         await event.edit("⏰ تحديد ساعات العمل\n\nأرسل الساعات بالصيغة: ساعة_البداية:دقيقة-ساعة_النهاية:دقيقة\nمثال: 09:00-17:30")
         
-        # Set conversation state
+        # Set conversation state using database system
         user_id = event.sender_id
-        self.conversation_states[user_id] = {
-            'action': 'set_working_hours',
-            'task_id': task_id
-        }
+        self.db.set_conversation_state(user_id, 'set_working_hours', {'task_id': task_id})
     
     async def start_add_language(self, event, task_id):
         """Start conversation to add language filter"""
         await event.edit("🌍 إضافة فلتر لغة\n\nأرسل رمز اللغة (مثال: ar للعربية، en للإنجليزية)\nأو اسم اللغة كاملاً")
         
-        # Set conversation state
+        # Set conversation state using database system
         user_id = event.sender_id
-        self.conversation_states[user_id] = {
-            'action': 'add_language',
-            'task_id': task_id
-        }
+        self.db.set_conversation_state(user_id, 'add_language', {'task_id': task_id})
     
     async def show_duplicate_settings(self, event, task_id):
         """Show duplicate detection settings"""
@@ -6684,12 +6678,21 @@ class SimpleTelegramBot:
                 await self.show_working_hours_filter(event, task_id)
             else:
                 await event.respond("❌ فشل في حفظ ساعات العمل")
+                # Clear conversation state even on failure
+                user_id = event.sender_id
+                self.db.clear_conversation_state(user_id)
                 
         except ValueError:
             await event.respond("❌ صيغة غير صحيحة. استخدم: ساعة:دقيقة-ساعة:دقيقة (مثال: 09:00-17:30)")
+            # Clear conversation state on error
+            user_id = event.sender_id
+            self.db.clear_conversation_state(user_id)
         except Exception as e:
             logger.error(f"❌ خطأ في تحديد ساعات العمل: {e}")
             await event.respond("❌ حدث خطأ أثناء التحديد")
+            # Clear conversation state on error
+            user_id = event.sender_id
+            self.db.clear_conversation_state(user_id)
     
     async def handle_add_language_filter(self, event, task_id, text):
         """Handle adding language filter from user input"""
@@ -6736,10 +6739,16 @@ class SimpleTelegramBot:
                 await self.show_language_filters(event, task_id)
             else:
                 await event.respond("❌ فشل في إضافة فلتر اللغة أو أنها موجودة مسبقاً")
+                # Clear conversation state even on failure to avoid getting stuck
+                user_id = event.sender_id
+                self.db.clear_conversation_state(user_id)
                 
         except Exception as e:
             logger.error(f"❌ خطأ في إضافة فلتر اللغة: {e}")
             await event.respond("❌ حدث خطأ أثناء الإضافة")
+            # Clear conversation state on error
+            user_id = event.sender_id
+            self.db.clear_conversation_state(user_id)
 
     async def manage_text_cleaning(self, event, task_id):
         """Manage text cleaning settings for a task"""
