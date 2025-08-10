@@ -25,6 +25,7 @@ class SimpleTelegramBot:
         self.db = Database()
         self.bot = None
         self.conversation_states = {}
+        self.user_states = {}  # For handling user input states
 
     async def start(self):
         """Start the bot"""
@@ -1294,8 +1295,7 @@ class SimpleTelegramBot:
                 return
 
         # Handle user_states for duplicate filter settings
-        user_id = event.sender_id
-        if user_id in self.user_states:
+        if hasattr(self, 'user_states') and user_id in self.user_states:
             state_info = self.user_states[user_id]
             state = state_info.get('state')
             task_id = state_info.get('task_id')
