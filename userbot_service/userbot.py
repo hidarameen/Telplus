@@ -466,8 +466,14 @@ class UserbotService:
                         cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
                         modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
 
-                        # Apply translation if enabled
-                        translated_text = await self.apply_translation(task['id'], modified_text) if modified_text else modified_text
+                        # Apply translation if enabled AND forward mode is copy (skip translation in forward mode)
+                        if forward_mode == 'copy':
+                            translated_text = await self.apply_translation(task['id'], modified_text) if modified_text else modified_text
+                            if modified_text != translated_text and modified_text:
+                                logger.info(f"🌐 تم تطبيق الترجمة في وضع النسخ: '{modified_text}' → '{translated_text}'")
+                        else:
+                            translated_text = modified_text  # Skip translation in forward mode
+                            logger.info(f"⏭️ تم تجاهل الترجمة في وضع التوجيه - إرسال الرسالة كما هي")
 
                         # Apply text formatting
                         formatted_text = self.apply_text_formatting(task['id'], translated_text) if translated_text else translated_text

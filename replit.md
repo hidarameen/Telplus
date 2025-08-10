@@ -6,6 +6,14 @@ This project is a Telegram message forwarding automation system designed to stre
 
 Preferred communication style: Simple, everyday language.
 
+# Recent Changes - August 10, 2025
+
+- **TRANSLATION BYPASS FOR FORWARD MODE**: Added intelligent translation bypass when forwarding mode is set to "forward" (not copy):
+  - **FORWARD MODE**: Skips translation completely and sends message as-is to preserve original content
+  - **COPY MODE**: Applies translation normally with all text processing features
+  - **LOGGING**: Added detailed Arabic logs showing when translation is skipped vs applied
+  - **USER REQUEST**: Fulfills requirement to ignore translation when using forward mode instead of copy mode
+
 # System Architecture
 
 ## UI/UX Decisions
