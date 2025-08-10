@@ -547,6 +547,9 @@ class Database:
 
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح مع الفلاتر المتقدمة والميزات الجديدة")
+            
+        # Create message duplicates table  
+        self.create_message_duplicates_table()
 
     # User Session Management
     def save_user_session(self, user_id: int, phone_number: str, session_string: str):
@@ -3355,3 +3358,128 @@ class Database:
         except Exception as e:
             logger.error(f"خطأ في تبديل فاصل الإرسال: {e}")
             return False
+
+    def update_duplicate_threshold(self, task_id: int, threshold: float) -> bool:
+        """Update duplicate filter similarity threshold"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE task_advanced_filters 
+                    SET duplicate_filter_similarity_threshold = ?
+                    WHERE task_id = ?
+                ''', (threshold, task_id))
+                conn.commit()
+                logger.info(f"✅ تم تحديث نسبة التشابه لفلتر التكرار: {threshold*100:.0f}% للمهمة {task_id}")
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث نسبة التشابه لفلتر التكرار: {e}")
+            return False
+
+    def update_duplicate_time_window(self, task_id: int, time_window_hours: int) -> bool:
+        """Update duplicate filter time window"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE task_advanced_filters 
+                    SET duplicate_filter_time_window_hours = ?
+                    WHERE task_id = ?
+                ''', (time_window_hours, task_id))
+                conn.commit()
+                logger.info(f"✅ تم تحديث النافذة الزمنية لفلتر التكرار: {time_window_hours} ساعة للمهمة {task_id}")
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث النافذة الزمنية لفلتر التكرار: {e}")
+            return False
+
+    def get_recent_messages_for_duplicate_check(self, task_id: int, cutoff_timestamp: int) -> list:
+        """Get recent messages for duplicate checking"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, message_text, media_hash, media_type, timestamp
+                    FROM message_duplicates
+                    WHERE task_id = ? AND timestamp > ?
+                    ORDER BY timestamp DESC
+                ''', (task_id, cutoff_timestamp))
+                
+                results = cursor.fetchall()
+                messages = []
+                for row in results:
+                    messages.append({
+                        'id': row[0],
+                        'message_text': row[1],
+                        'media_hash': row[2],
+                        'media_type': row[3],
+                        'timestamp': row[4]
+                    })
+                
+                logger.debug(f"🔍 تم العثور على {len(messages)} رسالة حديثة لفحص التكرار للمهمة {task_id}")
+                return messages
+                
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على الرسائل الحديثة لفحص التكرار: {e}")
+            return []
+
+    def store_message_for_duplicate_check(self, task_id: int, message_text: str, media_hash: str, media_type: str, timestamp: int):
+        """Store message for future duplicate checking"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO message_duplicates (task_id, message_text, media_hash, media_type, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (task_id, message_text, media_hash, media_type, timestamp))
+                conn.commit()
+                logger.debug(f"💾 تم حفظ الرسالة لفحص التكرار المستقبلي للمهمة {task_id}")
+                
+        except Exception as e:
+            logger.error(f"خطأ في حفظ الرسالة لفحص التكرار: {e}")
+
+    def update_message_timestamp_for_duplicate(self, message_id: int, timestamp: int):
+        """Update message timestamp when duplicate is found"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE message_duplicates 
+                    SET timestamp = ?
+                    WHERE id = ?
+                ''', (timestamp, message_id))
+                conn.commit()
+                logger.debug(f"🔄 تم تحديث طابع الوقت للرسالة المكررة {message_id}")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تحديث طابع الوقت للرسالة المكررة: {e}")
+
+    def create_message_duplicates_table(self):
+        """Create message_duplicates table if it doesn't exist"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS message_duplicates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id INTEGER NOT NULL,
+                        message_text TEXT,
+                        media_hash TEXT,
+                        media_type TEXT,
+                        timestamp INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    )
+                ''')
+                
+                # Create index for faster lookups
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_message_duplicates_task_timestamp 
+                    ON message_duplicates (task_id, timestamp)
+                ''')
+                
+                conn.commit()
+                logger.info("✅ تم إنشاء جدول message_duplicates والفهارس")
+                
+        except Exception as e:
+            logger.error(f"خطأ في إنشاء جدول message_duplicates: {e}")

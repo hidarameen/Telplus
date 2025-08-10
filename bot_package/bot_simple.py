@@ -612,6 +612,24 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فحص النص: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_threshold_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.set_duplicate_threshold(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد نسبة التشابه: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_time_window_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.set_duplicate_time_window(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد النافذة الزمنية: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_media_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1273,6 +1291,20 @@ class SimpleTelegramBot:
             elif state == 'waiting_hyperlink_settings': # Handle editing hyperlink settings
                 task_id = data.get('task_id')
                 await self.handle_hyperlink_settings(event, task_id, event.text)
+                return
+
+        # Handle user_states for duplicate filter settings
+        user_id = event.sender_id
+        if user_id in self.user_states:
+            state_info = self.user_states[user_id]
+            state = state_info.get('state')
+            task_id = state_info.get('task_id')
+            
+            if state == 'awaiting_threshold':
+                await self.handle_threshold_input(event, task_id, event.text)
+                return
+            elif state == 'awaiting_time_window':
+                await self.handle_time_window_input(event, task_id, event.text)
                 return
 
         # Check if this chat is a target chat for any active forwarding task
@@ -6224,6 +6256,106 @@ class SimpleTelegramBot:
             await self.show_duplicate_settings(event, task_id)
         else:
             await event.answer("❌ فشل في تحديث الإعداد")
+
+    async def set_duplicate_threshold(self, event, task_id):
+        """Set duplicate filter similarity threshold"""
+        user_id = event.sender_id
+        
+        # Start conversation to get threshold value
+        self.user_states[user_id] = {
+            'state': 'awaiting_threshold',
+            'task_id': task_id,
+            'action': 'set_duplicate_threshold'
+        }
+        
+        await event.edit(
+            "🎯 أدخل نسبة التشابه المطلوبة (من 1 إلى 100):\n\n"
+            "💡 مثال: 85 يعني 85% تشابه\n"
+            "⚠️ كلما قل الرقم، كلما زادت الحساسية لاكتشاف التكرار",
+            buttons=[
+                [Button.inline("❌ إلغاء", f"duplicate_settings_{task_id}")]
+            ]
+        )
+
+    async def set_duplicate_time_window(self, event, task_id):
+        """Set duplicate filter time window"""
+        user_id = event.sender_id
+        
+        # Start conversation to get time window value
+        self.user_states[user_id] = {
+            'state': 'awaiting_time_window',
+            'task_id': task_id,
+            'action': 'set_duplicate_time_window'
+        }
+        
+        await event.edit(
+            "⏰ أدخل النافذة الزمنية بالساعات (من 1 إلى 168 ساعة):\n\n"
+            "💡 مثال: 24 يعني 24 ساعة (يوم واحد)\n"
+            "⚠️ الرسائل المتشابهة خلال هذه الفترة سيتم اعتبارها مكررة",
+            buttons=[
+                [Button.inline("❌ إلغاء", f"duplicate_settings_{task_id}")]
+            ]
+        )
+
+    async def handle_threshold_input(self, event, task_id, text):
+        """Handle threshold input for duplicate filter"""
+        user_id = event.sender_id
+        
+        try:
+            threshold = float(text.strip())
+            
+            if threshold < 1 or threshold > 100:
+                await event.respond("❌ النسبة يجب أن تكون بين 1 و 100")
+                return
+                
+            # Update setting
+            success = self.db.update_duplicate_threshold(task_id, threshold / 100.0)
+            
+            if success:
+                # Clear user state
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                    
+                await event.respond(f"✅ تم تحديث نسبة التشابه إلى: {threshold}%")
+                await self.show_duplicate_settings(event, task_id)
+            else:
+                await event.respond("❌ فشل في تحديث النسبة")
+                
+        except ValueError:
+            await event.respond("❌ يجب إدخال رقم صحيح\nمثال: 85")
+        except Exception as e:
+            logger.error(f"خطأ في تعديل نسبة التشابه: {e}")
+            await event.respond("❌ حدث خطأ في تحديث النسبة")
+
+    async def handle_time_window_input(self, event, task_id, text):
+        """Handle time window input for duplicate filter"""
+        user_id = event.sender_id
+        
+        try:
+            time_window = int(text.strip())
+            
+            if time_window < 1 or time_window > 168:
+                await event.respond("❌ النافذة الزمنية يجب أن تكون بين 1 و 168 ساعة")
+                return
+                
+            # Update setting
+            success = self.db.update_duplicate_time_window(task_id, time_window)
+            
+            if success:
+                # Clear user state
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                    
+                await event.respond(f"✅ تم تحديث النافذة الزمنية إلى: {time_window} ساعة")
+                await self.show_duplicate_settings(event, task_id)
+            else:
+                await event.respond("❌ فشل في تحديث النافذة الزمنية")
+                
+        except ValueError:
+            await event.respond("❌ يجب إدخال رقم صحيح\nمثال: 24")
+        except Exception as e:
+            logger.error(f"خطأ في تعديل النافذة الزمنية: {e}")
+            await event.respond("❌ حدث خطأ في تحديث النافذة الزمنية")
     
     async def start_set_working_hours(self, event, task_id):
         """Start conversation to set working hours"""

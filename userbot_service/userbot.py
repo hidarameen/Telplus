@@ -1559,11 +1559,130 @@ class UserbotService:
                         logger.info(f"🗑️ رسالة تحتوي على أزرار شفافة - سيتم حذف الأزرار (وضع الحذف)")
                         should_remove_buttons = True
             
+            # Check duplicate filter
+            if not should_block and advanced_settings.get('duplicate_filter_enabled', False):
+                duplicate_detected = await self._check_duplicate_message(task_id, message)
+                if duplicate_detected:
+                    logger.info(f"🔄 رسالة مكررة - سيتم حظرها (فلتر التكرار)")
+                    should_block = True
+            
             return should_block, should_remove_buttons, should_remove_forward
             
         except Exception as e:
             logger.error(f"خطأ في فحص الفلاتر المتقدمة: {e}")
             return False, False, False
+
+    async def _check_duplicate_message(self, task_id: int, message) -> bool:
+        """Check if message is duplicate based on settings"""
+        try:
+            # Get duplicate filter settings
+            settings = self.db.get_duplicate_settings(task_id)
+            
+            if not settings:
+                logger.debug(f"❌ لا توجد إعدادات فلتر التكرار للمهمة {task_id}")
+                return False
+                
+            # Check if any checks are enabled
+            check_text = settings.get('check_text_similarity', False)
+            check_media = settings.get('check_media_similarity', False)
+            
+            if not check_text and not check_media:
+                logger.debug(f"❌ فحوصات فلتر التكرار معطلة للمهمة {task_id}")
+                return False
+                
+            threshold = settings.get('similarity_threshold', 0.8)
+            time_window_hours = settings.get('time_window_hours', 24)
+            
+            logger.info(f"🔍 فحص تكرار الرسالة للمهمة {task_id}: نص={check_text}, وسائط={check_media}, نسبة={threshold*100:.0f}%, نافذة={time_window_hours}ساعة")
+            
+            # Get message content to check
+            message_text = message.message or ""
+            message_media = None
+            media_hash = None
+            
+            # Extract media hash if exists
+            if hasattr(message, 'media') and message.media:
+                if hasattr(message.media, 'photo'):
+                    # Photo message
+                    if hasattr(message.media.photo, 'id'):
+                        media_hash = str(message.media.photo.id)
+                        message_media = 'photo'
+                elif hasattr(message.media, 'document'):
+                    # Document/video/audio message
+                    if hasattr(message.media.document, 'id'):
+                        media_hash = str(message.media.document.id)
+                        message_media = 'document'
+            
+            # Check for duplicates in database
+            import time
+            current_time = int(time.time())
+            time_window_seconds = time_window_hours * 3600
+            cutoff_time = current_time - time_window_seconds
+            
+            # Get recent messages from database
+            recent_messages = self.db.get_recent_messages_for_duplicate_check(task_id, cutoff_time)
+            
+            for stored_msg in recent_messages:
+                is_duplicate = False
+                
+                # Check text similarity if enabled
+                if check_text and message_text and stored_msg.get('message_text'):
+                    similarity = self._calculate_text_similarity(message_text, stored_msg['message_text'])
+                    if similarity >= threshold:
+                        logger.info(f"🔄 نص مكرر: تشابه={similarity*100:.1f}% >= {threshold*100:.0f}%")
+                        is_duplicate = True
+                
+                # Check media similarity if enabled
+                if check_media and media_hash and stored_msg.get('media_hash'):
+                    if media_hash == stored_msg['media_hash']:
+                        logger.info(f"🔄 وسائط مكررة: {media_hash}")
+                        is_duplicate = True
+                
+                if is_duplicate:
+                    # Update stored message timestamp to current time
+                    self.db.update_message_timestamp_for_duplicate(stored_msg['id'], current_time)
+                    return True
+            
+            # Store this message for future duplicate checks
+            self.db.store_message_for_duplicate_check(
+                task_id=task_id,
+                message_text=message_text,
+                media_hash=media_hash,
+                media_type=message_media,
+                timestamp=current_time
+            )
+            
+            logger.debug(f"✅ رسالة غير مكررة للمهمة {task_id}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"خطأ في فحص تكرار الرسالة: {e}")
+            return False  # Allow message if check fails
+            
+    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
+        """Calculate similarity between two texts"""
+        try:
+            if not text1 or not text2:
+                return 0.0
+                
+            # Simple similarity based on common words
+            words1 = set(text1.lower().split())
+            words2 = set(text2.lower().split())
+            
+            if not words1 and not words2:
+                return 1.0
+            if not words1 or not words2:
+                return 0.0
+                
+            intersection = len(words1.intersection(words2))
+            union = len(words1.union(words2))
+            
+            similarity = intersection / union if union > 0 else 0.0
+            return similarity
+            
+        except Exception as e:
+            logger.error(f"خطأ في حساب تشابه النص: {e}")
+            return 0.0
 
     async def stop_user(self, user_id: int):
         """Stop userbot for specific user"""
