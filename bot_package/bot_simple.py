@@ -6550,7 +6550,7 @@ class SimpleTelegramBot:
         
         # Set conversation state using database system
         user_id = event.sender_id
-        self.db.set_conversation_state(user_id, 'set_working_hours', {'task_id': task_id})
+        self.db.set_conversation_state(user_id, 'set_working_hours', json.dumps({'task_id': task_id}))
     
     async def start_add_language(self, event, task_id):
         """Start conversation to add language filter"""
@@ -6558,7 +6558,7 @@ class SimpleTelegramBot:
         
         # Set conversation state using database system
         user_id = event.sender_id
-        self.db.set_conversation_state(user_id, 'add_language', {'task_id': task_id})
+        self.db.set_conversation_state(user_id, 'add_language', json.dumps({'task_id': task_id}))
     
     async def show_duplicate_settings(self, event, task_id):
         """Show duplicate detection settings"""
