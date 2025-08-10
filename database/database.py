@@ -550,6 +550,9 @@ class Database:
             
         # Create message duplicates table  
         self.create_message_duplicates_table()
+        
+        # Add missing duplicate filter columns if they don't exist
+        self.add_duplicate_filter_columns()
 
     # User Session Management
     def save_user_session(self, user_id: int, phone_number: str, session_string: str):
@@ -3483,3 +3486,35 @@ class Database:
                 
         except Exception as e:
             logger.error(f"خطأ في إنشاء جدول message_duplicates: {e}")
+
+    def add_duplicate_filter_columns(self):
+        """Add missing duplicate filter columns to task_advanced_filters table"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if columns exist first
+                cursor.execute("PRAGMA table_info(task_advanced_filters)")
+                columns = [row[1] for row in cursor.fetchall()]
+                
+                # Add duplicate_filter_similarity_threshold if not exists
+                if 'duplicate_filter_similarity_threshold' not in columns:
+                    cursor.execute('''
+                        ALTER TABLE task_advanced_filters 
+                        ADD COLUMN duplicate_filter_similarity_threshold REAL DEFAULT 0.85
+                    ''')
+                    logger.info("✅ تم إضافة عمود duplicate_filter_similarity_threshold")
+                
+                # Add duplicate_filter_time_window_hours if not exists
+                if 'duplicate_filter_time_window_hours' not in columns:
+                    cursor.execute('''
+                        ALTER TABLE task_advanced_filters 
+                        ADD COLUMN duplicate_filter_time_window_hours INTEGER DEFAULT 24
+                    ''')
+                    logger.info("✅ تم إضافة عمود duplicate_filter_time_window_hours")
+                
+                conn.commit()
+                logger.info("✅ تم التحقق من وإضافة أعمدة فلتر التكرار")
+                
+        except Exception as e:
+            logger.error(f"خطأ في إضافة أعمدة فلتر التكرار: {e}")
