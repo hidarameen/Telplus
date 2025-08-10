@@ -13,6 +13,7 @@ from telethon.tl.types import MessageEntitySpoiler
 from database.database import Database
 from bot_package.config import API_ID, API_HASH
 import time
+from collections import defaultdict
 
 # Import translation service
 try:
@@ -24,12 +25,57 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+class AlbumCollector:
+    """Collector for handling album messages in copy mode"""
+    def __init__(self):
+        self.albums: Dict[int, List] = defaultdict(list)
+        self.timers: Dict[int, asyncio.Task] = {}
+        self.processed_albums: set = set()
+    
+    def should_collect_album(self, message, forward_mode: str, split_album: bool) -> bool:
+        """Check if message should be collected as part of album"""
+        return (hasattr(message, 'grouped_id') and 
+                message.grouped_id and 
+                forward_mode == 'copy' and 
+                not split_album)
+    
+    def add_message(self, message, task_info):
+        """Add message to album collection"""
+        group_id = message.grouped_id
+        self.albums[group_id].append({
+            'message': message,
+            'task_info': task_info
+        })
+        return group_id
+        
+    def is_album_processed(self, group_id: int) -> bool:
+        """Check if album was already processed"""
+        return group_id in self.processed_albums
+        
+    def mark_album_processed(self, group_id: int):
+        """Mark album as processed"""
+        self.processed_albums.add(group_id)
+        
+    def get_album_messages(self, group_id: int) -> List:
+        """Get all messages in album"""
+        return self.albums.get(group_id, [])
+        
+    def cleanup_album(self, group_id: int):
+        """Clean up album data"""
+        if group_id in self.albums:
+            del self.albums[group_id]
+        if group_id in self.timers:
+            if not self.timers[group_id].done():
+                self.timers[group_id].cancel()
+            del self.timers[group_id]
+
 class UserbotService:
     def __init__(self):
         self.db = Database()
         self.clients: Dict[int, TelegramClient] = {}  # user_id -> client
         self.user_tasks: Dict[int, List[Dict]] = {}   # user_id -> tasks
         self.running = True
+        self.album_collectors: Dict[int, AlbumCollector] = {}  # user_id -> collector
 
     async def start_with_session(self, user_id: int, session_string: str):
         """Start userbot for a specific user with session string"""
@@ -330,18 +376,55 @@ class UserbotService:
                 # Apply global forwarding delay once per message
                 await self._apply_forwarding_delay(first_task['id'])
 
+                # Initialize album collector for this user if needed
+                if user_id not in self.album_collectors:
+                    self.album_collectors[user_id] = AlbumCollector()
+                
+                album_collector = self.album_collectors[user_id]
+
                 # Forward message to all target chats
                 for i, task in enumerate(matching_tasks):
                     try:
                         target_chat_id = str(task['target_chat_id']).strip()
                         task_name = task.get('task_name', f"مهمة {task['id']}")
 
-                        # Get task forward mode
+                        # Get task forward mode and forwarding settings
                         forward_mode = task.get('forward_mode', 'forward')
+                        forwarding_settings = self.get_forwarding_settings(task['id'])
+                        split_album_enabled = forwarding_settings.get('split_album_enabled', False)
                         mode_text = "نسخ" if forward_mode == 'copy' else "توجيه"
 
                         logger.info(f"🔄 بدء {mode_text} رسالة من {source_chat_id} إلى {target_chat_id} (المهمة: {task_name})")
-                        logger.info(f"📤 تفاصيل الإرسال: مصدر='{source_chat_id}', هدف='{target_chat_id}', وضع={mode_text}, مستخدم={user_id}")
+                        logger.info(f"📤 تفاصيل الإرسال: مصدر='{source_chat_id}', هدف='{target_chat_id}', وضع={mode_text}, تقسيم_ألبوم={split_album_enabled}, مستخدم={user_id}")
+
+                        # Check if this is an album message that needs special handling
+                        if album_collector.should_collect_album(event.message, forward_mode, split_album_enabled):
+                            group_id = event.message.grouped_id
+                            if album_collector.is_album_processed(group_id):
+                                logger.info(f"📸 تجاهل رسالة الألبوم - تم معالجتها بالفعل: {group_id}")
+                                continue
+                            
+                            # Add to album collection
+                            album_collector.add_message(event.message, {
+                                'task': task,
+                                'target_chat_id': target_chat_id,
+                                'task_name': task_name,
+                                'mode_text': mode_text,
+                                'forward_mode': forward_mode,
+                                'forwarding_settings': forwarding_settings,
+                                'user_id': user_id,
+                                'index': i
+                            })
+                            
+                            # Set timer to process album (give time for all messages to arrive)
+                            if group_id in album_collector.timers:
+                                album_collector.timers[group_id].cancel()
+                            
+                            album_collector.timers[group_id] = asyncio.create_task(
+                                self._process_album_delayed(user_id, group_id, client)
+                            )
+                            
+                            continue  # Skip individual processing
 
                         # Parse target chat ID
                         if target_chat_id.startswith('@'):
@@ -466,27 +549,17 @@ class UserbotService:
                                             force_document=False
                                         )
                                     else:
-                                        # Keep album grouped: send as original album
-                                        logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']}")
-                                        # For grouped albums, we need to handle them differently
-                                        # Check if this is part of an album group
-                                        if hasattr(event.message, 'grouped_id') and event.message.grouped_id:
-                                            # This is part of an album - forward the entire album at once
-                                            forwarded_msg = await client.forward_messages(
-                                                target_entity,
-                                                event.message,
-                                                silent=forwarding_settings['silent_notifications']
-                                            )
-                                        else:
-                                            # Single media, send normally
-                                            forwarded_msg = await client.send_file(
-                                                target_entity,
-                                                event.message.media,
-                                                caption=caption_text,
-                                                silent=forwarding_settings['silent_notifications'],
-                                                parse_mode='HTML' if caption_text else None,
-                                                force_document=False
-                                            )
+                                        # Keep album grouped: send as new media (copy mode)
+                                        logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
+                                        # In copy mode, we always send as new media, not forward
+                                        forwarded_msg = await client.send_file(
+                                            target_entity,
+                                            event.message.media,
+                                            caption=caption_text,
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML' if caption_text else None,
+                                            force_document=False
+                                        )
                             elif event.message.text or final_text:
                                 # Pure text message
                                 # Process spoiler entities if present
@@ -570,28 +643,21 @@ class UserbotService:
                                                 event.message.media,
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
                                                 force_document=False
                                             )
                                         else:
-                                            # Keep album grouped: send as original album
-                                            logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']}")
-                                            # For grouped albums, we need to handle them differently
-                                            if hasattr(event.message, 'grouped_id') and event.message.grouped_id:
-                                                # This is part of an album - forward the entire album at once
-                                                forwarded_msg = await client.forward_messages(
-                                                    target_entity,
-                                                    event.message,
-                                                    silent=forwarding_settings['silent_notifications']
-                                                )
-                                            else:
-                                                # Single media, send normally
-                                                forwarded_msg = await client.send_file(
-                                                    target_entity,
-                                                    event.message.media,
-                                                    caption=caption_text,
-                                                    silent=forwarding_settings['silent_notifications'],
-                                                    force_document=False
-                                                )
+                                            # Keep album grouped: send as new media (copy mode)
+                                            logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (تحويل لوضع النسخ)")
+                                            # In forward mode with requires_copy_mode, we also send as new media
+                                            forwarded_msg = await client.send_file(
+                                                target_entity,
+                                                event.message.media,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                force_document=False
+                                            )
                                 else:
                                     # Process spoiler entities if present
                                     message_text = final_text or "رسالة"
@@ -1028,6 +1094,10 @@ class UserbotService:
                 return message_text
 
             # Create translator instance
+            if not TRANSLATION_AVAILABLE:
+                logger.warning(f"⚠️ الترجمة غير متوفرة")
+                return message_text
+                
             translator = Translator()
             
             # Perform translation
@@ -1037,34 +1107,31 @@ class UserbotService:
             if source_lang == 'auto':
                 try:
                     detected = translator.detect(message_text)
-                    if detected is None:
-                        logger.warning(f"🌐 فشل في اكتشاف اللغة، استخدام الإعداد الافتراضي")
-                        detected_lang = 'unknown'
-                        confidence = 0.0
-                    else:
-                        detected_lang = getattr(detected, 'lang', 'unknown')
+                    if detected and hasattr(detected, 'lang'):
+                        detected_lang = detected.lang
                         confidence = getattr(detected, 'confidence', 0.0)
-                    
-                    logger.info(f"🔍 تم اكتشاف اللغة: {detected_lang} (ثقة: {confidence:.2f})")
-                    
-                    # Skip translation if detected language is same as target
-                    if detected_lang == target_lang:
-                        logger.info(f"🌐 تجاهل الترجمة: النص بالفعل باللغة المطلوبة ({target_lang})")
-                        return message_text
+                        logger.info(f"🔍 تم اكتشاف اللغة: {detected_lang} (ثقة: {confidence:.2f})")
+                        
+                        # Skip translation if detected language is same as target
+                        if detected_lang == target_lang:
+                            logger.info(f"🌐 تجاهل الترجمة: النص بالفعل باللغة المطلوبة ({target_lang})")
+                            return message_text
+                    else:
+                        logger.warning(f"🌐 فشل في اكتشاف اللغة، الاستمرار بالترجمة")
                 except Exception as detect_error:
-                    logger.error(f"❌ خطأ في اكتشاف اللغة: {detect_error}")
-                    # Continue with translation attempt using original source_lang
+                    logger.warning(f"⚠️ مشكلة في اكتشاف اللغة: {detect_error}, الاستمرار بالترجمة")
 
             # Translate the text
             try:
                 result = translator.translate(message_text, src=source_lang, dest=target_lang)
-                if result is None:
+                if result and hasattr(result, 'text') and result.text:
+                    translated_text = result.text
+                    logger.info(f"🌐 تمت الترجمة بنجاح")
+                else:
                     logger.warning(f"🌐 فشل في الترجمة، إرجاع النص الأصلي")
                     translated_text = message_text
-                else:
-                    translated_text = getattr(result, 'text', message_text)
             except Exception as translate_error:
-                logger.error(f"❌ خطأ في ترجمة النص: {translate_error}")
+                logger.warning(f"⚠️ مشكلة في الترجمة: {translate_error}, إرجاع النص الأصلي")
                 translated_text = message_text
 
             if translated_text and translated_text != message_text:
@@ -1078,6 +1145,116 @@ class UserbotService:
             logger.error(f"❌ خطأ في ترجمة النص للمهمة {task_id}: {e}")
             # Return original text on translation error
             return message_text
+
+    async def _process_album_delayed(self, user_id: int, group_id: int, client: TelegramClient):
+        """Process collected album messages after delay"""
+        try:
+            await asyncio.sleep(1.5)  # Wait for all album messages to arrive
+            
+            album_collector = self.album_collectors.get(user_id)
+            if not album_collector:
+                return
+                
+            album_data = album_collector.get_album_messages(group_id)
+            if not album_data:
+                return
+                
+            album_collector.mark_album_processed(group_id)
+            logger.info(f"📸 معالجة ألبوم مجمع: {len(album_data)} رسائل (المجموعة: {group_id})")
+            
+            # Group by target to send albums together per target
+            targets = {}
+            for item in album_data:
+                target_id = item['task_info']['target_chat_id']
+                if target_id not in targets:
+                    targets[target_id] = []
+                targets[target_id].append(item)
+            
+            # Process each target
+            for target_chat_id, target_items in targets.items():
+                try:
+                    # Get target entity
+                    if target_chat_id.startswith('@'):
+                        target_entity = target_chat_id
+                    else:
+                        target_entity = int(target_chat_id)
+                        
+                    target_chat = await client.get_entity(target_entity)
+                    task_info = target_items[0]['task_info']  # Use first item's task info
+                    task = task_info['task']
+                    
+                    logger.info(f"📸 إرسال ألبوم إلى {target_chat_id} ({len(target_items)} رسائل)")
+                    
+                    # Process text for first message (albums usually share caption)
+                    first_message = target_items[0]['message']
+                    original_text = first_message.text or ""
+                    
+                    # Apply text processing
+                    message_settings = self.get_message_settings(task['id'])
+                    cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
+                    modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
+                    translated_text = await self.apply_translation(task['id'], modified_text) if modified_text else modified_text
+                    formatted_text = self.apply_text_formatting(task['id'], translated_text) if translated_text else translated_text
+                    final_text = self.apply_message_formatting(formatted_text, message_settings)
+                    
+                    # Check if caption should be removed
+                    text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                    if text_cleaning_settings and text_cleaning_settings.get('remove_caption', False):
+                        final_text = None
+                        logger.info(f"🗑️ تم حذف التسمية التوضيحية للألبوم {task['id']}")
+                    
+                    # Send album as grouped media files (copy mode)
+                    media_files = []
+                    for item in target_items:
+                        media_files.append(item['message'].media)
+                    
+                    # Send as single album
+                    if final_text:
+                        forwarded_msg = await client.send_file(
+                            target_entity,
+                            file=media_files,
+                            caption=final_text,
+                            silent=task_info['forwarding_settings']['silent_notifications'],
+                            parse_mode='HTML',
+                            force_document=False
+                        )
+                    else:
+                        forwarded_msg = await client.send_file(
+                            target_entity,
+                            file=media_files,
+                            silent=task_info['forwarding_settings']['silent_notifications'],
+                            force_document=False
+                        )
+                    
+                    logger.info(f"✅ تم إرسال ألبوم بنجاح إلى {target_chat_id}")
+                    
+                    # Save message mappings for all items
+                    if isinstance(forwarded_msg, list):
+                        for i, item in enumerate(target_items):
+                            if i < len(forwarded_msg):
+                                msg_id = forwarded_msg[i].id
+                                try:
+                                    self.db.save_message_mapping(
+                                        task_id=task['id'],
+                                        source_chat_id=str(item['message'].peer_id.channel_id if hasattr(item['message'].peer_id, 'channel_id') else item['message'].chat_id),
+                                        source_message_id=item['message'].id,
+                                        target_chat_id=str(target_chat_id),
+                                        target_message_id=msg_id
+                                    )
+                                except Exception as mapping_error:
+                                    logger.error(f"❌ فشل في حفظ تطابق رسالة الألبوم: {mapping_error}")
+                    
+                except Exception as target_error:
+                    logger.error(f"❌ فشل في إرسال ألبوم إلى {target_chat_id}: {target_error}")
+                    
+            # Cleanup
+            album_collector.cleanup_album(group_id)
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في معالجة الألبوم {group_id}: {e}")
+            # Cleanup on error
+            if user_id in self.album_collectors:
+                self.album_collectors[user_id].cleanup_album(group_id)
 
     def get_message_settings(self, task_id: int) -> dict:
         """Get message formatting settings for a task"""
