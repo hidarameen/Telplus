@@ -2022,40 +2022,43 @@ class Database:
             
             # Get working hours configuration
             cursor.execute('''
-                SELECT mode, timezone_offset
+                SELECT mode
                 FROM task_working_hours WHERE task_id = ?
             ''', (task_id,))
             config = cursor.fetchone()
             
             if not config:
-                return None
+                return {
+                    'mode': 'work_hours',
+                    'enabled_hours': [],
+                    'schedule': {}
+                }
             
             # Get enabled hours
             cursor.execute('''
-                SELECT hour, is_enabled
+                SELECT hour, enabled
                 FROM task_working_hours_schedule 
                 WHERE task_id = ? ORDER BY hour
             ''', (task_id,))
             schedule_results = cursor.fetchall()
             
-            enabled_hours = [row['hour'] for row in schedule_results if row['is_enabled']]
+            enabled_hours = [row['hour'] for row in schedule_results if row['enabled']]
             
             return {
                 'mode': config['mode'],
-                'timezone_offset': config['timezone_offset'],
                 'enabled_hours': enabled_hours,
-                'schedule': {row['hour']: row['is_enabled'] for row in schedule_results}
+                'schedule': {row['hour']: row['enabled'] for row in schedule_results}
             }
 
-    def set_working_hours_mode(self, task_id: int, mode: str = 'work_hours', timezone_offset: int = 0):
+    def set_working_hours_mode(self, task_id: int, mode: str = 'work_hours'):
         """Set working hours mode for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO task_working_hours 
-                (task_id, mode, timezone_offset)
-                VALUES (?, ?, ?)
-            ''', (task_id, mode, timezone_offset))
+                (task_id, mode)
+                VALUES (?, ?)
+            ''', (task_id, mode))
             conn.commit()
             return True
 
@@ -2065,7 +2068,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO task_working_hours_schedule 
-                (task_id, hour, is_enabled)
+                (task_id, hour, enabled)
                 VALUES (?, ?, ?)
             ''', (task_id, hour, is_enabled))
             conn.commit()
@@ -2078,7 +2081,7 @@ class Database:
             for hour in range(24):
                 cursor.execute('''
                     INSERT OR IGNORE INTO task_working_hours_schedule 
-                    (task_id, hour, is_enabled)
+                    (task_id, hour, enabled)
                     VALUES (?, ?, ?)
                 ''', (task_id, hour, False))
             conn.commit()
@@ -2091,7 +2094,7 @@ class Database:
             for hour in range(24):
                 cursor.execute('''
                     INSERT OR REPLACE INTO task_working_hours_schedule 
-                    (task_id, hour, is_enabled)
+                    (task_id, hour, enabled)
                     VALUES (?, ?, ?)
                 ''', (task_id, hour, is_enabled))
             conn.commit()
@@ -2103,19 +2106,19 @@ class Database:
             cursor = conn.cursor()
             # Get current state
             cursor.execute('''
-                SELECT is_enabled FROM task_working_hours_schedule 
+                SELECT enabled FROM task_working_hours_schedule 
                 WHERE task_id = ? AND hour = ?
             ''', (task_id, hour))
             result = cursor.fetchone()
             
             if result:
-                new_state = not bool(result['is_enabled'])
+                new_state = not bool(result['enabled'])
             else:
                 new_state = True
             
             cursor.execute('''
                 INSERT OR REPLACE INTO task_working_hours_schedule 
-                (task_id, hour, is_enabled)
+                (task_id, hour, enabled)
                 VALUES (?, ?, ?)
             ''', (task_id, hour, new_state))
             conn.commit()
@@ -2126,7 +2129,7 @@ class Database:
                          end_hour: int, end_minute: int, timezone_offset: int = 0):
         """Legacy: Set working hours for a task (converts to new system)"""
         # Initialize the new system
-        self.set_working_hours_mode(task_id, 'work_hours', timezone_offset)
+        self.set_working_hours_mode(task_id, 'work_hours')
         self.initialize_working_hours_schedule(task_id)
         
         # Enable hours in the range
@@ -2141,7 +2144,7 @@ class Database:
                 
                 cursor.execute('''
                     INSERT OR REPLACE INTO task_working_hours_schedule 
-                    (task_id, hour, is_enabled)
+                    (task_id, hour, enabled)
                     VALUES (?, ?, ?)
                 ''', (task_id, hour, is_in_range))
             conn.commit()
