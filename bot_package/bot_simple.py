@@ -6181,6 +6181,14 @@ class SimpleTelegramBot:
         else:
             await event.answer("❌ فشل في تحديث الإعداد")
 
+    async def toggle_forwarded_message_block(self, event, task_id):
+        """Toggle forwarded message filter mode between block and delete"""
+        await self.toggle_forwarded_message_mode(event, task_id)
+
+    async def toggle_inline_button_block(self, event, task_id):
+        """Toggle inline button filter mode between block and delete"""  
+        await self.toggle_inline_button_mode(event, task_id)
+
     async def toggle_text_check(self, event, task_id):
         """Toggle text similarity check for duplicate filter"""
         user_id = event.sender_id
