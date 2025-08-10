@@ -307,8 +307,23 @@ class UserbotService:
 
                 logger.info(f"تم العثور على {len(matching_tasks)} مهمة مطابقة للمحادثة {source_chat_id}")
 
+                # Check advanced features once per message (using first matching task for settings)
+                first_task = matching_tasks[0]
+                original_text = event.message.text or ""
+                cleaned_text = self.apply_text_cleaning(original_text, first_task['id']) if original_text else original_text
+                modified_text = self.apply_text_replacements(first_task['id'], cleaned_text) if cleaned_text else cleaned_text
+                text_for_limits = modified_text or original_text
+
+                # Check advanced features before processing any targets
+                if not await self._check_advanced_features(first_task['id'], text_for_limits, user_id):
+                    logger.info(f"🚫 الرسالة محظورة بواسطة إحدى الميزات المتقدمة - تم رفضها لجميع الأهداف")
+                    return
+
+                # Apply global forwarding delay once per message
+                await self._apply_forwarding_delay(first_task['id'])
+
                 # Forward message to all target chats
-                for task in matching_tasks:
+                for i, task in enumerate(matching_tasks):
                     try:
                         target_chat_id = str(task['target_chat_id']).strip()
                         task_name = task.get('task_name', f"مهمة {task['id']}")
@@ -340,16 +355,9 @@ class UserbotService:
                         # Get message formatting settings for this task
                         message_settings = self.get_message_settings(task['id'])
 
-                        # Apply text cleaning first, then text replacements
-                        original_text = event.message.text or ""
+                        # Apply text cleaning and replacements (use same as checked above)
                         cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
                         modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
-
-                        # Check advanced features BEFORE formatting (use original/cleaned text)
-                        text_for_limits = modified_text or original_text  # Use text after cleaning/replacements but before formatting
-                        if not await self._check_advanced_features(task['id'], text_for_limits, user_id):
-                            logger.info(f"🚫 الرسالة محظورة بواسطة إحدى الميزات المتقدمة للمهمة {task['id']}")
-                            continue
 
                         # Apply text formatting
                         formatted_text = self.apply_text_formatting(task['id'], modified_text) if modified_text else modified_text
@@ -382,8 +390,9 @@ class UserbotService:
                         # Get forwarding settings
                         forwarding_settings = self.get_forwarding_settings(task['id'])
 
-                        # Apply forwarding delay if enabled
-                        await self._apply_forwarding_delay(task['id'])
+                        # Apply sending interval before each target (except first)
+                        if i > 0:
+                            await self._apply_sending_interval(task['id'])
 
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")

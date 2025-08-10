@@ -8,6 +8,27 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+- **August 10, 2025 (CRITICAL BUG FIX - RATE LIMITING LOGIC COMPLETELY FIXED)**: Fixed rate limiting to work per source message instead of per target:
+  - **ROOT CAUSE IDENTIFIED**: Rate limits were being checked separately for each target destination, causing first target to pass and subsequent targets to be blocked
+  - **ARCHITECTURE RESTRUCTURE**: Moved rate limit checking to occur once per source message before target processing loop
+  - **FIXED FLOW**: Advanced features (character limits, rate limits) now checked once per message using first matching task settings
+  - **PROPER BEHAVIOR**: One source message now forwards to ALL targets if within rate limit, then blocks subsequent messages until time window expires
+  - **TIMING FIXES**: 
+    - Forwarding delay applied once per source message (before all targets)
+    - Sending interval applied between targets (not per message)
+  - **USER EXPERIENCE**: Rate limit of "1 message per 10 seconds" now correctly allows 1 source message to reach all destinations, then blocks for 10 seconds
+  - **LOGGING ENHANCED**: Clear Arabic logging shows when rate limits block messages for all targets vs individual targets
+  - **STATUS**: Rate limiting now works as intended - per source message, not per destination
+
+- **August 10, 2025 (CRITICAL BUG FIX - CHARACTER LIMITS LOGIC COMPLETELY FIXED)**: Fixed character limit checking to use original message text instead of formatted HTML:
+  - **ROOT CAUSE IDENTIFIED**: Character limits were checking HTML-formatted text (with hyperlinks) instead of original message content
+  - **EXAMPLE**: Message "مرحبا" (5 chars) was blocked because formatted version `<a href="...">مرحبا</a>` (42 chars) exceeded 10-char limit
+  - **ARCHITECTURE FIX**: Moved character limit checking to occur before text formatting is applied
+  - **PROPER SEQUENCE**: Text cleaning → Character limits check → Text formatting → Send
+  - **ACCURATE COUNTING**: Now correctly counts only the actual message characters, not HTML markup
+  - **USER EXPERIENCE**: Messages within configured character range (3-10) are now properly allowed through
+  - **STATUS**: Character limits now work as intended with accurate character counting on original message text
+
 - **August 9, 2025 (CRITICAL BUG FIX - ADVANCED FEATURES EDIT BUTTONS FULLY RESOLVED)**: Fixed non-working sub-buttons for character limits, message limits, forwarding delay, and sending interval:
   - **ROOT CAUSE PHASE 1**: Missing callback handlers and database interaction methods for editing specific values
   - **FIXED PHASE 1**: Added complete callback handlers for `edit_char_range_`, `edit_rate_count_`, `edit_rate_period_`, `edit_forwarding_delay_`, `edit_sending_interval_`
