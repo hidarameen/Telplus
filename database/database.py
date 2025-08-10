@@ -553,6 +553,9 @@ class Database:
         
         # Add missing duplicate filter columns if they don't exist
         self.add_duplicate_filter_columns()
+        
+        # Add language filter mode support
+        self.add_language_filter_mode_support()
 
     # User Session Management
     def save_user_session(self, user_id: int, phone_number: str, session_string: str):
@@ -2037,24 +2040,39 @@ class Database:
 
     # ===== Language Filters Management =====
 
-    def get_language_filters(self, task_id: int) -> List[Dict]:
-        """Get language filters for a task"""
+    def get_language_filters(self, task_id: int) -> Dict:
+        """Get language filters and mode for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            
+            # Get filter mode
+            cursor.execute('''
+                SELECT language_filter_mode 
+                FROM task_advanced_filters 
+                WHERE task_id = ?
+            ''', (task_id,))
+            mode_result = cursor.fetchone()
+            filter_mode = mode_result['language_filter_mode'] if mode_result else 'allow'
+            
+            # Get languages
             cursor.execute('''
                 SELECT language_code, language_name, is_allowed
                 FROM task_language_filters WHERE task_id = ?
                 ORDER BY language_name
             ''', (task_id,))
 
-            filters = []
+            languages = []
             for row in cursor.fetchall():
-                filters.append({
+                languages.append({
                     'language_code': row['language_code'],
                     'language_name': row['language_name'],
                     'is_allowed': bool(row['is_allowed'])
                 })
-            return filters
+            
+            return {
+                'mode': filter_mode,  # 'allow' or 'block'
+                'languages': languages
+            }
 
     def add_language_filter(self, task_id: int, language_code: str, language_name: str, is_allowed: bool = True):
         """Add language filter"""
@@ -2090,6 +2108,44 @@ class Database:
             ''', (task_id, language_code))
             conn.commit()
             return cursor.rowcount > 0
+
+    def set_language_filter_mode(self, task_id: int, mode: str):
+        """Set language filter mode (allow/block)"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # First ensure record exists
+                cursor.execute('SELECT id FROM task_advanced_filters WHERE task_id = ?', (task_id,))
+                if not cursor.fetchone():
+                    cursor.execute('''
+                        INSERT INTO task_advanced_filters (task_id, language_filter_mode)
+                        VALUES (?, ?)
+                    ''', (task_id, mode))
+                else:
+                    cursor.execute('''
+                        UPDATE task_advanced_filters 
+                        SET language_filter_mode = ?
+                        WHERE task_id = ?
+                    ''', (mode, task_id))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث وضع فلتر اللغة: {e}")
+            return False
+
+    def get_language_filter_mode(self, task_id: int) -> str:
+        """Get language filter mode"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT language_filter_mode 
+                FROM task_advanced_filters 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            return result['language_filter_mode'] if result else 'allow'
 
     # ===== Admin Filters Management =====
 
@@ -3518,3 +3574,27 @@ class Database:
                 
         except Exception as e:
             logger.error(f"خطأ في إضافة أعمدة فلتر التكرار: {e}")
+
+    def add_language_filter_mode_support(self):
+        """Add language filter mode support to task_advanced_filters table"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if columns exist first
+                cursor.execute("PRAGMA table_info(task_advanced_filters)")
+                columns = [row[1] for row in cursor.fetchall()]
+                
+                # Add language_filter_mode if not exists (allow/block mode)
+                if 'language_filter_mode' not in columns:
+                    cursor.execute('''
+                        ALTER TABLE task_advanced_filters 
+                        ADD COLUMN language_filter_mode TEXT DEFAULT 'allow'
+                    ''')
+                    logger.info("✅ تم إضافة عمود language_filter_mode")
+                
+                conn.commit()
+                logger.info("✅ تم التحقق من وإضافة دعم أوضاع فلتر اللغة")
+                
+        except Exception as e:
+            logger.error(f"خطأ في إضافة دعم أوضاع فلتر اللغة: {e}")

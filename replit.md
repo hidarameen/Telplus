@@ -8,11 +8,24 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 10, 2025
 
+- **LANGUAGE FILTER MAJOR UPGRADE**: Completely redesigned language filter with advanced allow/block modes:
+  - **ALLOW/BLOCK MODES**: Toggle between allowing specific languages or blocking specific languages
+  - **QUICK LANGUAGE SELECTION**: One-click addition of 10 common languages (Arabic, English, French, etc.)
+  - **CUSTOM LANGUAGE SUPPORT**: Manual addition of any language with custom codes and names
+  - **VISUAL SELECTION INTERFACE**: Clear visual indicators (✅/🚫/⚪) for selected/unselected languages
+  - **TOGGLE FUNCTIONALITY**: Working toggle button for enable/disable filter
+  - **DATABASE ENHANCEMENTS**: Added language_filter_mode column to support new functionality
+  - **USER INTERFACE**: Complete Arabic interface with intuitive controls and descriptions
+
+- **DUPLICATE FILTER COMPLETION**: Fixed all remaining issues with duplicate message filtering:
+  - **DATABASE COLUMNS**: Added missing similarity_threshold and time_window_hours columns
+  - **USER INPUT HANDLING**: Added proper user state management for threshold and time window input
+  - **FULLY FUNCTIONAL**: All buttons respond correctly and filtering works as expected
+
 - **TRANSLATION BYPASS FOR FORWARD MODE**: Added intelligent translation bypass when forwarding mode is set to "forward" (not copy):
   - **FORWARD MODE**: Skips translation completely and sends message as-is to preserve original content
   - **COPY MODE**: Applies translation normally with all text processing features
   - **LOGGING**: Added detailed Arabic logs showing when translation is skipped vs applied
-  - **USER REQUEST**: Fulfills requirement to ignore translation when using forward mode instead of copy mode
 
 # System Architecture
 

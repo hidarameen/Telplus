@@ -1115,14 +1115,56 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد ساعات العمل: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("add_language_"): # Handler for adding language
+            elif data.startswith("add_language_") or data.startswith("add_custom_language_"): # Handler for adding language
                 parts = data.split("_")
                 if len(parts) >= 3:
                     try:
-                        task_id = int(parts[2])
+                        if data.startswith("add_custom_language_"):
+                            task_id = int(parts[3])
+                        else:
+                            task_id = int(parts[2])
                         await self.start_add_language(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة لغة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("quick_add_lang_"): # Handler for quick language addition
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[3])
+                        language_code = parts[4]
+                        language_name = "_".join(parts[5:]) if len(parts) > 5 else parts[4]
+                        await self.quick_add_language(event, task_id, language_code, language_name)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في إضافة اللغة السريعة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_lang_selection_"): # Handler for toggling language selection
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[3])
+                        language_code = parts[4]
+                        await self.toggle_language_selection(event, task_id, language_code)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تبديل اللغة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_language_mode_"): # Handler for toggling language mode
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_language_mode(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تبديل وضع اللغة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("clear_all_languages_"): # Handler for clearing all languages
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.clear_all_languages(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في مسح اللغات: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("duplicate_settings_"): # Handler for duplicate settings
                 parts = data.split("_")
@@ -5673,7 +5715,7 @@ class SimpleTelegramBot:
         )
     
     async def show_language_filters(self, event, task_id):
-        """Show language filters management"""
+        """Show language filters management with allow/block modes"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
@@ -5685,36 +5727,181 @@ class SimpleTelegramBot:
         
         # Get settings
         advanced_settings = self.db.get_advanced_filters_settings(task_id)
-        language_filters = self.db.get_language_filters(task_id)
+        language_data = self.db.get_language_filters(task_id)
         
         enabled_status = "🟢 مُفَعَّل" if advanced_settings['language_filter_enabled'] else "🔴 غير مُفَعَّل"
+        filter_mode = language_data['mode']  # 'allow' or 'block'
+        languages = language_data['languages']
+        
+        # Mode display
+        mode_text = "وضع السماح" if filter_mode == 'allow' else "وضع الحظر"
+        mode_description = "السماح للغات المحددة فقط" if filter_mode == 'allow' else "حظر اللغات المحددة"
+        mode_emoji = "✅" if filter_mode == 'allow' else "🚫"
         
         # Create language buttons
         lang_buttons = []
-        if language_filters:
-            for lang in language_filters:
-                status = "✅" if lang['is_allowed'] else "❌"
-                lang_buttons.append([Button.inline(f"{status} {lang['language_name']}", f"toggle_lang_{task_id}_{lang['language_code']}")])
-        else:
-            lang_buttons.append([Button.inline("📝 لا توجد لغات محددة", "none")])
+        if languages:
+            for lang in languages:
+                # In allow mode: selected = allowed, in block mode: selected = blocked
+                if filter_mode == 'allow':
+                    status = "✅" if lang['is_allowed'] else "⚪"
+                else:
+                    status = "🚫" if lang['is_allowed'] else "⚪"
+                lang_buttons.append([Button.inline(f"{status} {lang['language_name']}", f"toggle_lang_selection_{task_id}_{lang['language_code']}")])
         
-        # Add control buttons
+        # Quick add language buttons
+        common_languages = [
+            ('ar', 'العربية'),
+            ('en', 'English'),
+            ('fr', 'Français'),
+            ('es', 'Español'),
+            ('de', 'Deutsch'),
+            ('ru', 'Русский'),
+            ('tr', 'Türkçe'),
+            ('fa', 'فارسی'),
+            ('ur', 'اردو'),
+            ('hi', 'हिन्दी')
+        ]
+        
+        # Filter out already added languages
+        existing_codes = [lang['language_code'] for lang in languages]
+        available_languages = [(code, name) for code, name in common_languages if code not in existing_codes]
+        
+        # Add quick language selection buttons (2 per row)
+        quick_lang_buttons = []
+        for i in range(0, len(available_languages), 2):
+            row = []
+            for j in range(2):
+                if i + j < len(available_languages):
+                    code, name = available_languages[i + j]
+                    row.append(Button.inline(f"➕ {name}", f"quick_add_lang_{task_id}_{code}_{name}"))
+            if row:
+                quick_lang_buttons.append(row)
+        
+        # Control buttons
         control_buttons = [
-            [Button.inline("➕ إضافة لغة", f"add_language_{task_id}")],
+            [Button.inline(f"⚙️ تغيير إلى: {mode_emoji} {mode_text}", f"toggle_language_mode_{task_id}")],
+            [Button.inline("➕ إضافة لغة مخصصة", f"add_custom_language_{task_id}")],
+            [Button.inline("🗑️ مسح جميع اللغات", f"clear_all_languages_{task_id}")] if languages else [],
             [Button.inline(f"🔄 {enabled_status}", f"toggle_advanced_filter_language_{task_id}")],
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
-        buttons = lang_buttons + control_buttons
+        # Remove empty lists
+        control_buttons = [btn for btn in control_buttons if btn]
         
-        await event.edit(
+        # Combine all buttons
+        buttons = lang_buttons + quick_lang_buttons + control_buttons
+        
+        # Message text
+        message = (
             f"🌍 فلتر اللغة: {task_name}\n\n"
-            f"📊 حالة الفلتر: {enabled_status}\n\n"
-            f"🗣️ اللغات المُكونة:\n"
-            f"✅ = مسموح | ❌ = محظور\n\n"
-            f"💡 ملاحظة: عند تفعيل هذا الفلتر، سيتم توجيه الرسائل حسب اللغات المحددة",
-            buttons=buttons
+            f"📊 حالة الفلتر: {enabled_status}\n"
+            f"⚙️ الوضع الحالي: {mode_emoji} {mode_text}\n"
+            f"📝 الوصف: {mode_description}\n\n"
         )
+        
+        if languages:
+            message += f"🗣️ اللغات المُكونة:\n"
+            if filter_mode == 'allow':
+                message += f"✅ = مُختارة للسماح | ⚪ = غير مُختارة\n\n"
+            else:
+                message += f"🚫 = مُختارة للحظر | ⚪ = غير مُختارة\n\n"
+        else:
+            message += f"📝 لا توجد لغات محددة\n\n"
+        
+        if available_languages:
+            message += f"➕ اللغات الشائعة المتاحة:\n"
+        
+        message += (
+            f"\n💡 الأوضاع:\n"
+            f"• ✅ وضع السماح: توجيه الرسائل باللغات المحددة فقط\n"
+            f"• 🚫 وضع الحظر: منع توجيه الرسائل باللغات المحددة"
+        )
+        
+        await event.edit(message, buttons=buttons)
+    
+    async def quick_add_language(self, event, task_id, language_code, language_name):
+        """Quick add a language to filter"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Add language filter (default to allowed)
+        success = self.db.add_language_filter(task_id, language_code, language_name, True)
+        
+        if success:
+            await event.answer(f"✅ تم إضافة {language_name}")
+            await self.show_language_filters(event, task_id)
+        else:
+            await event.answer(f"❌ فشل في إضافة {language_name}")
+    
+    async def toggle_language_selection(self, event, task_id, language_code):
+        """Toggle language selection status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Toggle language selection
+        success = self.db.toggle_language_filter(task_id, language_code)
+        
+        if success:
+            await event.answer("✅ تم تحديث اللغة")
+            await self.show_language_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث اللغة")
+    
+    async def toggle_language_mode(self, event, task_id):
+        """Toggle between allow and block mode"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Get current mode and toggle
+        current_mode = self.db.get_language_filter_mode(task_id)
+        new_mode = 'block' if current_mode == 'allow' else 'allow'
+        
+        success = self.db.set_language_filter_mode(task_id, new_mode)
+        
+        if success:
+            mode_text = "وضع الحظر" if new_mode == 'block' else "وضع السماح"
+            await event.answer(f"✅ تم التبديل إلى {mode_text}")
+            await self.show_language_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تبديل الوضع")
+    
+    async def clear_all_languages(self, event, task_id):
+        """Clear all language filters"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Clear all languages (you'll need to add this method to database)
+        language_data = self.db.get_language_filters(task_id)
+        languages = language_data['languages']
+        
+        cleared_count = 0
+        for lang in languages:
+            if self.db.remove_language_filter(task_id, lang['language_code']):
+                cleared_count += 1
+        
+        if cleared_count > 0:
+            await event.answer(f"✅ تم مسح {cleared_count} لغة")
+            await self.show_language_filters(event, task_id)
+        else:
+            await event.answer("❌ لا توجد لغات لمسحها")
     
     async def show_admin_filters(self, event, task_id):
         """Show admin filters management"""
