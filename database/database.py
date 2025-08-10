@@ -2704,6 +2704,17 @@ class Database:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # First check if record exists
+                cursor.execute('SELECT id FROM task_character_limit_settings WHERE task_id = ?', (task_id,))
+                if not cursor.fetchone():
+                    # Create default settings if not exists
+                    cursor.execute('''
+                        INSERT INTO task_character_limit_settings 
+                        (task_id, enabled, mode, min_chars, max_chars, use_range)
+                        VALUES (?, FALSE, 'allow', 0, 4000, TRUE)
+                    ''', (task_id,))
+                
                 updates = []
                 params = []
                 
@@ -2722,7 +2733,7 @@ class Database:
                     WHERE task_id = ?
                 ''', params)
                 conn.commit()
-                return cursor.rowcount > 0
+                return True
         except Exception as e:
             logger.error(f"خطأ في تحديث إعدادات حد الأحرف: {e}")
             return False
@@ -2773,6 +2784,17 @@ class Database:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # First check if record exists
+                cursor.execute('SELECT id FROM task_rate_limit_settings WHERE task_id = ?', (task_id,))
+                if not cursor.fetchone():
+                    # Create default settings if not exists
+                    cursor.execute('''
+                        INSERT INTO task_rate_limit_settings 
+                        (task_id, enabled, message_count, time_period_seconds)
+                        VALUES (?, FALSE, 10, 60)
+                    ''', (task_id,))
+                
                 updates = []
                 params = []
                 
@@ -2791,7 +2813,7 @@ class Database:
                     WHERE task_id = ?
                 ''', params)
                 conn.commit()
-                return cursor.rowcount > 0
+                return True
         except Exception as e:
             logger.error(f"خطأ في تحديث إعدادات حد الرسائل: {e}")
             return False
@@ -2894,6 +2916,17 @@ class Database:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # First check if record exists
+                cursor.execute('SELECT id FROM task_forwarding_delay_settings WHERE task_id = ?', (task_id,))
+                if not cursor.fetchone():
+                    # Create default settings if not exists
+                    cursor.execute('''
+                        INSERT INTO task_forwarding_delay_settings 
+                        (task_id, enabled, delay_seconds)
+                        VALUES (?, FALSE, 0)
+                    ''', (task_id,))
+                
                 updates = []
                 params = []
                 
@@ -2912,7 +2945,7 @@ class Database:
                     WHERE task_id = ?
                 ''', params)
                 conn.commit()
-                return cursor.rowcount > 0
+                return True
         except Exception as e:
             logger.error(f"خطأ في تحديث إعدادات تأخير التوجيه: {e}")
             return False
@@ -2960,6 +2993,17 @@ class Database:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # First check if record exists
+                cursor.execute('SELECT id FROM task_sending_interval_settings WHERE task_id = ?', (task_id,))
+                if not cursor.fetchone():
+                    # Create default settings if not exists
+                    cursor.execute('''
+                        INSERT INTO task_sending_interval_settings 
+                        (task_id, enabled, interval_seconds)
+                        VALUES (?, FALSE, 3)
+                    ''', (task_id,))
+                
                 updates = []
                 params = []
                 
@@ -2978,7 +3022,7 @@ class Database:
                     WHERE task_id = ?
                 ''', params)
                 conn.commit()
-                return cursor.rowcount > 0
+                return True
         except Exception as e:
             logger.error(f"خطأ في تحديث إعدادات فاصل الإرسال: {e}")
             return False

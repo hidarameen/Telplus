@@ -8,6 +8,16 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+- **August 10, 2025 (CRITICAL BUG FIX - DATABASE SETTINGS UPDATE ERROR RESOLVED)**: Fixed error messages appearing when updating advanced feature settings:
+  - **ROOT CAUSE IDENTIFIED**: Database update functions returned False when no existing records found, causing error messages after successful settings creation
+  - **ISSUE SYMPTOMS**: Users saw both success and error messages like "✅ تم تحديث فاصل الإرسال إلى: 10 ثانية" followed by "❌ حدث خطأ في تحديث فاصل الإرسال"
+  - **ARCHITECTURAL FIX**: Modified update functions to create default records before attempting updates using INSERT OR IGNORE pattern
+  - **FUNCTIONS UPDATED**: Fixed update_rate_limit_settings, update_forwarding_delay_settings, update_sending_interval_settings, update_character_limit_settings
+  - **DATABASE LOGIC**: Update functions now check for existing records and create defaults if missing, then always return True on successful update
+  - **USER EXPERIENCE**: Settings updates now show only success messages without confusing error messages
+  - **TESTING CONFIRMED**: All advanced feature settings (message period, message count, forwarding delay, sending interval) update without errors
+  - **STATUS**: Database update error messages eliminated - clean user experience restored
+
 - **August 10, 2025 (CRITICAL BUG FIX - RATE LIMITING LOGIC COMPLETELY FIXED)**: Fixed rate limiting to work per source message instead of per target:
   - **ROOT CAUSE IDENTIFIED**: Rate limits were being checked separately for each target destination, causing first target to pass and subsequent targets to be blocked
   - **ARCHITECTURE RESTRUCTURE**: Moved rate limit checking to occur once per source message before target processing loop
