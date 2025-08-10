@@ -345,6 +345,12 @@ class UserbotService:
                         cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
                         modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
 
+                        # Check advanced features BEFORE formatting (use original/cleaned text)
+                        text_for_limits = modified_text or original_text  # Use text after cleaning/replacements but before formatting
+                        if not await self._check_advanced_features(task['id'], text_for_limits, user_id):
+                            logger.info(f"🚫 الرسالة محظورة بواسطة إحدى الميزات المتقدمة للمهمة {task['id']}")
+                            continue
+
                         # Apply text formatting
                         formatted_text = self.apply_text_formatting(task['id'], modified_text) if modified_text else modified_text
 
@@ -375,11 +381,6 @@ class UserbotService:
 
                         # Get forwarding settings
                         forwarding_settings = self.get_forwarding_settings(task['id'])
-
-                        # Check advanced features before sending
-                        if not await self._check_advanced_features(task['id'], final_text, user_id):
-                            logger.info(f"🚫 الرسالة محظورة بواسطة إحدى الميزات المتقدمة للمهمة {task['id']}")
-                            continue
 
                         # Apply forwarding delay if enabled
                         await self._apply_forwarding_delay(task['id'])
@@ -1002,28 +1003,46 @@ class UserbotService:
         """Check if message meets character limit requirements"""
         try:
             settings = self.db.get_character_limit_settings(task_id)
+            logger.info(f"🔍 إعدادات حد الأحرف للمهمة {task_id}: {settings}")
+            
             if not settings or not settings.get('enabled', False):
+                logger.info(f"✅ حد الأحرف غير مفعل للمهمة {task_id}")
                 return True
 
             if not message_text:
+                logger.info(f"✅ رسالة فارغة - السماح بالتوجيه للمهمة {task_id}")
                 return True
 
             message_length = len(message_text)
             min_chars = settings.get('min_chars', 0)
             max_chars = settings.get('max_chars', 0)
+            mode = settings.get('mode', 'allow')
 
-            # Check minimum characters
+            logger.info(f"📏 فحص حد الأحرف للمهمة {task_id}: النص='{message_text}' ({message_length} حرف), النطاق={min_chars}-{max_chars}, الوضع={mode}")
+
+            # Check character range
+            in_range = True
             if min_chars > 0 and message_length < min_chars:
                 logger.info(f"📏 الرسالة قصيرة جداً: {message_length} < {min_chars} حرف")
-                return False
-
-            # Check maximum characters
-            if max_chars > 0 and message_length > max_chars:
+                in_range = False
+            elif max_chars > 0 and message_length > max_chars:
                 logger.info(f"📏 الرسالة طويلة جداً: {message_length} > {max_chars} حرف")
-                return False
+                in_range = False
 
-            logger.debug(f"✅ حد الأحرف مقبول: {message_length} حرف (حد أدنى: {min_chars}, حد أقصى: {max_chars})")
-            return True
+            # Apply mode logic
+            if mode == 'allow':
+                # Allow mode: only allow messages within range
+                result = in_range
+                logger.info(f"🔧 وضع السماح: {'✅ مقبول' if result else '🚫 مرفوض'} - الرسالة {'في النطاق' if in_range else 'خارج النطاق'}")
+                return result
+            elif mode == 'block':
+                # Block mode: block messages within range
+                result = not in_range
+                logger.info(f"🔧 وضع الحظر: {'✅ مقبول' if result else '🚫 مرفوض'} - الرسالة {'في النطاق' if in_range else 'خارج النطاق'}")
+                return result
+            else:
+                logger.warning(f"⚠️ وضع غير معروف '{mode}' - السماح بالتوجيه")
+                return True
 
         except Exception as e:
             logger.error(f"خطأ في فحص حدود الأحرف: {e}")
