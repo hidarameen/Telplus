@@ -225,6 +225,7 @@ class Database:
                     auto_delete_time INTEGER DEFAULT 3600,
                     sync_edit_enabled BOOLEAN DEFAULT FALSE,
                     sync_delete_enabled BOOLEAN DEFAULT FALSE,
+                    split_album_enabled BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
@@ -400,6 +401,7 @@ class Database:
                     remove_phone_numbers BOOLEAN DEFAULT FALSE,
                     remove_empty_lines BOOLEAN DEFAULT FALSE,
                     remove_lines_with_keywords BOOLEAN DEFAULT FALSE,
+                    remove_caption BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
@@ -445,6 +447,33 @@ class Database:
                 logger.info("✅ تم إضافة عمود sync_delete_enabled")
             except Exception:
                 pass  # Column already exists
+
+            # Add new columns for album splitting and caption removal if they don't exist
+            try:
+                cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN split_album_enabled BOOLEAN DEFAULT FALSE")
+                logger.info("✅ تم إضافة عمود split_album_enabled")
+            except Exception:
+                pass  # Column already exists
+
+            try:
+                cursor.execute("ALTER TABLE task_text_cleaning_settings ADD COLUMN remove_caption BOOLEAN DEFAULT FALSE")
+                logger.info("✅ تم إضافة عمود remove_caption")
+            except Exception:
+                pass  # Column already exists
+
+            # Task translation settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_translation_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    source_language TEXT DEFAULT 'auto',
+                    target_language TEXT DEFAULT 'ar',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
 
             # Task character limit settings table
             cursor.execute('''
@@ -1674,7 +1703,8 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT link_preview_enabled, pin_message_enabled, silent_notifications, 
-                       auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled
+                       auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled,
+                       split_album_enabled
                 FROM task_forwarding_settings 
                 WHERE task_id = ?
             ''', (task_id,))
@@ -1688,7 +1718,8 @@ class Database:
                     'auto_delete_enabled': result['auto_delete_enabled'],
                     'auto_delete_time': result['auto_delete_time'],
                     'sync_edit_enabled': result['sync_edit_enabled'],
-                    'sync_delete_enabled': result['sync_delete_enabled']
+                    'sync_delete_enabled': result['sync_delete_enabled'],
+                    'split_album_enabled': result['split_album_enabled'] if 'split_album_enabled' in result.keys() else False
                 }
             else:
                 # Return default settings
@@ -1699,7 +1730,8 @@ class Database:
                     'auto_delete_enabled': False,
                     'auto_delete_time': 3600,
                     'sync_edit_enabled': False,
-                    'sync_delete_enabled': False
+                    'sync_delete_enabled': False,
+                    'split_album_enabled': False
                 }
 
     def update_forwarding_settings(self, task_id: int, **kwargs):
@@ -1716,12 +1748,14 @@ class Database:
             cursor.execute('''
                 INSERT OR REPLACE INTO task_forwarding_settings 
                 (task_id, link_preview_enabled, pin_message_enabled, silent_notifications, 
-                 auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled, 
+                 split_album_enabled, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (task_id, current_settings['link_preview_enabled'], 
                   current_settings['pin_message_enabled'], current_settings['silent_notifications'],
                   current_settings['auto_delete_enabled'], current_settings['auto_delete_time'],
-                  current_settings['sync_edit_enabled'], current_settings['sync_delete_enabled']))
+                  current_settings['sync_edit_enabled'], current_settings['sync_delete_enabled'],
+                  current_settings['split_album_enabled']))
 
             conn.commit()
 
@@ -1765,6 +1799,13 @@ class Database:
         current_settings = self.get_forwarding_settings(task_id)
         new_state = not current_settings['sync_delete_enabled']
         self.update_forwarding_settings(task_id, sync_delete_enabled=new_state)
+        return new_state
+
+    def toggle_split_album(self, task_id: int) -> bool:
+        """Toggle split album setting"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings['split_album_enabled']
+        self.update_forwarding_settings(task_id, split_album_enabled=new_state)
         return new_state
 
     def set_auto_delete_time(self, task_id: int, seconds: int):
@@ -2225,7 +2266,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT remove_links, remove_emojis, remove_hashtags, remove_phone_numbers,
-                       remove_empty_lines, remove_lines_with_keywords
+                       remove_empty_lines, remove_lines_with_keywords, remove_caption
                 FROM task_text_cleaning_settings WHERE task_id = ?
             ''', (task_id,))
             result = cursor.fetchone()
@@ -2237,7 +2278,8 @@ class Database:
                     'remove_hashtags': bool(result['remove_hashtags']),
                     'remove_phone_numbers': bool(result['remove_phone_numbers']),
                     'remove_empty_lines': bool(result['remove_empty_lines']),
-                    'remove_lines_with_keywords': bool(result['remove_lines_with_keywords'])
+                    'remove_lines_with_keywords': bool(result['remove_lines_with_keywords']),
+                    'remove_caption': bool(result['remove_caption']) if 'remove_caption' in result.keys() else False
                 }
             else:
                 # Create default settings
@@ -2248,7 +2290,8 @@ class Database:
                     'remove_hashtags': False,
                     'remove_phone_numbers': False,
                     'remove_empty_lines': False,
-                    'remove_lines_with_keywords': False
+                    'remove_lines_with_keywords': False,
+                    'remove_caption': False
                 }
 
     def create_default_text_cleaning_settings(self, task_id: int):
@@ -2269,7 +2312,8 @@ class Database:
             'remove_hashtags': 'remove_hashtags',
             'remove_phone_numbers': 'remove_phone_numbers',
             'remove_empty_lines': 'remove_empty_lines',
-            'remove_lines_with_keywords': 'remove_lines_with_keywords'
+            'remove_lines_with_keywords': 'remove_lines_with_keywords',
+            'remove_caption': 'remove_caption'
         }
 
         if setting_type not in valid_settings:
@@ -3025,6 +3069,101 @@ class Database:
                 return True
         except Exception as e:
             logger.error(f"خطأ في تحديث إعدادات فاصل الإرسال: {e}")
+            return False
+
+    # ===== Translation Settings =====
+    
+    def get_translation_settings(self, task_id: int) -> Dict:
+        """Get translation settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT enabled, source_language, target_language
+                FROM task_translation_settings 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'enabled': bool(result['enabled']),
+                    'source_language': result['source_language'],
+                    'target_language': result['target_language']
+                }
+            return {
+                'enabled': False,
+                'source_language': 'auto',
+                'target_language': 'ar'
+            }
+    
+    def update_translation_settings(self, task_id: int, **kwargs) -> bool:
+        """Update translation settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # First check if record exists
+                cursor.execute('SELECT id FROM task_translation_settings WHERE task_id = ?', (task_id,))
+                if not cursor.fetchone():
+                    # Create default settings if not exists
+                    cursor.execute('''
+                        INSERT INTO task_translation_settings 
+                        (task_id, enabled, source_language, target_language)
+                        VALUES (?, FALSE, 'auto', 'ar')
+                    ''', (task_id,))
+                
+                updates = []
+                params = []
+                
+                for key, value in kwargs.items():
+                    if key in ['enabled', 'source_language', 'target_language']:
+                        updates.append(f"{key} = ?")
+                        params.append(value)
+                
+                if not updates:
+                    return False
+                
+                params.append(task_id)
+                cursor.execute(f'''
+                    UPDATE task_translation_settings 
+                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', params)
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات الترجمة: {e}")
+            return False
+    
+    def toggle_translation(self, task_id: int) -> bool:
+        """Toggle translation on/off for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current status
+                cursor.execute('SELECT enabled FROM task_translation_settings WHERE task_id = ?', (task_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    new_enabled = not result[0]
+                    cursor.execute('''
+                        UPDATE task_translation_settings 
+                        SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ?
+                    ''', (new_enabled, task_id))
+                else:
+                    # Create default settings if not exists
+                    new_enabled = True
+                    cursor.execute('''
+                        INSERT INTO task_translation_settings 
+                        (task_id, enabled, source_language, target_language)
+                        VALUES (?, ?, 'auto', 'ar')
+                    ''', (task_id, new_enabled))
+                
+                conn.commit()
+                return new_enabled
+        except Exception as e:
+            logger.error(f"خطأ في تبديل الترجمة: {e}")
             return False
 
     # ===== Advanced Features Toggle Functions =====

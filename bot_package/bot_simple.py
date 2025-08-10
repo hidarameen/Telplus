@@ -725,19 +725,58 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتنظيف النصوص: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("translation_settings_"): # Handler for translation settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_translation_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الترجمة: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_text_clean_"): # Handler for toggling text cleaning settings
                 parts = data.split("_")
                 if len(parts) >= 4:
                     try:
                         setting_type = parts[3]
                         task_id = int(parts[4]) if len(parts) >= 5 else int(parts[3])
-                        if setting_type in ['remove', 'links', 'emojis', 'hashtags', 'phone', 'empty', 'keywords']:
+                        if setting_type in ['remove', 'links', 'emojis', 'hashtags', 'phone', 'empty', 'keywords', 'caption']:
                             await self.toggle_text_cleaning_setting(event, task_id, setting_type)
                         else:
                             logger.error(f"نوع إعداد تنظيف النص غير صالح: {setting_type}")
                             await event.answer("❌ نوع إعداد غير صالح")
                     except (ValueError, IndexError) as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تنظيف النص: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_translation_"): # Handler for toggling translation
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.toggle_translation(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الترجمة: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_translation_"): # Handler for setting translation languages
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        setting = parts[2] # source or target
+                        task_id = int(parts[3])
+                        await self.set_translation_language(event, task_id, setting)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل لغة الترجمة: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_lang_"): # Handler for setting specific language
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        setting = parts[2] # source or target
+                        task_id = int(parts[3])
+                        language_code = parts[4]
+                        await self.set_specific_language(event, task_id, setting, language_code)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل لغة محددة: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_text_clean_keywords_"): # Handler for managing text cleaning keywords
                 parts = data.split("_")
@@ -919,6 +958,15 @@ class SimpleTelegramBot:
                         await self.show_forwarding_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التوجيه: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_split_album_"): # Handler for toggling split album
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_split_album(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تقسيم الألبوم: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_link_preview_"): # Handler for toggling link preview
                 parts = data.split("_")
@@ -1270,6 +1318,10 @@ class SimpleTelegramBot:
         # Get text formatting settings for status display
         formatting_settings = self.db.get_text_formatting_settings(task_id)
         formatting_status = "🟢" if formatting_settings['text_formatting_enabled'] else "🔴"
+        
+        # Get translation settings for status display
+        translation_settings = self.db.get_translation_settings(task_id)
+        translation_status = "🟢" if translation_settings['enabled'] else "🔴"
 
         buttons = [
             [Button.inline(f"🔄 تغيير وضع التوجيه ({forward_mode_text})", f"toggle_forward_mode_{task_id}")],
@@ -1280,6 +1332,7 @@ class SimpleTelegramBot:
             [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")],
             [Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
             [Button.inline("🧹 تنظيف النصوص", f"text_cleaning_{task_id}")],
+            [Button.inline(f"{translation_status} ترجمة النصوص", f"translation_settings_{task_id}")],
             [Button.inline(f"{formatting_status} تنسيق النصوص", f"text_formatting_{task_id}")],
             [Button.inline(f"{header_status} رأس الرسالة", f"header_settings_{task_id}")],
             [Button.inline(f"{footer_status} ذيل الرسالة", f"footer_settings_{task_id}")],
@@ -3348,7 +3401,8 @@ class SimpleTelegramBot:
             ('remove_hashtags', 'حذف الهاشتاقات', '#️⃣'),
             ('remove_phone_numbers', 'تنظيف أرقام الهواتف', '📱'),
             ('remove_empty_lines', 'حذف الأسطر الفارغة', '📝'),
-            ('remove_lines_with_keywords', 'حذف الأسطر بكلمات معينة', '🚫')
+            ('remove_lines_with_keywords', 'حذف الأسطر بكلمات معينة', '🚫'),
+            ('remove_caption', 'حذف توضيحات الوسائط', '📸')
         ]
 
         buttons = []
@@ -3372,7 +3426,8 @@ class SimpleTelegramBot:
                 'remove_hashtags': 'hashtags',
                 'remove_phone_numbers': 'phone',
                 'remove_empty_lines': 'empty',
-                'remove_lines_with_keywords': 'keywords'
+                'remove_lines_with_keywords': 'keywords',
+                'remove_caption': 'caption'
             }
             
             callback_id = callback_map.get(setting_key, setting_key)
@@ -3409,7 +3464,8 @@ class SimpleTelegramBot:
             'hashtags': 'remove_hashtags',
             'phone': 'remove_phone_numbers',
             'empty': 'remove_empty_lines',
-            'keywords': 'remove_lines_with_keywords'
+            'keywords': 'remove_lines_with_keywords',
+            'caption': 'remove_caption'
         }
 
         db_setting = setting_map.get(setting_type)
@@ -3430,7 +3486,8 @@ class SimpleTelegramBot:
                 'remove_hashtags': 'حذف الهاشتاقات',
                 'remove_phone_numbers': 'تنظيف أرقام الهواتف',
                 'remove_empty_lines': 'حذف الأسطر الفارغة',
-                'remove_lines_with_keywords': 'حذف الأسطر بكلمات معينة'
+                'remove_lines_with_keywords': 'حذف الأسطر بكلمات معينة',
+                'remove_caption': 'حذف توضيحات الوسائط'
             }
             
             setting_name = setting_names.get(db_setting, db_setting)
@@ -4975,6 +5032,7 @@ class SimpleTelegramBot:
         auto_delete_status = "🟢 مفعل" if settings['auto_delete_enabled'] else "🔴 معطل"
         sync_edit_status = "🟢 مفعل" if settings['sync_edit_enabled'] else "🔴 معطل"
         sync_delete_status = "🟢 مفعل" if settings['sync_delete_enabled'] else "🔴 معطل"
+        split_album_status = "🟢 تقسيم" if settings.get('split_album_enabled', False) else "🔴 إبقاء مجمع"
         
         # Convert seconds to readable format
         delete_time = settings['auto_delete_time']
@@ -4985,10 +5043,13 @@ class SimpleTelegramBot:
         else:
             time_display = f"{delete_time} ثانية"
 
+
+
         buttons = [
             [Button.inline(f"🔗 معاينة الرابط ({link_preview_status})", f"toggle_link_preview_{task_id}")],
             [Button.inline(f"📌 تثبيت الرسالة ({pin_message_status})", f"toggle_pin_message_{task_id}")],
             [Button.inline(f"🔔 الإشعارات ({silent_status})", f"toggle_silent_notifications_{task_id}")],
+            [Button.inline(f"📸 الألبومات ({split_album_status})", f"toggle_split_album_{task_id}")],
             [Button.inline(f"🗑️ الحذف التلقائي ({auto_delete_status})", f"toggle_auto_delete_{task_id}")],
             [Button.inline(f"🔄 مزامنة التعديل ({sync_edit_status})", f"toggle_sync_edit_{task_id}")],
             [Button.inline(f"🗂️ مزامنة الحذف ({sync_delete_status})", f"toggle_sync_delete_{task_id}")],
@@ -5011,6 +5072,8 @@ class SimpleTelegramBot:
             f"   └ تثبيت الرسالة في المحادثة الهدف\n\n"
             f"🔔 **الإشعارات**: {silent_status}\n"
             f"   └ إشعار المشتركين عند النشر\n\n"
+            f"📸 **الألبومات**: {split_album_status}\n"
+            f"   └ تفكيك الألبومات أو إبقاؤها مجمعة\n\n"
             f"🗑️ **الحذف التلقائي**: {auto_delete_status}\n"
         )
         
@@ -5122,6 +5185,172 @@ class SimpleTelegramBot:
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
         await event.answer(f"✅ {status_text} مزامنة الحذف")
         await self.show_forwarding_settings(event, task_id)
+
+    async def toggle_split_album(self, event, task_id):
+        """Toggle split album setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_split_album(task_id)
+        
+        status_text = "تم تفعيل تفكيك الألبومات" if new_state else "تم تفعيل إبقاء الألبومات مجمعة"
+        await event.answer(f"✅ {status_text}")
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        await self.show_forwarding_settings(event, task_id)
+
+    # ===== Translation Settings =====
+    
+    async def show_translation_settings(self, event, task_id):
+        """Show translation settings for task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_translation_settings(task_id)
+
+        message = f"🌐 إعدادات الترجمة للمهمة: {task_name}\n\n"
+        
+        if settings['enabled']:
+            message += "📊 **الحالة**: 🟢 مفعل\n\n"
+            message += f"🗣️ **لغة المصدر**: {settings['source_language']}\n"
+            message += f"🎯 **لغة الهدف**: {settings['target_language']}\n\n"
+            message += "💡 سيتم ترجمة الرسائل تلقائياً من اللغة المصدر إلى لغة الهدف"
+        else:
+            message += "📊 **الحالة**: 🔴 معطل\n\n"
+            message += "💡 يمكنك تفعيل الترجمة التلقائية للرسائل"
+
+        buttons = [
+            [Button.inline(f"{'❌ تعطيل' if settings['enabled'] else '✅ تفعيل'} الترجمة", f"toggle_translation_{task_id}")],
+        ]
+        
+        if settings['enabled']:
+            buttons.extend([
+                [Button.inline(f"🗣️ تغيير لغة المصدر ({settings['source_language']})", f"set_translation_source_{task_id}")],
+                [Button.inline(f"🎯 تغيير لغة الهدف ({settings['target_language']})", f"set_translation_target_{task_id}")],
+            ])
+
+        buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
+
+        await event.edit(message, buttons=buttons)
+
+    async def toggle_translation(self, event, task_id):
+        """Toggle translation setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        settings = self.db.get_translation_settings(task_id)
+        new_status = not settings['enabled']
+        
+        success = self.db.update_translation_settings(task_id, enabled=new_status)
+
+        if success:
+            status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+            await event.answer(f"✅ {status_text} الترجمة التلقائية")
+
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+
+            await self.show_translation_settings(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير إعداد الترجمة")
+
+    async def set_translation_language(self, event, task_id, setting):
+        """Start setting translation language (source or target)"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        current_settings = self.db.get_translation_settings(task_id)
+        
+        setting_name = "لغة المصدر" if setting == "source" else "لغة الهدف"
+        current_lang = current_settings['source_language'] if setting == "source" else current_settings['target_language']
+
+        # Language options
+        languages = [
+            ('ar', 'العربية', '🇸🇦'),
+            ('en', 'English', '🇺🇸'),
+            ('es', 'Español', '🇪🇸'),
+            ('fr', 'Français', '🇫🇷'),
+            ('de', 'Deutsch', '🇩🇪'),
+            ('it', 'Italiano', '🇮🇹'),
+            ('pt', 'Português', '🇵🇹'),
+            ('ru', 'Русский', '🇷🇺'),
+            ('zh', '中文', '🇨🇳'),
+            ('ja', '日本語', '🇯🇵'),
+            ('ko', '한국어', '🇰🇷'),
+            ('hi', 'हिन्दी', '🇮🇳'),
+            ('tr', 'Türkçe', '🇹🇷'),
+            ('auto', 'تلقائي', '🔍')
+        ]
+
+        buttons = []
+        for code, name, flag in languages:
+            status = " ✅" if code == current_lang else ""
+            buttons.append([Button.inline(f"{flag} {name}{status}", f"set_lang_{setting}_{task_id}_{code}")])
+
+        buttons.append([Button.inline("🔙 رجوع لإعدادات الترجمة", f"translation_settings_{task_id}")])
+
+        message = f"🌐 تعديل {setting_name}\n"
+        message += f"📝 المهمة: {task_name}\n\n"
+        message += f"📊 اللغة الحالية: {current_lang}\n\n"
+        message += "🗂️ اختر اللغة الجديدة:"
+
+        await event.edit(message, buttons=buttons)
+
+    async def set_specific_language(self, event, task_id, setting, language_code):
+        """Set specific language for translation"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Update the language setting
+        if setting == "source":
+            success = self.db.update_translation_settings(task_id, source_language=language_code)
+            setting_name = "لغة المصدر"
+        else:
+            success = self.db.update_translation_settings(task_id, target_language=language_code)
+            setting_name = "لغة الهدف"
+
+        if success:
+            # Get language name
+            languages = {
+                'ar': 'العربية', 'en': 'English', 'es': 'Español', 'fr': 'Français',
+                'de': 'Deutsch', 'it': 'Italiano', 'pt': 'Português', 'ru': 'Русский',
+                'zh': '中文', 'ja': '日本語', 'ko': '한국어', 'hi': 'हिन्दी',
+                'tr': 'Türkçe', 'auto': 'تلقائي'
+            }
+            language_name = languages.get(language_code, language_code)
+            
+            await event.answer(f"✅ تم تحديث {setting_name} إلى: {language_name}")
+
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+
+            await self.show_translation_settings(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث اللغة")
 
     async def start_set_auto_delete_time(self, event, task_id):
         """Start setting auto delete time"""

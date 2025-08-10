@@ -14,6 +14,14 @@ from database.database import Database
 from bot_package.config import API_ID, API_HASH
 import time
 
+# Import translation service
+try:
+    from googletrans import Translator
+    TRANSLATION_AVAILABLE = True
+except ImportError:
+    TRANSLATION_AVAILABLE = False
+    logger.warning("⚠️ googletrans غير متوفر - الترجمة معطلة")
+
 logger = logging.getLogger(__name__)
 
 class UserbotService:
@@ -359,8 +367,11 @@ class UserbotService:
                         cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
                         modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
 
+                        # Apply translation if enabled
+                        translated_text = await self.apply_translation(task['id'], modified_text) if modified_text else modified_text
+
                         # Apply text formatting
-                        formatted_text = self.apply_text_formatting(task['id'], modified_text) if modified_text else modified_text
+                        formatted_text = self.apply_text_formatting(task['id'], translated_text) if translated_text else translated_text
 
                         # Apply header and footer formatting
                         final_text = self.apply_message_formatting(formatted_text, message_settings)
@@ -368,7 +379,8 @@ class UserbotService:
                         # Check if we need to use copy mode due to formatting
                         requires_copy_mode = (
                             original_text != modified_text or  # Text replacements applied
-                            modified_text != formatted_text or  # Text formatting applied
+                            modified_text != translated_text or  # Translation applied
+                            translated_text != formatted_text or  # Text formatting applied
                             message_settings['header_enabled'] or  # Header enabled
                             message_settings['footer_enabled'] or  # Footer enabled
                             message_settings['inline_buttons_enabled']  # Inline buttons enabled
@@ -858,6 +870,59 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في تطبيق الاستبدالات النصية: {e}")
             return message_text  # Return original text on error
+
+    async def apply_translation(self, task_id: int, message_text: str) -> str:
+        """Apply translation to message text if enabled"""
+        if not message_text or not TRANSLATION_AVAILABLE:
+            return message_text
+
+        try:
+            # Get translation settings for this task
+            settings = self.db.get_translation_settings(task_id)
+            
+            if not settings or not settings.get('enabled', False):
+                return message_text
+
+            source_lang = settings.get('source_language', 'auto')
+            target_lang = settings.get('target_language', 'en')
+
+            # Skip translation if source and target are the same
+            if source_lang == target_lang and source_lang != 'auto':
+                logger.debug(f"🌐 تجاهل الترجمة: اللغة المصدر والهدف متشابهة ({source_lang})")
+                return message_text
+
+            # Create translator instance
+            translator = Translator()
+            
+            # Perform translation
+            logger.info(f"🌐 بدء ترجمة النص من {source_lang} إلى {target_lang} للمهمة {task_id}")
+            
+            # Detect language if source is auto
+            if source_lang == 'auto':
+                detected = translator.detect(message_text)
+                detected_lang = detected.lang
+                logger.info(f"🔍 تم اكتشاف اللغة: {detected_lang} (ثقة: {detected.confidence:.2f})")
+                
+                # Skip translation if detected language is same as target
+                if detected_lang == target_lang:
+                    logger.info(f"🌐 تجاهل الترجمة: النص بالفعل باللغة المطلوبة ({target_lang})")
+                    return message_text
+
+            # Translate the text
+            result = translator.translate(message_text, src=source_lang, dest=target_lang)
+            translated_text = result.text
+
+            if translated_text and translated_text != message_text:
+                logger.info(f"🌐 تم ترجمة النص بنجاح للمهمة {task_id}: '{message_text[:50]}...' → '{translated_text[:50]}...'")
+                return translated_text
+            else:
+                logger.debug(f"🌐 لم تتم الترجمة: النص مطابق أو فارغ")
+                return message_text
+
+        except Exception as e:
+            logger.error(f"❌ خطأ في ترجمة النص للمهمة {task_id}: {e}")
+            # Return original text on translation error
+            return message_text
 
     def get_message_settings(self, task_id: int) -> dict:
         """Get message formatting settings for a task"""
