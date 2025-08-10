@@ -22,6 +22,13 @@ Preferred communication style: Simple, everyday language.
   - **USER INPUT HANDLING**: Added proper user state management for threshold and time window input
   - **FULLY FUNCTIONAL**: All buttons respond correctly and filtering works as expected
 
+- **LANGUAGE FILTER FIXES COMPLETED**: Fixed critical issues preventing language filter from working:
+  - **USERBOT INTEGRATION**: Added language filter check to _check_message_advanced_filters function
+  - **LANGUAGE DETECTION**: Implemented smart language detection based on character analysis (Arabic, English, Russian, etc.)
+  - **BLOCK/ALLOW LOGIC**: Properly implemented filter logic for both allow and block modes
+  - **CUSTOM LANGUAGE INPUT**: Fixed bot handler to properly respond to custom language codes (en, ar, etc.)
+  - **TESTING VERIFIED**: Language filter now blocks English messages in block mode as expected
+
 - **TRANSLATION BYPASS FOR FORWARD MODE**: Added intelligent translation bypass when forwarding mode is set to "forward" (not copy):
   - **FORWARD MODE**: Skips translation completely and sends message as-is to preserve original content
   - **COPY MODE**: Applies translation normally with all text processing features

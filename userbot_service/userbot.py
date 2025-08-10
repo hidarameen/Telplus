@@ -1566,6 +1566,13 @@ class UserbotService:
                     logger.info(f"🔄 رسالة مكررة - سيتم حظرها (فلتر التكرار)")
                     should_block = True
             
+            # Check language filter
+            if not should_block and advanced_settings.get('language_filter_enabled', False):
+                language_blocked = await self._check_language_filter(task_id, message)
+                if language_blocked:
+                    logger.info(f"🌍 رسالة محظورة بواسطة فلتر اللغة")
+                    should_block = True
+            
             return should_block, should_remove_buttons, should_remove_forward
             
         except Exception as e:
@@ -1683,6 +1690,102 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في حساب تشابه النص: {e}")
             return 0.0
+
+    async def _check_language_filter(self, task_id: int, message) -> bool:
+        """Check if message should be blocked by language filter"""
+        try:
+            # Get language filter data
+            language_data = self.db.get_language_filters(task_id)
+            filter_mode = language_data['mode']  # 'allow' or 'block'
+            languages = language_data['languages']
+            
+            # If no languages configured, don't block
+            if not languages:
+                logger.debug(f"🌍 لا توجد لغات محددة في الفلتر للمهمة {task_id}")
+                return False
+            
+            # Extract message text
+            message_text = message.message or ""
+            if not message_text.strip():
+                logger.debug(f"🌍 رسالة بدون نص - لن يتم فلترتها")
+                return False
+            
+            # Simple language detection based on script/characters
+            detected_language = self._detect_message_language(message_text)
+            logger.info(f"🌍 لغة الرسالة المكتشفة: {detected_language}")
+            
+            # Check if language is in filter list
+            selected_languages = [lang['language_code'] for lang in languages if lang['is_allowed']]
+            is_language_selected = detected_language in selected_languages
+            
+            logger.info(f"🌍 فلتر اللغة - الوضع: {filter_mode}, اللغة المكتشفة: {detected_language}, اللغات المحددة: {selected_languages}")
+            
+            # Apply filter logic
+            if filter_mode == 'allow':
+                # Allow mode: block if language NOT in selected list
+                should_block = not is_language_selected
+                if should_block:
+                    logger.info(f"🚫 حظر الرسالة - وضع السماح: اللغة {detected_language} غير مسموحة")
+            else:  # block mode
+                # Block mode: block if language IS in selected list
+                should_block = is_language_selected  
+                if should_block:
+                    logger.info(f"🚫 حظر الرسالة - وضع الحظر: اللغة {detected_language} محظورة")
+            
+            return should_block
+            
+        except Exception as e:
+            logger.error(f"خطأ في فحص فلتر اللغة: {e}")
+            return False
+
+    def _detect_message_language(self, text: str) -> str:
+        """Simple language detection based on character analysis"""
+        try:
+            # Remove spaces and punctuation for analysis
+            clean_text = ''.join(c for c in text if c.isalpha())
+            
+            if not clean_text:
+                return 'unknown'
+            
+            # Count character types
+            arabic_chars = sum(1 for c in clean_text if '\u0600' <= c <= '\u06FF' or '\u0750' <= c <= '\u077F')
+            latin_chars = sum(1 for c in clean_text if 'a' <= c.lower() <= 'z')
+            cyrillic_chars = sum(1 for c in clean_text if '\u0400' <= c <= '\u04FF')
+            
+            total_chars = len(clean_text)
+            
+            # Calculate percentages
+            arabic_ratio = arabic_chars / total_chars if total_chars > 0 else 0
+            latin_ratio = latin_chars / total_chars if total_chars > 0 else 0
+            cyrillic_ratio = cyrillic_chars / total_chars if total_chars > 0 else 0
+            
+            logger.debug(f"🔍 تحليل النص: عربي={arabic_ratio:.2f}, لاتيني={latin_ratio:.2f}, كيريلي={cyrillic_ratio:.2f}")
+            
+            # Determine primary language (threshold: 30%)
+            if arabic_ratio > 0.3:
+                return 'ar'
+            elif latin_ratio > 0.3:
+                # Additional check for common English patterns
+                english_words = ['the', 'and', 'or', 'is', 'are', 'was', 'were', 'to', 'of', 'in', 'on', 'at', 'for']
+                text_lower = text.lower()
+                english_count = sum(1 for word in english_words if word in text_lower)
+                if english_count >= 2 or 'english' in text_lower:
+                    return 'en'
+                return 'en'  # Default to English for Latin script
+            elif cyrillic_ratio > 0.3:
+                return 'ru'
+            else:
+                # For mixed or unclear text, try to detect by common patterns
+                text_lower = text.lower()
+                if any(word in text_lower for word in ['hello', 'hi', 'good', 'yes', 'no', 'thank']):
+                    return 'en'
+                elif any(word in text_lower for word in ['مرحبا', 'أهلا', 'نعم', 'لا', 'شكرا']):
+                    return 'ar'
+                return 'unknown'
+                
+        except Exception as e:
+            logger.error(f"خطأ في كشف اللغة: {e}")
+            return 'unknown'
 
     async def stop_user(self, user_id: int):
         """Stop userbot for specific user"""
