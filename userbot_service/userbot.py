@@ -541,6 +541,9 @@ class UserbotService:
                         media_to_send = event.message.media
                         reply_markup = original_reply_markup or inline_buttons
 
+                        # Get watermark settings first
+                        watermark_settings = self.db.get_watermark_settings(task['id'])
+                        
                         # Apply watermark if enabled
                         if watermark_settings.get('enabled', False):
                             logger.info(f"🏷️ بدء تطبيق العلامة المائية على الوسائط...")
