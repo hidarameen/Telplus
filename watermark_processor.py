@@ -21,8 +21,8 @@ class WatermarkProcessor:
         self.supported_image_formats = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp']
         self.supported_video_formats = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv']
         
-    def calculate_position(self, base_size: Tuple[int, int], watermark_size: Tuple[int, int], position: str) -> Tuple[int, int]:
-        """حساب موقع العلامة المائية على الصورة/الفيديو"""
+    def calculate_position(self, base_size: Tuple[int, int], watermark_size: Tuple[int, int], position: str, offset_x: int = 0, offset_y: int = 0) -> Tuple[int, int]:
+        """حساب موقع العلامة المائية على الصورة/الفيديو مع الإزاحة اليدوية"""
         base_width, base_height = base_size
         watermark_width, watermark_height = watermark_size
         
@@ -39,7 +39,15 @@ class WatermarkProcessor:
             'center': ((base_width - watermark_width) // 2, (base_height - watermark_height) // 2)
         }
         
-        return position_map.get(position, position_map['bottom_right'])
+        base_position = position_map.get(position, position_map['bottom_right'])
+        
+        # إضافة الإزاحة اليدوية مع التأكد من البقاء داخل حدود الصورة
+        final_x = max(0, min(base_position[0] + offset_x, base_width - watermark_width))
+        final_y = max(0, min(base_position[1] + offset_y, base_height - watermark_height))
+        
+        logger.info(f"📍 الموقع الأساسي: {base_position}, الإزاحة: ({offset_x}, {offset_y}), الموقع النهائي: ({final_x}, {final_y})")
+        
+        return (final_x, final_y)
     
     def create_text_watermark(self, text: str, font_size: int, color: str, opacity: int, 
                             image_size: Tuple[int, int]) -> Image.Image:
@@ -254,8 +262,10 @@ class WatermarkProcessor:
                 logger.warning("فشل في إنشاء العلامة المائية")
                 return image_bytes
             
-            # حساب موقع العلامة المائية
-            position = self.calculate_position(image.size, watermark.size, watermark_settings['position'])
+            # حساب موقع العلامة المائية مع الإزاحة اليدوية
+            offset_x = watermark_settings.get('offset_x', 0)
+            offset_y = watermark_settings.get('offset_y', 0)
+            position = self.calculate_position(image.size, watermark.size, watermark_settings['position'], offset_x, offset_y)
             
             # تطبيق العلامة المائية
             if image.mode == 'RGBA':

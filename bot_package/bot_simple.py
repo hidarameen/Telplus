@@ -442,6 +442,78 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل حجم خط العلامة المائية: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_default_up_"): # Increase default watermark size
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.adjust_watermark_default_size(event, task_id, increase=True)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة الحجم الافتراضي: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_default_down_"): # Decrease default watermark size
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.adjust_watermark_default_size(event, task_id, increase=False)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل الحجم الافتراضي: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_apply_default_"): # Apply default size
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.apply_default_watermark_size(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتطبيق الحجم الافتراضي: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_offset_left_"): # Move watermark left
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.adjust_watermark_offset(event, task_id, axis='x', increase=False)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة يساراً: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_offset_right_"): # Move watermark right
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.adjust_watermark_offset(event, task_id, axis='x', increase=True)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة يميناً: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_offset_up_"): # Move watermark up
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.adjust_watermark_offset(event, task_id, axis='y', increase=False)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة أعلى: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_offset_down_"): # Move watermark down
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.adjust_watermark_offset(event, task_id, axis='y', increase=True)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة أسفل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_reset_offset_"): # Reset watermark offset
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.reset_watermark_offset(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعادة تعيين الإزاحة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_position_selector_"): # Show watermark position selector
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -3037,6 +3109,10 @@ class SimpleTelegramBot:
         opacity = watermark_settings.get('opacity', 70)
         font_size = watermark_settings.get('font_size', 32)
         
+        default_size = watermark_settings.get('default_size', 50)
+        offset_x = watermark_settings.get('offset_x', 0)
+        offset_y = watermark_settings.get('offset_y', 0)
+        
         buttons = [
             [
                 Button.inline("🔺", f"watermark_size_up_{task_id}"),
@@ -3053,6 +3129,23 @@ class SimpleTelegramBot:
                 Button.inline(f"الخط: {font_size}px", f"watermark_appearance_info_{task_id}"),
                 Button.inline("🔻", f"watermark_font_down_{task_id}")
             ],
+            [
+                Button.inline("🔺", f"watermark_default_up_{task_id}"),
+                Button.inline(f"افتراضي: {default_size}%", f"watermark_default_info_{task_id}"),
+                Button.inline("🔻", f"watermark_default_down_{task_id}")
+            ],
+            [
+                Button.inline("⬅️", f"watermark_offset_left_{task_id}"),
+                Button.inline(f"إزاحة أفقية: {offset_x}", f"watermark_offset_info_{task_id}"),
+                Button.inline("➡️", f"watermark_offset_right_{task_id}")
+            ],
+            [
+                Button.inline("⬆️", f"watermark_offset_up_{task_id}"),
+                Button.inline(f"إزاحة عمودية: {offset_y}", f"watermark_offset_info_{task_id}"),
+                Button.inline("⬇️", f"watermark_offset_down_{task_id}")
+            ],
+            [Button.inline("🎯 تطبيق الحجم الافتراضي", f"watermark_apply_default_{task_id}")],
+            [Button.inline("🔄 إعادة تعيين الإزاحة", f"watermark_reset_offset_{task_id}")],
             [Button.inline("📍 تغيير الموقع", f"watermark_position_selector_{task_id}")],
             [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
         ]
@@ -3061,9 +3154,14 @@ class SimpleTelegramBot:
             f"🎨 إعدادات مظهر العلامة المائية - المهمة #{task_id}\n\n"
             f"📏 **الحجم الحالي**: {size}% (المدى: 5-100%)\n"
             f"🌫️ **الشفافية**: {opacity}% (المدى: 10-100%)\n"
-            f"📝 **حجم الخط**: {font_size}px (المدى: 12-72px)\n\n"
+            f"📝 **حجم الخط**: {font_size}px (المدى: 12-72px)\n"
+            f"🎯 **الحجم الافتراضي**: {default_size}% (المدى: 5-100%)\n"
+            f"➡️ **الإزاحة الأفقية**: {offset_x} (المدى: -200 إلى +200)\n"
+            f"⬇️ **الإزاحة العمودية**: {offset_y} (المدى: -200 إلى +200)\n\n"
+            f"ℹ️ **الحجم الذكي**: عند 100% تغطي العلامة المائية العرض الكامل\n"
+            f"🎛️ **الإزاحة اليدوية**: تحريك العلامة المائية بدقة من موقعها الأساسي\n"
             f"🔧 **التحكم**: استخدم الأزرار أعلاه لتعديل الإعدادات\n"
-            f"🔺 زيادة القيمة\n"
+            f"🔺 زيادة القيمة / ⬅️➡️⬆️⬇️ التحريك\n"
             f"🔻 تقليل القيمة",
             buttons=buttons
         )
@@ -3080,6 +3178,70 @@ class SimpleTelegramBot:
         
         self.db.update_watermark_settings(task_id, size_percentage=new_size)
         await event.answer(f"✅ تم تعديل الحجم إلى {new_size}%")
+        
+        # Refresh display
+        await self.show_watermark_appearance(event, task_id)
+
+    async def adjust_watermark_default_size(self, event, task_id, increase=True):
+        """Adjust watermark default size"""
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        current_default = watermark_settings.get('default_size', 50)
+        
+        if increase:
+            new_default = min(100, current_default + 5)  # Max 100%
+        else:
+            new_default = max(5, current_default - 5)    # Min 5%
+        
+        self.db.update_watermark_settings(task_id, default_size=new_default)
+        await event.answer(f"✅ تم تعديل الحجم الافتراضي إلى {new_default}%")
+        
+        # Refresh display
+        await self.show_watermark_appearance(event, task_id)
+
+    async def apply_default_watermark_size(self, event, task_id):
+        """Apply default watermark size to current size"""
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        default_size = watermark_settings.get('default_size', 50)
+        
+        self.db.update_watermark_settings(task_id, size_percentage=default_size)
+        await event.answer(f"✅ تم تطبيق الحجم الافتراضي {default_size}%")
+        
+        # Refresh display
+        await self.show_watermark_appearance(event, task_id)
+
+    async def adjust_watermark_offset(self, event, task_id, axis='x', increase=True):
+        """Adjust watermark offset position"""
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        
+        if axis == 'x':
+            current_offset = watermark_settings.get('offset_x', 0)
+            if increase:
+                new_offset = min(200, current_offset + 10)  # Max +200px
+            else:
+                new_offset = max(-200, current_offset - 10)  # Min -200px
+            
+            self.db.update_watermark_settings(task_id, offset_x=new_offset)
+            direction = "يمين" if increase else "يسار"
+            await event.answer(f"✅ تم تحريك العلامة المائية {direction} إلى {new_offset}px")
+            
+        else:  # axis == 'y'
+            current_offset = watermark_settings.get('offset_y', 0)
+            if increase:
+                new_offset = min(200, current_offset + 10)  # Max +200px
+            else:
+                new_offset = max(-200, current_offset - 10)  # Min -200px
+            
+            self.db.update_watermark_settings(task_id, offset_y=new_offset)
+            direction = "أسفل" if increase else "أعلى"
+            await event.answer(f"✅ تم تحريك العلامة المائية {direction} إلى {new_offset}px")
+        
+        # Refresh display
+        await self.show_watermark_appearance(event, task_id)
+
+    async def reset_watermark_offset(self, event, task_id):
+        """Reset watermark offset to center position"""
+        self.db.update_watermark_settings(task_id, offset_x=0, offset_y=0)
+        await event.answer("✅ تم إعادة تعيين الإزاحة إلى المركز")
         
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
