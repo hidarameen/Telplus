@@ -3731,15 +3731,27 @@ class SimpleTelegramBot:
                 [Button.inline("⚙️ الإعدادات", "settings"), Button.inline("🏠 الرئيسية", "main_menu")]
             ]
 
-            await event.edit(status_message, buttons=buttons)
+            try:
+                await event.edit(status_message, buttons=buttons)
+            except Exception as edit_error:
+                # If edit fails, send new message
+                await event.respond(status_message, buttons=buttons)
 
         except Exception as e:
             logger.error(f"خطأ في فحص حالة UserBot للمستخدم {user_id}: {e}")
-            await event.edit(
-                f"❌ **خطأ في فحص حالة UserBot**\n\n"
-                f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول",
-                buttons=[[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
-            )
+            try:
+                await event.edit(
+                    f"❌ **خطأ في فحص حالة UserBot**\n\n"
+                    f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول",
+                    buttons=[[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
+                )
+            except:
+                # If edit fails, send new message
+                await event.respond(
+                    f"❌ **خطأ في فحص حالة UserBot**\n\n"
+                    f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول",
+                    buttons=[[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
+                )
 
     async def show_language_settings(self, event):
         """Show language selection menu"""
