@@ -524,8 +524,18 @@ class SimpleTelegramBot:
                         task_id = int(parts[3])
                         position = parts[4]
                         await self.set_watermark_position(event, task_id, position)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد موقع العلامة المائية: {e}")
+                    except (ValueError, IndexError) as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد موقع العلامة المائية: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_watermark_"): # Handler for editing watermark appearance
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        setting_type = parts[2]  # size, opacity, font_size, color
+                        task_id = int(parts[3])
+                        await self.start_edit_watermark_setting(event, task_id, setting_type)
+                    except (ValueError, IndexError) as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحرير العلامة المائية: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("source_admins_"): # Handler for source admins
                 parts = data.split("_")
@@ -1528,6 +1538,22 @@ class SimpleTelegramBot:
             elif state == 'waiting_watermark_image': # Handle setting watermark image
                 task_id = int(data)
                 await self.handle_watermark_image_input(event, task_id)
+                return
+            elif state == 'waiting_watermark_size': # Handle setting watermark size
+                task_id = int(data)
+                await self.handle_watermark_setting_input(event, task_id, 'size', event.text)
+                return
+            elif state == 'waiting_watermark_opacity': # Handle setting watermark opacity
+                task_id = int(data)
+                await self.handle_watermark_setting_input(event, task_id, 'opacity', event.text)
+                return
+            elif state == 'waiting_watermark_font_size': # Handle setting watermark font size
+                task_id = int(data)
+                await self.handle_watermark_setting_input(event, task_id, 'font_size', event.text)
+                return
+            elif state == 'waiting_watermark_color': # Handle setting watermark color
+                task_id = int(data)
+                await self.handle_watermark_setting_input(event, task_id, 'color', event.text)
                 return
             elif state == 'waiting_text_replacements': # Handle adding text replacements
                 task_id = int(data)
@@ -6295,7 +6321,7 @@ class SimpleTelegramBot:
         buttons = [
             [Button.inline("📏 تعديل الحجم", f"edit_watermark_size_{task_id}")],
             [Button.inline("🔍 تعديل الشفافية", f"edit_watermark_opacity_{task_id}")],
-            [Button.inline("🖋️ تعديل حجم الخط", f"edit_watermark_font_size_{task_id}")],
+            [Button.inline("🖋️ تعديل حجم الخط", f"edit_watermark_font_{task_id}")],
             [Button.inline("🎨 تعديل اللون", f"edit_watermark_color_{task_id}")],
             [Button.inline("🔙 عودة للتكوين", f"watermark_config_{task_id}")]
         ]
@@ -6381,7 +6407,12 @@ class SimpleTelegramBot:
                     return
                 
                 # Check file type
-                file_name = getattr(file, 'attributes', [{}])[0].get('file_name', '') if hasattr(file, 'attributes') else ''
+                file_name = ''
+                if hasattr(file, 'attributes') and file.attributes:
+                    for attr in file.attributes:
+                        if hasattr(attr, 'file_name'):
+                            file_name = attr.file_name
+                            break
                 if not file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
                     await event.respond("❌ يجب أن تكون الصورة بصيغة PNG, JPG, JPEG أو WebP")
                     return
@@ -6413,6 +6444,162 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"خطأ في معالجة صورة العلامة المائية: {e}")
             await event.respond("❌ حدث خطأ في معالجة الصورة")
+
+    async def start_edit_watermark_setting(self, event, task_id, setting_type):
+        """Start editing a specific watermark setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get current settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        
+        if setting_type == "size":
+            current_value = watermark_settings.get('size_percentage', 10)
+            self.db.set_conversation_state(user_id, 'waiting_watermark_size', str(task_id))
+            message = (
+                f"📏 تعديل حجم العلامة المائية - المهمة #{task_id}\n\n"
+                f"📊 **الحجم الحالي**: {current_value}%\n\n"
+                f"✍️ أدخل الحجم الجديد (من 5 إلى 50):\n\n"
+                f"💡 **أمثلة**:\n"
+                f"• 10 = حجم صغير\n"
+                f"• 20 = حجم متوسط\n"
+                f"• 30 = حجم كبير\n\n"
+                f"❌ أرسل 'إلغاء' للخروج"
+            )
+        elif setting_type == "opacity":
+            current_value = watermark_settings.get('opacity', 70)
+            self.db.set_conversation_state(user_id, 'waiting_watermark_opacity', str(task_id))
+            message = (
+                f"🔍 تعديل شفافية العلامة المائية - المهمة #{task_id}\n\n"
+                f"👁️ **الشفافية الحالية**: {current_value}%\n\n"
+                f"✍️ أدخل درجة الشفافية الجديدة (من 10 إلى 100):\n\n"
+                f"💡 **أمثلة**:\n"
+                f"• 30 = شفاف جداً\n"
+                f"• 50 = شفاف متوسط\n"
+                f"• 80 = غير شفاف\n\n"
+                f"❌ أرسل 'إلغاء' للخروج"
+            )
+        elif setting_type == "font":
+            current_value = watermark_settings.get('font_size', 24)
+            self.db.set_conversation_state(user_id, 'waiting_watermark_font_size', str(task_id))
+            message = (
+                f"🖋️ تعديل حجم خط العلامة المائية - المهمة #{task_id}\n\n"
+                f"📝 **حجم الخط الحالي**: {current_value}px\n\n"
+                f"✍️ أدخل حجم الخط الجديد (من 12 إلى 72):\n\n"
+                f"💡 **أمثلة**:\n"
+                f"• 18 = خط صغير\n"
+                f"• 24 = خط متوسط\n"
+                f"• 36 = خط كبير\n\n"
+                f"❌ أرسل 'إلغاء' للخروج"
+            )
+        elif setting_type == "color":
+            current_value = watermark_settings.get('text_color', '#FFFFFF')
+            self.db.set_conversation_state(user_id, 'waiting_watermark_color', str(task_id))
+            message = (
+                f"🎨 تعديل لون العلامة المائية - المهمة #{task_id}\n\n"
+                f"🎨 **اللون الحالي**: {current_value}\n\n"
+                f"✍️ أدخل كود اللون الجديد:\n\n"
+                f"💡 **أمثلة على الألوان**:\n"
+                f"• #FFFFFF = أبيض\n"
+                f"• #000000 = أسود\n"
+                f"• #FF0000 = أحمر\n"
+                f"• #00FF00 = أخضر\n"
+                f"• #0000FF = أزرق\n\n"
+                f"❌ أرسل 'إلغاء' للخروج"
+            )
+        else:
+            await event.answer("❌ نوع إعداد غير صالح")
+            return
+
+        await event.edit(
+            message,
+            buttons=[[Button.inline("❌ إلغاء", f"watermark_appearance_{task_id}")]]
+        )
+
+    async def handle_watermark_setting_input(self, event, task_id, setting_type, value):
+        """Handle watermark setting input"""
+        user_id = event.sender_id
+        
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
+        
+        # Check if user wants to cancel
+        if value.lower() in ['إلغاء', 'cancel']:
+            await event.respond("❌ تم إلغاء التعديل")
+            await self.show_watermark_appearance_settings(event, task_id)
+            return
+        
+        try:
+            if setting_type in ['size', 'opacity', 'font_size']:
+                # Validate numeric input
+                numeric_value = int(value)
+                
+                if setting_type == 'size':
+                    if not (5 <= numeric_value <= 50):
+                        await event.respond("❌ يجب أن يكون الحجم بين 5 و 50")
+                        return
+                    success = self.db.update_watermark_settings(task_id, size_percentage=numeric_value)
+                    setting_name = "الحجم"
+                    unit = "%"
+                elif setting_type == 'opacity':
+                    if not (10 <= numeric_value <= 100):
+                        await event.respond("❌ يجب أن تكون الشفافية بين 10 و 100")
+                        return
+                    success = self.db.update_watermark_settings(task_id, opacity=numeric_value)
+                    setting_name = "الشفافية"
+                    unit = "%"
+                elif setting_type == 'font_size':
+                    if not (12 <= numeric_value <= 72):
+                        await event.respond("❌ يجب أن يكون حجم الخط بين 12 و 72")
+                        return
+                    success = self.db.update_watermark_settings(task_id, font_size=numeric_value)
+                    setting_name = "حجم الخط"
+                    unit = "px"
+                
+                if success:
+                    await event.respond(f"✅ تم تحديث {setting_name} إلى: {numeric_value}{unit}")
+                    
+                    # Force refresh UserBot tasks
+                    await self._refresh_userbot_tasks(user_id)
+                    
+                    await self.show_watermark_appearance_settings(event, task_id)
+                else:
+                    await event.respond("❌ فشل في تحديث الإعداد")
+                    
+            elif setting_type == 'color':
+                # Validate color code
+                if not value.startswith('#') or len(value) != 7:
+                    await event.respond("❌ كود اللون غير صالح. يجب أن يكون بصيغة #FFFFFF")
+                    return
+                
+                # Validate hex characters
+                try:
+                    int(value[1:], 16)
+                except ValueError:
+                    await event.respond("❌ كود اللون يحتوي على أحرف غير صالحة")
+                    return
+                
+                success = self.db.update_watermark_settings(task_id, text_color=value.upper())
+                
+                if success:
+                    await event.respond(f"✅ تم تحديث لون النص إلى: {value.upper()}")
+                    
+                    # Force refresh UserBot tasks
+                    await self._refresh_userbot_tasks(user_id)
+                    
+                    await self.show_watermark_appearance_settings(event, task_id)
+                else:
+                    await event.respond("❌ فشل في تحديث اللون")
+                    
+        except ValueError:
+            await event.respond("❌ قيمة غير صالحة. يجب إدخال رقم")
+        except Exception as e:
+            logger.error(f"خطأ في معالجة إعداد العلامة المائية: {e}")
+            await event.respond("❌ حدث خطأ في المعالجة")
     
     async def show_day_filters(self, event, task_id):
         """Show day filters management"""

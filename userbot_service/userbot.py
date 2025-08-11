@@ -1386,6 +1386,22 @@ class UserbotService:
             if not event.message.media:
                 return event.message.media, None
             
+            # Check media type and watermark settings
+            is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
+            is_video = hasattr(event.message.media, 'document') and event.message.media.document and event.message.media.document.mime_type and event.message.media.document.mime_type.startswith('video/')
+            is_document = hasattr(event.message.media, 'document') and event.message.media.document and not is_video
+            
+            # Check if watermark should be applied to this media type
+            if is_photo and not watermark_settings.get('apply_to_photos', True):
+                logger.debug(f"تخطي الصورة - العلامة المائية معطلة للصور في المهمة {task_id}")
+                return event.message.media, None
+            elif is_video and not watermark_settings.get('apply_to_videos', True):
+                logger.debug(f"تخطي الفيديو - العلامة المائية معطلة للفيديوهات في المهمة {task_id}")
+                return event.message.media, None
+            elif is_document and not watermark_settings.get('apply_to_documents', False):
+                logger.debug(f"تخطي المستند - العلامة المائية معطلة للمستندات في المهمة {task_id}")
+                return event.message.media, None
+            
             # Download media
             media_bytes = await event.message.download_media(bytes)
             if not media_bytes:
@@ -1393,14 +1409,24 @@ class UserbotService:
                 return event.message.media, None
             
             # Get file name
-            file_name = getattr(event.message.media, 'document', None)
-            if hasattr(file_name, 'attributes'):
-                for attr in file_name.attributes:
-                    if hasattr(attr, 'file_name'):
-                        file_name = attr.file_name
-                        break
-            else:
-                file_name = "media_file"
+            file_name = "media_file"
+            if is_photo:
+                file_name = "photo.jpg"
+            elif hasattr(event.message.media, 'document') and event.message.media.document:
+                doc = event.message.media.document
+                if hasattr(doc, 'attributes'):
+                    for attr in doc.attributes:
+                        if hasattr(attr, 'file_name') and attr.file_name:
+                            file_name = attr.file_name
+                            break
+                # Fallback to mime type extension
+                if file_name == "media_file" and doc.mime_type:
+                    if doc.mime_type.startswith('video/'):
+                        file_name = "video.mp4"
+                    elif doc.mime_type.startswith('image/'):
+                        file_name = "image.jpg"
+            
+            logger.info(f"🏷️ تطبيق العلامة المائية على {file_name} للمهمة {task_id}")
             
             # Apply watermark
             watermarked_media = self.watermark_processor.process_media_with_watermark(
