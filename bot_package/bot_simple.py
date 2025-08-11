@@ -1492,21 +1492,38 @@ class SimpleTelegramBot:
         translation_status = "🟢" if translation_settings['enabled'] else "🔴"
 
         buttons = [
-            [Button.inline(f"🔄 تغيير وضع التوجيه ({forward_mode_text})", f"toggle_forward_mode_{task_id}")],
-            [Button.inline(f"📥 إدارة المصادر ({sources_count})", f"manage_sources_{task_id}")],
-            [Button.inline(f"📤 إدارة الأهداف ({targets_count})", f"manage_targets_{task_id}")],
-            [Button.inline("🔧 إعدادات التوجيه", f"forwarding_settings_{task_id}")],
-            [Button.inline("🎬 فلاتر الوسائط", f"media_filters_{task_id}")],
-            [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}")],
-            [Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
-            [Button.inline("🧹 تنظيف النصوص", f"text_cleaning_{task_id}")],
-            [Button.inline(f"{translation_status} ترجمة النصوص", f"translation_settings_{task_id}")],
-            [Button.inline(f"{formatting_status} تنسيق النصوص", f"text_formatting_{task_id}")],
-            [Button.inline(f"{header_status} رأس الرسالة", f"header_settings_{task_id}")],
-            [Button.inline(f"{footer_status} ذيل الرسالة", f"footer_settings_{task_id}")],
-            [Button.inline(f"{buttons_status} أزرار إنلاين", f"inline_buttons_{task_id}")],
-            [Button.inline("🅰️ الفلاتر المتقدمة", f"advanced_filters_{task_id}")],
-            [Button.inline("⚡ الميزات المتقدمة", f"advanced_features_{task_id}")],
+            # الصف الأول - وضع التوجيه
+            [Button.inline(f"🔄 وضع التوجيه ({forward_mode_text})", f"toggle_forward_mode_{task_id}")],
+            
+            # الصف الثاني - إدارة المصادر والأهداف
+            [Button.inline(f"📥 المصادر ({sources_count})", f"manage_sources_{task_id}"),
+             Button.inline(f"📤 الأهداف ({targets_count})", f"manage_targets_{task_id}")],
+            
+            # الصف الثالث - إعدادات التوجيه والفلاتر
+            [Button.inline("⚙️ إعدادات التوجيه", f"forwarding_settings_{task_id}"),
+             Button.inline("🎬 فلاتر الوسائط", f"media_filters_{task_id}")],
+            
+            # الصف الرابع - فلاتر النصوص
+            [Button.inline("📝 فلاتر الكلمات", f"word_filters_{task_id}"),
+             Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
+            
+            # الصف الخامس - تنظيف وترجمة
+            [Button.inline("🧹 تنظيف النصوص", f"text_cleaning_{task_id}"),
+             Button.inline(f"🌍 ترجمة النصوص {translation_status}", f"translation_settings_{task_id}")],
+            
+            # الصف السادس - تنسيق وأزرار
+            [Button.inline(f"🎨 تنسيق النصوص {formatting_status}", f"text_formatting_{task_id}"),
+             Button.inline(f"🔘 أزرار إنلاين {buttons_status}", f"inline_buttons_{task_id}")],
+            
+            # الصف السابع - رأس وذيل الرسالة
+            [Button.inline(f"📄 رأس الرسالة {header_status}", f"header_settings_{task_id}"),
+             Button.inline(f"📝 ذيل الرسالة {footer_status}", f"footer_settings_{task_id}")],
+            
+            # الصف الثامن - الفلاتر والميزات المتقدمة
+            [Button.inline("🔍 الفلاتر المتقدمة", f"advanced_filters_{task_id}"),
+             Button.inline("⚡ الميزات المتقدمة", f"advanced_features_{task_id}")],
+            
+            # الصف الأخير - العودة
             [Button.inline("🔙 رجوع لتفاصيل المهمة", f"task_manage_{task_id}")]
         ]
 
@@ -3191,30 +3208,52 @@ class SimpleTelegramBot:
         allowed_count = 0
         total_count = len(media_types)
 
-        for media_type, arabic_name in media_types.items():
+        # Build status message and prepare buttons list
+        media_items = list(media_types.items())
+        
+        for media_type, arabic_name in media_items:
             is_allowed = filters.get(media_type, True)
             status_icon = "✅" if is_allowed else "❌"
             if is_allowed:
                 allowed_count += 1
-
             message += f"{status_icon} {arabic_name}\n"
-
-            # Add toggle button
-            toggle_text = "❌ منع" if is_allowed else "✅ سماح"
-            buttons.append([
-                Button.inline(f"{toggle_text} {arabic_name}", f"toggle_media_{task_id}_{media_type}")
-            ])
 
         message += f"\n📊 الإحصائيات: {allowed_count}/{total_count} مسموح\n\n"
         message += "اختر نوع الوسائط لتغيير حالته:"
 
+        # Create buttons in pairs (2 buttons per row)
+        for i in range(0, len(media_items), 2):
+            row_buttons = []
+            
+            for j in range(2):
+                if i + j < len(media_items):
+                    media_type, arabic_name = media_items[i + j]
+                    is_allowed = filters.get(media_type, True)
+                    status_emoji = "✅" if is_allowed else "❌"
+                    
+                    # Use shorter button text for better layout
+                    short_names = {
+                        'text': 'نص', 'photo': 'صور', 'video': 'فيديو',
+                        'audio': 'صوت', 'document': 'ملف', 'voice': 'صوتي',
+                        'video_note': 'فيديو دائري', 'sticker': 'ملصق', 'animation': 'متحرك',
+                        'location': 'موقع', 'contact': 'جهة اتصال', 'poll': 'استطلاع'
+                    }
+                    short_name = short_names.get(media_type, arabic_name)
+                    
+                    row_buttons.append(
+                        Button.inline(f"{status_emoji} {short_name}", f"toggle_media_{task_id}_{media_type}")
+                    )
+            
+            if row_buttons:
+                buttons.append(row_buttons)
+
         # Add bulk action buttons
-        buttons.append([
-            Button.inline("✅ السماح للكل", f"allow_all_media_{task_id}"),
-            Button.inline("❌ منع الكل", f"block_all_media_{task_id}")
+        buttons.extend([
+            [Button.inline("✅ السماح للكل", f"allow_all_media_{task_id}"),
+             Button.inline("❌ منع الكل", f"block_all_media_{task_id}")],
+            [Button.inline("🔄 إعادة تعيين افتراضي", f"reset_media_filters_{task_id}")],
+            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ])
-        buttons.append([Button.inline("🔄 إعادة تعيين افتراضي", f"reset_media_filters_{task_id}")])
-        buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
         await event.edit(message, buttons=buttons)
 
@@ -5313,18 +5352,27 @@ class SimpleTelegramBot:
 
 
         buttons = [
-            [Button.inline(f"🔗 معاينة الرابط ({link_preview_status})", f"toggle_link_preview_{task_id}")],
-            [Button.inline(f"📌 تثبيت الرسالة ({pin_message_status})", f"toggle_pin_message_{task_id}")],
-            [Button.inline(f"🔔 الإشعارات ({silent_status})", f"toggle_silent_notifications_{task_id}")],
-            [Button.inline(f"📸 الألبومات ({split_album_status})", f"toggle_split_album_{task_id}")],
-            [Button.inline(f"🗑️ الحذف التلقائي ({auto_delete_status})", f"toggle_auto_delete_{task_id}")],
-            [Button.inline(f"🔄 مزامنة التعديل ({sync_edit_status})", f"toggle_sync_edit_{task_id}")],
-            [Button.inline(f"🗂️ مزامنة الحذف ({sync_delete_status})", f"toggle_sync_delete_{task_id}")],
+            # الصف الأول - معاينة الرابط وتثبيت الرسالة
+            [Button.inline(f"🔗 معاينة الرابط {link_preview_status.split()[0]}", f"toggle_link_preview_{task_id}"),
+             Button.inline(f"📌 تثبيت الرسالة {pin_message_status.split()[0]}", f"toggle_pin_message_{task_id}")],
+            
+            # الصف الثاني - الإشعارات والألبومات
+            [Button.inline(f"🔔 الإشعارات {silent_status.split()[0]}", f"toggle_silent_notifications_{task_id}"),
+             Button.inline(f"📸 الألبومات {split_album_status.split()[0]}", f"toggle_split_album_{task_id}")],
+            
+            # الصف الثالث - الحذف التلقائي ومزامنة التعديل
+            [Button.inline(f"🗑️ حذف تلقائي {auto_delete_status.split()[0]}", f"toggle_auto_delete_{task_id}"),
+             Button.inline(f"🔄 مزامنة التعديل {sync_edit_status.split()[0]}", f"toggle_sync_edit_{task_id}")],
+            
+            # الصف الرابع - مزامنة الحذف
+            [Button.inline(f"🗂️ مزامنة الحذف {sync_delete_status.split()[0]}", f"toggle_sync_delete_{task_id}")],
         ]
         
+        # إضافة زر تعديل المدة إذا كان الحذف التلقائي مفعل
         if settings['auto_delete_enabled']:
-            buttons.append([Button.inline(f"⏰ تعديل المدة ({time_display})", f"set_auto_delete_time_{task_id}")])
+            buttons[-1].append(Button.inline(f"⏰ مدة الحذف ({time_display})", f"set_auto_delete_time_{task_id}"))
             
+        # الصف الأخير - العودة
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
         from datetime import datetime
@@ -5737,13 +5785,22 @@ class SimpleTelegramBot:
         forwarded_status = status_icon(advanced_settings['forwarded_message_filter_enabled'])
         
         buttons = [
-            [Button.inline(f"{day_status} فلتر الأيام", f"day_filters_{task_id}")],
-            [Button.inline(f"{hours_status} ساعات العمل", f"working_hours_filter_{task_id}")],
-            [Button.inline(f"{lang_status} فلتر اللغة", f"language_filters_{task_id}")],
-            [Button.inline(f"{admin_status} فلتر المشرفين", f"admin_filters_{task_id}")],
-            [Button.inline(f"{duplicate_status} فلتر التكرار", f"duplicate_filter_{task_id}")],
-            [Button.inline(f"{inline_btn_status} فلتر الأزرار الشفافة", f"inline_button_filter_{task_id}")],
-            [Button.inline(f"{forwarded_status} فلتر الرسائل المعاد توجيهها", f"forwarded_msg_filter_{task_id}")],
+            # الصف الأول - فلتر الأيام وساعات العمل
+            [Button.inline(f"📅 فلتر الأيام {day_status}", f"day_filters_{task_id}"),
+             Button.inline(f"⏰ ساعات العمل {hours_status}", f"working_hours_filter_{task_id}")],
+            
+            # الصف الثاني - فلتر اللغة والمشرفين
+            [Button.inline(f"🌍 فلتر اللغة {lang_status}", f"language_filters_{task_id}"),
+             Button.inline(f"👮‍♂️ فلتر المشرفين {admin_status}", f"admin_filters_{task_id}")],
+            
+            # الصف الثالث - فلتر التكرار والأزرار
+            [Button.inline(f"🔁 فلتر التكرار {duplicate_status}", f"duplicate_filter_{task_id}"),
+             Button.inline(f"🔘 فلتر الأزرار {inline_btn_status}", f"inline_button_filter_{task_id}")],
+            
+            # الصف الرابع - فلتر الرسائل المعاد توجيهها
+            [Button.inline(f"↪️ فلتر المعاد توجيهه {forwarded_status}", f"forwarded_msg_filter_{task_id}")],
+            
+            # الصف الأخير - العودة
             [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ]
         
@@ -7419,10 +7476,15 @@ class SimpleTelegramBot:
         interval_status = "🟢" if sending_interval['enabled'] else "🔴"
 
         buttons = [
-            [Button.inline(f"{char_status} حد الأحرف", f"character_limit_{task_id}")],
-            [Button.inline(f"{rate_status} حد الرسائل", f"rate_limit_{task_id}")],
-            [Button.inline(f"{delay_status} تأخير التوجيه", f"forwarding_delay_{task_id}")],
-            [Button.inline(f"{interval_status} فاصل الإرسال", f"sending_interval_{task_id}")],
+            # الصف الأول - حد الأحرف وحد الرسائل
+            [Button.inline(f"📏 حد الأحرف {char_status}", f"character_limit_{task_id}"),
+             Button.inline(f"📊 حد الرسائل {rate_status}", f"rate_limit_{task_id}")],
+            
+            # الصف الثاني - تأخير التوجيه وفاصل الإرسال
+            [Button.inline(f"⏱️ تأخير التوجيه {delay_status}", f"forwarding_delay_{task_id}"),
+             Button.inline(f"⏲️ فاصل الإرسال {interval_status}", f"sending_interval_{task_id}")],
+            
+            # الصف الأخير - العودة
             [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ]
 

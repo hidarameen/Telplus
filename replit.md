@@ -8,12 +8,20 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **TASK SETTINGS UI REDESIGN**: Completely redesigned task settings interface with improved organization and visual appeal:
+  - **TWO-COLUMN LAYOUT**: Reorganized all buttons to display 2 buttons per row for better space utilization
+  - **ENHANCED EMOJIS**: Upgraded emoji selection for better visual identification of each feature
+  - **ORGANIZED SECTIONS**: Grouped related settings logically (sources/targets, filters, formatting, etc.)
+  - **CONSISTENT DESIGN**: Applied same layout pattern to all sub-menus (forwarding settings, advanced filters, advanced features, media filters)
+  - **IMPROVED STATUS INDICATORS**: Enhanced visual status indicators throughout all settings menus
+
 - **BOT SETTINGS INTERFACE ENHANCEMENT**: Added comprehensive user preference management in Telegram bot:
   - **LANGUAGE SETTINGS**: Added language change button in main settings menu with 6 language options (Arabic, English, French, German, Spanish, Russian)
   - **TIMEZONE SETTINGS**: Added timezone change button with 24 timezone options covering Middle East, Europe, America, Asia, and Australia
   - **USER PREFERENCES STORAGE**: Integrated with existing user_settings database table for persistent preference storage
   - **REAL-TIME FEEDBACK**: Users receive confirmation messages when settings are successfully changed
   - **NAVIGATION FLOW**: Added proper back navigation between settings menus and main menu
+  - **DUPLICATE BUTTON FIX**: Removed duplicate language/timezone buttons from main menu, keeping them only in settings
 
 - **COMPREHENSIVE FILTER INTERFACE FIXES**: Resolved all major UI responsiveness issues across the filter system:
   - **TOGGLE BUTTONS FIXED**: All filter toggle buttons now properly update interface text and status indicators
