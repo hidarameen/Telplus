@@ -1657,21 +1657,29 @@ class UserbotService:
             # Check for post_author (Telegram's Author Signature feature)
             if hasattr(message, 'post_author') and message.post_author:
                 author_signature = message.post_author.strip()
-                logger.debug(f"👮‍♂️ توقيع المؤلف (Author Signature): {author_signature}")
+                logger.info(f"👮‍♂️ توقيع المؤلف (Author Signature): {author_signature}")
             
-            # If we have a channel message with author signature, use signature matching
-            if str(sender_id).startswith('-100') and author_signature:
-                logger.debug(f"👮‍♂️ رسالة قناة مع توقيع المؤلف: {author_signature}")
+            # Determine if this is a channel message (sender_id is channel ID)
+            is_channel_message = sender_id and str(sender_id).startswith('-100')
+            
+            # For channel messages with author signature, use signature matching
+            if is_channel_message and author_signature:
+                logger.info(f"👮‍♂️ رسالة قناة مع توقيع المؤلف: {author_signature}")
                 return await self._check_admin_by_signature(task_id, author_signature)
             
-            # If we have sender ID and it's not a channel, use ID matching
-            elif sender_id and not str(sender_id).startswith('-100'):
-                logger.debug(f"👮‍♂️ فحص المرسل بالمعرف: {sender_id}")
+            # For user messages (groups), use ID matching
+            elif sender_id and not is_channel_message:
+                logger.info(f"👮‍♂️ فحص المرسل بالمعرف: {sender_id}")
                 return await self._check_admin_by_id(task_id, sender_id)
+            
+            # For channel messages without author signature, allow by default
+            elif is_channel_message and not author_signature:
+                logger.info(f"👮‍♂️ رسالة قناة بدون توقيع المؤلف - سيتم السماح")
+                return False
             
             # If no valid identification method, allow message
             else:
-                logger.debug(f"👮‍♂️ لا يمكن تحديد هوية المرسل - سيتم السماح")
+                logger.info(f"👮‍♂️ لا يمكن تحديد هوية المرسل - سيتم السماح")
                 return False
             
                 
