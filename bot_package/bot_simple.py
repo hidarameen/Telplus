@@ -1126,9 +1126,10 @@ class SimpleTelegramBot:
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_working_hours_mode_"): # Handler for toggling working hours mode
                 parts = data.split("_")
-                if len(parts) >= 5 and parts[4] != 'mode':
+                if len(parts) >= 5:
                     try:
-                        task_id = int(parts[4])
+                        # Extract task_id - it should be the last part
+                        task_id = int(parts[-1])
                         await self.toggle_working_hours_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع ساعات العمل: {e}")
@@ -6782,6 +6783,7 @@ class SimpleTelegramBot:
         if success:
             mode_text = "ساعات النوم" if new_mode == 'sleep_hours' else "ساعات العمل"
             await event.answer(f"✅ تم تغيير الوضع إلى: {mode_text}")
+            # Refresh the working hours interface to show updated mode
             await self.show_working_hours_filter(event, task_id)
         else:
             await event.answer("❌ فشل في تغيير الوضع")
