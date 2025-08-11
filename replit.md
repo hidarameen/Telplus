@@ -4,6 +4,9 @@ This project is a Telegram message forwarding automation system designed to stre
 # User Preferences
 Preferred communication style: Simple, everyday language.
 
+# Recent Changes
+- Fixed watermark filename issue: Images with watermarks were being sent as "unnamed" files without extensions. Added missing `file_name` parameter in the photo watermark sending logic to preserve original filenames and extensions like .jpg, .png, etc. (2025-08-11)
+
 # System Architecture
 ## UI/UX Decisions
 The system features a Flask-based web application with Jinja2 templating and Bootstrap 5, providing full RTL support for its Arabic interface. Client-side interactions utilize vanilla JavaScript for form validation and real-time updates. Custom CSS ensures proper Arabic typography and responsive design. The Telegram bot interface is entirely in Arabic, facilitating intuitive management of forwarding tasks.

@@ -840,6 +840,7 @@ class UserbotService:
                                                             silent=forwarding_settings['silent_notifications'],
                                                             force_document=False,
                                                             buttons=original_reply_markup or inline_buttons,
+                                                            file_name=modified_filename or "photo.jpg",
                                                         )
                                                     else:
                                                         # Send other media types normally
