@@ -1741,6 +1741,15 @@ class SimpleTelegramBot:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
 
+        except Exception as e:
+            import traceback
+            logger.error(f"خطأ في معالج الأزرار: {e}, data='{data}', user_id={user_id}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            try:
+                await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            except:
+                pass  # Sometimes event.answer fails if callback is already processed
+
     async def toggle_advanced_filter(self, event, task_id, filter_type):
         """Toggle advanced filter setting"""
         user_id = event.sender_id
@@ -1900,7 +1909,7 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في تحديد/إلغاء جميع الأيام: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
 
-    async def show_advanced_filters(self, task_id):
+    async def show_advanced_filters(self, event, task_id):
         """Show advanced filters menu"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
