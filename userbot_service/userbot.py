@@ -707,15 +707,18 @@ class UserbotService:
                                             # Apply watermark if enabled
                                             watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
                                             
-                                            forwarded_msg = await client.send_file(
+                                            # استخدام مساعد إرسال الملفات للتعامل مع أسماء الملفات بشكل صحيح
+                                            from send_file_helper import TelethonFileSender
+                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                client,
                                                 target_entity,
                                                 watermarked_media,
+                                                modified_filename or "media_file.jpg",
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
                                                 force_document=False,
                                                 buttons=original_reply_markup or inline_buttons,
-                                                file_name=modified_filename or "media_file",
                                             )
                                         else:
                                             # Keep album grouped: send as new media (copy mode)
@@ -726,15 +729,17 @@ class UserbotService:
                                             logger.info(f"📁 سيتم إرسال الملف باسم: {modified_filename}")
                                             
                                             # In forward mode with requires_copy_mode, we also send as new media
-                                            forwarded_msg = await client.send_file(
+                                            from send_file_helper import TelethonFileSender
+                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                client,
                                                 target_entity,
                                                 watermarked_media,
+                                                modified_filename or "media_file.jpg",
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
                                                 force_document=False,
                                                 buttons=original_reply_markup or inline_buttons,
-                                                file_name=modified_filename or "media_file",
                                             )
                                 else:
                                     # Process spoiler entities if present
@@ -802,25 +807,29 @@ class UserbotService:
                                                 # For photos with watermarks, ensure they're sent as photos
                                                 if is_photo and watermarked_media != event.message.media:
                                                     # Send watermarked photo as photo (not document)
-                                                    forwarded_msg = await client.send_file(
+                                                    from send_file_helper import TelethonFileSender
+                                                    forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                        client,
                                                         target_entity,
                                                         watermarked_media,
+                                                        modified_filename or "photo.jpg",
                                                         caption=caption_text,
                                                         silent=forwarding_settings['silent_notifications'],
                                                         force_document=False,
                                                         buttons=original_reply_markup or inline_buttons,
-                                                        file_name=modified_filename or "photo.jpg",
                                                     )
                                                 else:
                                                     # Send other media types normally
-                                                    forwarded_msg = await client.send_file(
+                                                    from send_file_helper import TelethonFileSender
+                                                    forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                        client,
                                                         target_entity,
                                                         watermarked_media,
+                                                        modified_filename or "media_file.jpg",
                                                         caption=caption_text,
                                                         silent=forwarding_settings['silent_notifications'],
                                                         force_document=False,
                                                         buttons=original_reply_markup or inline_buttons,
-                                                        file_name=modified_filename or "media_file",
                                                     )
                                             else:
                                                 # Keep album grouped
@@ -844,25 +853,29 @@ class UserbotService:
                                                     if is_photo and watermarked_media != event.message.media:
                                                         logger.info(f"📸 إرسال صورة مُعالجة كصورة: {modified_filename}")
                                                         # Send watermarked photo as photo (not document)
-                                                        forwarded_msg = await client.send_file(
+                                                        from send_file_helper import TelethonFileSender
+                                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                            client,
                                                             target_entity,
                                                             watermarked_media,
+                                                            modified_filename or "photo.jpg",
                                                             caption=caption_text,
                                                             silent=forwarding_settings['silent_notifications'],
                                                             force_document=False,
                                                             buttons=original_reply_markup or inline_buttons,
-                                                            file_name=modified_filename or "photo.jpg",
                                                         )
                                                     else:
                                                         # Send other media types normally
-                                                        forwarded_msg = await client.send_file(
+                                                        from send_file_helper import TelethonFileSender
+                                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                            client,
                                                             target_entity,
                                                             watermarked_media,
+                                                            modified_filename or "media_file.jpg",
                                                             caption=caption_text,
                                                             silent=forwarding_settings['silent_notifications'],
                                                             force_document=False,
                                                             buttons=original_reply_markup or inline_buttons,
-                                                            file_name=modified_filename or "media_file",
                                                         )
                                     else:
                                         # Regular text forward
