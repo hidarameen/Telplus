@@ -121,39 +121,40 @@ class WatermarkProcessor:
         
         # حساب المساحة المتاحة للعلامة المائية مع التحسين الذكي
         if size_percentage == 100:
-            # للحجم 100%، استخدم كامل عرض الصورة مع هامش صغير
-            margin_horizontal = base_width * 0.02  # هامش أفقي 2%
-            margin_vertical = base_height * 0.02   # هامش عمودي 2%
-            
-            max_width = base_width - (2 * margin_horizontal)
-            max_height = base_height - (2 * margin_vertical)
-            
-            # للحجم 100%، استخدم كامل العرض المتاح دائماً
-            new_width = int(max_width * 0.96)  # 96% من العرض المتاح
+            # للحجم 100%، أعطِ الأولوية للعرض الكامل
+            new_width = int(base_width * 0.95)  # 95% من عرض الصورة الأساسية
             new_height = int(new_width / aspect_ratio)
             
-            # إذا كان الارتفاع كبير جداً، قلل الحجم قليلاً
-            max_reasonable_height = base_height * 0.25  # لا تتجاوز 25% من الارتفاع
-            if new_height > max_reasonable_height:
-                new_height = int(max_reasonable_height)
-                new_width = int(new_height * aspect_ratio)
+            # تحقق من الارتفاع - إذا كان كبيراً جداً، استخدم استراتيجية مختلفة
+            max_height_limit = base_height * 0.6  # حد أكثر مرونة - 60% من الارتفاع
+            if new_height > max_height_limit:
+                # بدلاً من تصغير العلامة، نبقي العرض ونقلل الارتفاع قليلاً
+                new_height = int(max_height_limit)
+                # لكن نحتفظ بعرض كبير حتى لو كسرنا النسبة قليلاً
+                new_width = int(base_width * 0.90)  # عرض 90% في كل الأحوال
         else:
-            # للنسب المئوية الأخرى، احسب حسب النسبة المطلوبة بطريقة محسنة
+            # للنسب المئوية الأخرى، احسب حسب النسبة المطلوبة مباشرة
             scale_factor = size_percentage / 100.0
             
-            # حساب الحجم بناءً على عرض الصورة بشكل أساسي
+            # حساب الحجم بناءً على عرض الصورة مباشرة
             if position in ['top', 'bottom', 'center']:
-                # للمواضع الأفقية، اعتمد على العرض
-                new_width = int(base_width * scale_factor * 0.8)  # 80% كحد أقصى
+                # للمواضع الأفقية، استخدم النسبة المئوية كاملة من العرض
+                new_width = int(base_width * scale_factor)
             else:
-                # للمواضع الركنية، استخدم نسبة أصغر
-                new_width = int(base_width * scale_factor * 0.5)  # 50% كحد أقصى
+                # للمواضع الركنية، استخدم نسبة أقل قليلاً
+                new_width = int(base_width * scale_factor * 0.8)
             
             new_height = int(new_width / aspect_ratio)
         
-        # تأكد من عدم تجاوز حدود الصورة الأساسية
-        max_allowed_width = base_width * 0.95  # الحد الأقصى 95% من عرض الصورة
-        max_allowed_height = base_height * 0.95  # الحد الأقصى 95% من ارتفاع الصورة
+        # تأكد من عدم تجاوز حدود الصورة الأساسية - للحجم 100% نتساهل أكثر
+        if size_percentage == 100:
+            # للحجم 100%، لا نطبق قيود صارمة على الارتفاع
+            max_allowed_width = base_width * 0.99  # الحد الأقصى 99% من عرض الصورة
+            max_allowed_height = base_height * 0.8   # الحد الأقصى 80% من ارتفاع الصورة للحجم 100%
+        else:
+            # للأحجام الأخرى، حدود معقولة
+            max_allowed_width = base_width * 0.95  
+            max_allowed_height = base_height * 0.6
         
         if new_width > max_allowed_width:
             new_width = int(max_allowed_width)
