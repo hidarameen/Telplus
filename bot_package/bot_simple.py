@@ -3027,7 +3027,7 @@ class SimpleTelegramBot:
         else:
             new_size = max(5, current_size - 5)   # Min 5%
         
-        self.db.update_watermark_settings(task_id, {'size_percentage': new_size})
+        self.db.update_watermark_settings(task_id, size_percentage=new_size)
         await event.answer(f"✅ تم تعديل الحجم إلى {new_size}%")
         
         # Refresh display
@@ -3043,7 +3043,7 @@ class SimpleTelegramBot:
         else:
             new_opacity = max(10, current_opacity - 10)   # Min 10%
         
-        self.db.update_watermark_settings(task_id, {'opacity': new_opacity})
+        self.db.update_watermark_settings(task_id, opacity=new_opacity)
         await event.answer(f"✅ تم تعديل الشفافية إلى {new_opacity}%")
         
         # Refresh display
@@ -3059,7 +3059,7 @@ class SimpleTelegramBot:
         else:
             new_font = max(12, current_font - 4)   # Min 12px
         
-        self.db.update_watermark_settings(task_id, {'font_size': new_font})
+        self.db.update_watermark_settings(task_id, font_size=new_font)
         await event.answer(f"✅ تم تعديل حجم الخط إلى {new_font}px")
         
         # Refresh display
@@ -3083,7 +3083,7 @@ class SimpleTelegramBot:
             'center': 'الوسط'
         }
         
-        self.db.update_watermark_settings(task_id, {'position': new_position})
+        self.db.update_watermark_settings(task_id, position=new_position)
         await event.answer(f"✅ تم تغيير الموقع إلى: {position_map.get(new_position, new_position)}")
         
         # Refresh display

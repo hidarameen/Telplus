@@ -6,6 +6,18 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **FINAL WATERMARK CONTROL FIX**: Successfully resolved all remaining watermark control and file naming issues:
+  - **FIXED WATERMARK CONTROLS**: Corrected database.update_watermark_settings() parameter passing from dict to kwargs format
+  - **FIXED SIZE CONTROLS**: Size adjustment buttons (🔺🔻) now work correctly (5-80% range)
+  - **FIXED OPACITY CONTROLS**: Transparency adjustment buttons now functional (10-100% range)  
+  - **FIXED FONT SIZE CONTROLS**: Font size adjustment buttons operational (12-72px range)
+  - **FIXED POSITION CONTROLS**: Position cycling button now changes watermark placement correctly
+  - **FIXED FILE NAMING**: Enhanced filename preservation logic to maintain original names and extensions
+  - **IMPROVED PHOTO HANDLING**: Photos now generate unique filenames with proper extensions instead of "unnamed"
+  - **ENHANCED MEDIA DETECTION**: Better media type detection and MIME type to extension mapping
+  - **SYSTEM RESTART**: Successfully restarted bot with all fixes applied and verified operational
+  - **DATE**: August 11, 2025
+
 - **COMPLETE SYSTEM SUCCESS - ALL FUNCTIONALITY WORKING**: Successfully resolved all bot operation issues and confirmed full system functionality:
   - **FIXED SESSION CONFLICT**: Resolved critical session conflict between SimpleTelegramBot and UserBot services by using unique session names ('simple_bot_session' vs 'bot_session')
   - **FIXED BOT STARTUP**: Corrected async function call issues in main.py that prevented bot from starting properly

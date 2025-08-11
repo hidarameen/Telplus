@@ -1421,10 +1421,8 @@ class UserbotService:
             file_name = "media_file"
             file_extension = ""
             
-            if is_photo:
-                file_name = "photo"
-                file_extension = ".jpg"  # Default for photos
-            elif hasattr(event.message.media, 'document') and event.message.media.document:
+            # Try to get original filename from any media type first
+            if hasattr(event.message.media, 'document') and event.message.media.document:
                 doc = event.message.media.document
                 
                 # Try to get original filename first
@@ -1438,29 +1436,41 @@ class UserbotService:
                                 file_name = file_name.rsplit('.', 1)[0]
                             break
                 
-                # If no filename found, use mime type
-                if file_name == "media_file" and doc.mime_type:
-                    mime_to_ext = {
-                        'image/jpeg': '.jpg',
-                        'image/jpg': '.jpg', 
-                        'image/png': '.png',
-                        'image/gif': '.gif',
-                        'image/webp': '.webp',
-                        'video/mp4': '.mp4',
-                        'video/avi': '.avi',
-                        'video/mov': '.mov',
-                        'video/mkv': '.mkv',
-                        'video/webm': '.webm'
-                    }
-                    
-                    file_extension = mime_to_ext.get(doc.mime_type, '.bin')
-                    
-                    if doc.mime_type.startswith('video/'):
-                        file_name = "video"
-                    elif doc.mime_type.startswith('image/'):
-                        file_name = "image"
-                    else:
-                        file_name = "document"
+            # If still no filename found and it's a photo, get from message attributes or generate
+            elif is_photo:
+                file_name = "photo"
+                file_extension = ".jpg"  # Default for photos without document attributes
+                
+                # Try to get more specific info if available 
+                if hasattr(event.message.media, 'photo') and hasattr(event.message.media.photo, 'sizes'):
+                    # Generate a unique filename based on photo ID if available
+                    if hasattr(event.message.media.photo, 'id'):
+                        file_name = f"photo_{event.message.media.photo.id}"
+                        
+            # If no filename found, use mime type for documents
+            if file_name == "media_file" and hasattr(event.message.media, 'document') and event.message.media.document and event.message.media.document.mime_type:
+                doc = event.message.media.document
+                mime_to_ext = {
+                    'image/jpeg': '.jpg',
+                    'image/jpg': '.jpg', 
+                    'image/png': '.png',
+                    'image/gif': '.gif',
+                    'image/webp': '.webp',
+                    'video/mp4': '.mp4',
+                    'video/avi': '.avi',
+                    'video/mov': '.mov',
+                    'video/mkv': '.mkv',
+                    'video/webm': '.webm'
+                }
+                
+                file_extension = mime_to_ext.get(doc.mime_type, '.bin')
+                
+                if doc.mime_type.startswith('video/'):
+                    file_name = "video"
+                elif doc.mime_type.startswith('image/'):
+                    file_name = "image"
+                else:
+                    file_name = "document"
             
             # Combine name and extension
             full_file_name = file_name + file_extension
