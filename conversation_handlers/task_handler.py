@@ -163,6 +163,27 @@ class TaskHandler:
         elif data.startswith("toggle_replacement_"):
             task_id = int(data.split("_")[2])
             await self._toggle_text_replacement(update, context, task_id)
+        elif data.startswith("watermark_settings_"):
+            task_id = int(data.split("_")[2])
+            await self._show_watermark_settings(update, context, task_id)
+        elif data.startswith("toggle_watermark_"):
+            task_id = int(data.split("_")[2])
+            await self._toggle_watermark(update, context, task_id)
+        elif data.startswith("watermark_config_"):
+            task_id = int(data.split("_")[2])
+            await self._show_watermark_config(update, context, task_id)
+        elif data.startswith("watermark_media_"):
+            task_id = int(data.split("_")[2])
+            await self._show_watermark_media_settings(update, context, task_id)
+        elif data.startswith("toggle_watermark_photos_"):
+            task_id = int(data.split("_")[3])
+            await self._toggle_watermark_media_type(update, context, task_id, 'photos')
+        elif data.startswith("toggle_watermark_videos_"):
+            task_id = int(data.split("_")[3])
+            await self._toggle_watermark_media_type(update, context, task_id, 'videos')
+        elif data.startswith("toggle_watermark_documents_"):
+            task_id = int(data.split("_")[3])
+            await self._toggle_watermark_media_type(update, context, task_id, 'documents')
         elif data.startswith("add_replacement_"):
             task_id = int(data.split("_")[2])
             await self._start_add_replacement(update, context, task_id)
@@ -193,6 +214,7 @@ class TaskHandler:
             [InlineKeyboardButton(toggle_text, callback_data=toggle_action)],
             [InlineKeyboardButton("🔍 فلاتر الكلمات", callback_data=f"word_filters_{task_id}")],
             [InlineKeyboardButton("🔄 استبدال النصوص", callback_data=f"text_replacements_{task_id}")],
+            [InlineKeyboardButton("🏷️ العلامة المائية", callback_data=f"watermark_settings_{task_id}")],
             [InlineKeyboardButton("🗑️ حذف المهمة", callback_data=f"task_delete_{task_id}")],
             [InlineKeyboardButton("📋 عرض المهام", callback_data="list_tasks")]
         ]
@@ -210,6 +232,7 @@ class TaskHandler:
             f"⚙️ **الميزات المتاحة:**\n"
             f"• 🔍 فلاتر الكلمات (قائمة بيضاء/سوداء)\n"
             f"• 🔄 استبدال النصوص (تعديل المحتوى)\n"
+            f"• 🏷️ العلامة المائية (حماية الوسائط)\n"
             f"• 🗑️ إدارة المهمة (حذف/إيقاف)\n\n"
             f"📅 تاريخ الإنشاء: {task['created_at'][:16]}",
             reply_markup=reply_markup,
@@ -719,6 +742,189 @@ class TaskHandler:
             f"⚠️ **ملاحظة**: عند تفعيل الاستبدال، سيتم تحويل وضع التوجيه تلقائياً إلى 'نسخ' للرسائل المعدلة",
             reply_markup=reply_markup
         )
+
+    # Watermark Management Functions
+    async def _show_watermark_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Show watermark settings management interface"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get watermark settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        
+        status = "🟢 مفعل" if watermark_settings.get('enabled', False) else "🔴 معطل"
+        toggle_text = "⏸️ إلغاء التفعيل" if watermark_settings.get('enabled', False) else "▶️ تفعيل"
+        
+        watermark_type = watermark_settings.get('watermark_type', 'text')
+        type_display = "📝 نص" if watermark_type == 'text' else "🖼️ صورة"
+        
+        position_names = {
+            'top_left': 'أعلى اليسار',
+            'top_right': 'أعلى اليمين',
+            'bottom_left': 'أسفل اليسار',
+            'bottom_right': 'أسفل اليمين',
+            'center': 'الوسط'
+        }
+        position_display = position_names.get(watermark_settings.get('position', 'bottom_right'), 'أسفل اليمين')
+
+        keyboard = [
+            [InlineKeyboardButton(toggle_text, callback_data=f"toggle_watermark_{task_id}")],
+            [InlineKeyboardButton("⚙️ إعدادات العلامة", callback_data=f"watermark_config_{task_id}")],
+            [InlineKeyboardButton("📱 اختيار الوسائط", callback_data=f"watermark_media_{task_id}")],
+            [InlineKeyboardButton("🔙 عودة للمهمة", callback_data=f"task_manage_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # Build media settings display
+        media_settings = []
+        if watermark_settings.get('apply_to_photos', True):
+            media_settings.append("📷 الصور")
+        if watermark_settings.get('apply_to_videos', True):
+            media_settings.append("🎥 الفيديوهات")
+        if watermark_settings.get('apply_to_documents', False):
+            media_settings.append("📄 المستندات")
+        
+        media_display = " • ".join(media_settings) if media_settings else "لا يوجد"
+
+        await update.callback_query.edit_message_text(
+            f"🏷️ إعدادات العلامة المائية - المهمة #{task_id}\n\n"
+            f"📊 **الحالة**: {status}\n"
+            f"🎭 **النوع**: {type_display}\n"
+            f"📍 **الموقع**: {position_display}\n"
+            f"🎯 **الوسائط المطبقة**: {media_display}\n\n"
+            f"🔧 **الإعدادات الحالية:**\n"
+            f"• الحجم: {watermark_settings.get('size_percentage', 10)}%\n"
+            f"• الشفافية: {watermark_settings.get('opacity', 70)}%\n"
+            f"• حجم الخط: {watermark_settings.get('font_size', 24)}px\n\n"
+            f"🏷️ **الوظيفة**: إضافة علامة مائية نصية أو صورة على الوسائط المرسلة لحماية الحقوق\n\n"
+            f"📝 **نص العلامة**: {watermark_settings.get('watermark_text', 'غير محدد')[:30]}{'...' if len(watermark_settings.get('watermark_text', '')) > 30 else ''}\n"
+            f"🖼️ **صورة العلامة**: {'محددة' if watermark_settings.get('watermark_image_path') else 'غير محددة'}",
+            reply_markup=reply_markup
+        )
+
+    async def _toggle_watermark(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Toggle watermark status"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle watermark
+        new_status = self.db.toggle_watermark(task_id)
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        
+        await update.callback_query.answer(f"✅ {status_text} العلامة المائية")
+        await self._show_watermark_settings(update, context, task_id)
+
+    async def _show_watermark_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Show watermark configuration options"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        keyboard = [
+            [InlineKeyboardButton("📝 تعديل النص", callback_data=f"watermark_text_{task_id}")],
+            [InlineKeyboardButton("🖼️ رفع صورة", callback_data=f"watermark_image_{task_id}")],
+            [InlineKeyboardButton("📍 تغيير الموقع", callback_data=f"watermark_position_{task_id}")],
+            [InlineKeyboardButton("🎨 إعدادات المظهر", callback_data=f"watermark_appearance_{task_id}")],
+            [InlineKeyboardButton("🔙 عودة للعلامة المائية", callback_data=f"watermark_settings_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            f"⚙️ تكوين العلامة المائية - المهمة #{task_id}\n\n"
+            f"🔧 **خيارات التكوين المتاحة:**\n\n"
+            f"📝 **تعديل النص**: تحديد النص المراد إظهاره كعلامة مائية\n"
+            f"🖼️ **رفع صورة**: استخدام صورة كعلامة مائية (PNG مفضل)\n"
+            f"📍 **تغيير الموقع**: اختيار مكان العلامة على الوسائط\n"
+            f"🎨 **إعدادات المظهر**: تخصيص الحجم والشفافية واللون\n\n"
+            f"💡 **نصيحة**: يُفضل استخدام صور PNG شفافة للحصول على أفضل نتيجة",
+            reply_markup=reply_markup
+        )
+
+    async def _show_watermark_media_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Show watermark media type settings"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get current settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        
+        photos_enabled = watermark_settings.get('apply_to_photos', True)
+        videos_enabled = watermark_settings.get('apply_to_videos', True)
+        documents_enabled = watermark_settings.get('apply_to_documents', False)
+        
+        photos_text = "✅ الصور" if photos_enabled else "❌ الصور"
+        videos_text = "✅ الفيديوهات" if videos_enabled else "❌ الفيديوهات"
+        documents_text = "✅ المستندات" if documents_enabled else "❌ المستندات"
+
+        keyboard = [
+            [InlineKeyboardButton(photos_text, callback_data=f"toggle_watermark_photos_{task_id}")],
+            [InlineKeyboardButton(videos_text, callback_data=f"toggle_watermark_videos_{task_id}")],
+            [InlineKeyboardButton(documents_text, callback_data=f"toggle_watermark_documents_{task_id}")],
+            [InlineKeyboardButton("🔙 عودة للعلامة المائية", callback_data=f"watermark_settings_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            f"📱 اختيار الوسائط للعلامة المائية - المهمة #{task_id}\n\n"
+            f"📋 **حدد أنواع الوسائط التي تريد تطبيق العلامة المائية عليها:**\n\n"
+            f"📷 **الصور**: JPG, PNG, WebP وغيرها\n"
+            f"🎥 **الفيديوهات**: MP4, AVI, MOV وغيرها\n"
+            f"📄 **المستندات**: ملفات الصور في شكل مستندات\n\n"
+            f"⚠️ **ملاحظة**: معالجة الفيديوهات قد تستغرق وقتاً أطول\n\n"
+            f"✅ = مفعل  ❌ = معطل",
+            reply_markup=reply_markup
+        )
+
+    async def _toggle_watermark_media_type(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                           task_id: int, media_type: str):
+        """Toggle watermark application for specific media type"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle media type setting
+        field_map = {
+            'photos': 'apply_to_photos',
+            'videos': 'apply_to_videos', 
+            'documents': 'apply_to_documents'
+        }
+        
+        field_name = field_map.get(media_type)
+        if not field_name:
+            await update.callback_query.answer("❌ نوع وسائط غير صالح")
+            return
+
+        new_status = self.db.toggle_watermark_media_type(task_id, field_name)
+        
+        media_names = {
+            'photos': 'الصور',
+            'videos': 'الفيديوهات',
+            'documents': 'المستندات'
+        }
+        
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        media_name = media_names.get(media_type, media_type)
+        
+        await update.callback_query.answer(f"✅ {status_text} العلامة المائية لـ {media_name}")
+        await self._show_watermark_media_settings(update, context, task_id)
 
     async def _toggle_text_replacement(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
         """Toggle text replacement status"""

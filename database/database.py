@@ -496,6 +496,30 @@ class Database:
                 )
             ''')
 
+            # Task watermark settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_watermark_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    watermark_type TEXT DEFAULT 'text' CHECK (watermark_type IN ('text', 'image')),
+                    watermark_text TEXT,
+                    watermark_image_path TEXT,
+                    position TEXT DEFAULT 'bottom_right' CHECK (position IN ('top_left', 'top_right', 'bottom_left', 'bottom_right', 'center')),
+                    size_percentage INTEGER DEFAULT 10 CHECK (size_percentage >= 5 AND size_percentage <= 50),
+                    opacity INTEGER DEFAULT 70 CHECK (opacity >= 10 AND opacity <= 100),
+                    text_color TEXT DEFAULT '#FFFFFF',
+                    use_original_color BOOLEAN DEFAULT FALSE,
+                    apply_to_photos BOOLEAN DEFAULT TRUE,
+                    apply_to_videos BOOLEAN DEFAULT TRUE,
+                    apply_to_documents BOOLEAN DEFAULT FALSE,
+                    font_size INTEGER DEFAULT 24,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             # Task character limit settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_character_limit_settings (
@@ -3943,5 +3967,235 @@ class Database:
                 
         except Exception as e:
             print(f"خطأ في تحديث اللغة: {e}")
+            return False
+
+    # ===== Watermark Settings Methods =====
+    
+    def get_watermark_settings(self, task_id: int) -> dict:
+        """Get watermark settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT enabled, watermark_type, watermark_text, watermark_image_path,
+                           position, size_percentage, opacity, text_color, use_original_color,
+                           apply_to_photos, apply_to_videos, apply_to_documents, font_size
+                    FROM task_watermark_settings WHERE task_id = ?
+                ''', (task_id,))
+                
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'enabled': bool(result[0]),
+                        'watermark_type': result[1],
+                        'watermark_text': result[2],
+                        'watermark_image_path': result[3],
+                        'position': result[4],
+                        'size_percentage': result[5],
+                        'opacity': result[6],
+                        'text_color': result[7],
+                        'use_original_color': bool(result[8]),
+                        'apply_to_photos': bool(result[9]),
+                        'apply_to_videos': bool(result[10]),
+                        'apply_to_documents': bool(result[11]),
+                        'font_size': result[12]
+                    }
+                else:
+                    return {
+                        'enabled': False,
+                        'watermark_type': 'text',
+                        'watermark_text': '',
+                        'watermark_image_path': '',
+                        'position': 'bottom_right',
+                        'size_percentage': 10,
+                        'opacity': 70,
+                        'text_color': '#FFFFFF',
+                        'use_original_color': False,
+                        'apply_to_photos': True,
+                        'apply_to_videos': True,
+                        'apply_to_documents': False,
+                        'font_size': 24
+                    }
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على إعدادات العلامة المائية: {e}")
+            return {}
+
+    def update_watermark_settings(self, task_id: int, settings: dict) -> bool:
+        """Update watermark settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_watermark_settings (
+                        task_id, enabled, watermark_type, watermark_text, watermark_image_path,
+                        position, size_percentage, opacity, text_color, use_original_color,
+                        apply_to_photos, apply_to_videos, apply_to_documents, font_size,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (
+                    task_id,
+                    settings.get('enabled', False),
+                    settings.get('watermark_type', 'text'),
+                    settings.get('watermark_text', ''),
+                    settings.get('watermark_image_path', ''),
+                    settings.get('position', 'bottom_right'),
+                    settings.get('size_percentage', 10),
+                    settings.get('opacity', 70),
+                    settings.get('text_color', '#FFFFFF'),
+                    settings.get('use_original_color', False),
+                    settings.get('apply_to_photos', True),
+                    settings.get('apply_to_videos', True),
+                    settings.get('apply_to_documents', False),
+                    settings.get('font_size', 24)
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات العلامة المائية: {e}")
+            return False
+
+    def toggle_watermark_media_type(self, task_id: int, field_name: str) -> bool:
+        """Toggle watermark application for specific media type"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current status
+                cursor.execute(f'SELECT {field_name} FROM task_watermark_settings WHERE task_id = ?', (task_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    new_status = not bool(result[0])
+                    cursor.execute(f'''
+                        UPDATE task_watermark_settings 
+                        SET {field_name} = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ?
+                    ''', (new_status, task_id))
+                else:
+                    # Create default settings if not exists
+                    new_status = True
+                    cursor.execute('''
+                        INSERT INTO task_watermark_settings 
+                        (task_id, enabled, watermark_type, watermark_text, position,
+                         apply_to_photos, apply_to_videos, apply_to_documents)
+                        VALUES (?, FALSE, 'text', 'العلامة المائية', 'bottom_right', ?, ?, ?)
+                    ''', (task_id, field_name == 'apply_to_photos', 
+                          field_name == 'apply_to_videos', 
+                          field_name == 'apply_to_documents'))
+                
+                conn.commit()
+                return new_status
+        except Exception as e:
+            logger.error(f"خطأ في تبديل نوع وسائط العلامة المائية: {e}")
+            return False
+
+    def toggle_watermark(self, task_id: int) -> bool:
+        """Toggle watermark on/off for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current status
+                cursor.execute('SELECT enabled FROM task_watermark_settings WHERE task_id = ?', (task_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    new_enabled = not result[0]
+                    cursor.execute('''
+                        UPDATE task_watermark_settings 
+                        SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ?
+                    ''', (new_enabled, task_id))
+                else:
+                    # Create default settings if not exists
+                    new_enabled = True
+                    cursor.execute('''
+                        INSERT INTO task_watermark_settings 
+                        (task_id, enabled, watermark_type, watermark_text, position)
+                        VALUES (?, ?, 'text', 'العلامة المائية', 'bottom_right')
+                    ''', (task_id, new_enabled))
+                
+                conn.commit()
+                return new_enabled
+        except Exception as e:
+            logger.error(f"خطأ في تبديل العلامة المائية: {e}")
+            return False
+
+    def update_watermark_text(self, task_id: int, text: str) -> bool:
+        """Update watermark text for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE task_watermark_settings 
+                    SET watermark_text = ?, watermark_type = 'text', updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', (text, task_id))
+                if cursor.rowcount == 0:
+                    # Create if doesn't exist
+                    cursor.execute('''
+                        INSERT INTO task_watermark_settings 
+                        (task_id, watermark_text, watermark_type)
+                        VALUES (?, ?, 'text')
+                    ''', (task_id, text))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث نص العلامة المائية: {e}")
+            return False
+
+    def update_watermark_image(self, task_id: int, image_path: str) -> bool:
+        """Update watermark image for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE task_watermark_settings 
+                    SET watermark_image_path = ?, watermark_type = 'image', updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', (image_path, task_id))
+                if cursor.rowcount == 0:
+                    # Create if doesn't exist
+                    cursor.execute('''
+                        INSERT INTO task_watermark_settings 
+                        (task_id, watermark_image_path, watermark_type)
+                        VALUES (?, ?, 'image')
+                    ''', (task_id, image_path))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث صورة العلامة المائية: {e}")
+            return False
+
+    def update_watermark_position(self, task_id: int, position: str) -> bool:
+        """Update watermark position for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE task_watermark_settings 
+                    SET position = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', (position, task_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث موقع العلامة المائية: {e}")
+            return False
+
+    def update_watermark_media_settings(self, task_id: int, apply_to_photos: bool, apply_to_videos: bool, apply_to_documents: bool) -> bool:
+        """Update watermark media application settings"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE task_watermark_settings 
+                    SET apply_to_photos = ?, apply_to_videos = ?, apply_to_documents = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ?
+                ''', (apply_to_photos, apply_to_videos, apply_to_documents, task_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعدادات الوسائط للعلامة المائية: {e}")
             return False
 

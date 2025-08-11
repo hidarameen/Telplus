@@ -14,6 +14,9 @@ from database.database import Database
 from bot_package.config import API_ID, API_HASH
 import time
 from collections import defaultdict
+from watermark_processor import WatermarkProcessor
+import tempfile
+import os
 
 # Import translation service  
 try:
@@ -76,6 +79,7 @@ class UserbotService:
         self.user_tasks: Dict[int, List[Dict]] = {}   # user_id -> tasks
         self.running = True
         self.album_collectors: Dict[int, AlbumCollector] = {}  # user_id -> collector
+        self.watermark_processor = WatermarkProcessor()  # معالج العلامة المائية
 
     async def start_with_session(self, user_id: int, session_string: str):
         """Start userbot for a specific user with session string"""
@@ -688,27 +692,37 @@ class UserbotService:
                                         if split_album_enabled:
                                             # Split album: send each media individually
                                             logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                            
+                                            # Apply watermark if enabled
+                                            watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                            
                                             forwarded_msg = await client.send_file(
                                                 target_entity,
-                                                event.message.media,
+                                                watermarked_media,
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
                                                 force_document=False,
                                                 buttons=original_reply_markup or inline_buttons,
+                                                file_name=modified_filename,
                                             )
                                         else:
                                             # Keep album grouped: send as new media (copy mode)
                                             logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (تحويل لوضع النسخ)")
+                                            
+                                            # Apply watermark if enabled
+                                            watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                            
                                             # In forward mode with requires_copy_mode, we also send as new media
                                             forwarded_msg = await client.send_file(
                                                 target_entity,
-                                                event.message.media,
+                                                watermarked_media,
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
                                                 force_document=False,
                                                 buttons=original_reply_markup or inline_buttons,
+                                                file_name=modified_filename,
                                             )
                                 else:
                                     # Process spoiler entities if present
@@ -768,13 +782,18 @@ class UserbotService:
                                             if needs_copy_for_album:
                                                 # Split album: send each media individually
                                                 logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                                
+                                                # Apply watermark if enabled
+                                                watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                                
                                                 forwarded_msg = await client.send_file(
                                                     target_entity,
-                                                    event.message.media,
+                                                    watermarked_media,
                                                     caption=caption_text,
                                                     silent=forwarding_settings['silent_notifications'],
                                                     force_document=False,
                                                     buttons=original_reply_markup or inline_buttons,
+                                                    file_name=modified_filename,
                                                 )
                                             else:
                                                 # Keep album grouped
@@ -788,13 +807,17 @@ class UserbotService:
                                                     )
                                                 else:
                                                     # Single media
+                                                    # Apply watermark if enabled
+                                                    watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                                    
                                                     forwarded_msg = await client.send_file(
                                                         target_entity,
-                                                        event.message.media,
+                                                        watermarked_media,
                                                         caption=caption_text,
                                                         silent=forwarding_settings['silent_notifications'],
                                                         force_document=False,
                                                         buttons=original_reply_markup or inline_buttons,
+                                                        file_name=modified_filename,
                                                     )
                                     else:
                                         # Regular text forward
@@ -1349,6 +1372,53 @@ class UserbotService:
                 'auto_delete_enabled': False,
                 'auto_delete_time': 3600
             }
+
+    async def apply_watermark_to_media(self, event, task_id: int):
+        """Apply watermark to media if enabled for the task"""
+        try:
+            # Get watermark settings
+            watermark_settings = self.db.get_watermark_settings(task_id)
+            
+            if not watermark_settings.get('enabled', False):
+                return event.message.media, None
+            
+            # Check if message has media
+            if not event.message.media:
+                return event.message.media, None
+            
+            # Download media
+            media_bytes = await event.message.download_media(bytes)
+            if not media_bytes:
+                logger.warning(f"فشل في تحميل الوسائط للمهمة {task_id}")
+                return event.message.media, None
+            
+            # Get file name
+            file_name = getattr(event.message.media, 'document', None)
+            if hasattr(file_name, 'attributes'):
+                for attr in file_name.attributes:
+                    if hasattr(attr, 'file_name'):
+                        file_name = attr.file_name
+                        break
+            else:
+                file_name = "media_file"
+            
+            # Apply watermark
+            watermarked_media = self.watermark_processor.process_media_with_watermark(
+                media_bytes, 
+                file_name, 
+                watermark_settings
+            )
+            
+            if watermarked_media and watermarked_media != media_bytes:
+                logger.info(f"✅ تم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
+                return watermarked_media, file_name
+            else:
+                logger.debug(f"🔄 لم يتم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
+                return event.message.media, None
+                
+        except Exception as e:
+            logger.error(f"خطأ في تطبيق العلامة المائية: {e}")
+            return event.message.media, None
 
     def apply_message_formatting(self, text: str, settings: dict) -> str:
         """Apply header and footer formatting to message text"""

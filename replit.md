@@ -6,6 +6,34 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **WATERMARK FEATURE IMPLEMENTATION**: Successfully integrated comprehensive watermark functionality for media protection:
+  - **CORE FUNCTIONALITY**: Added `WatermarkProcessor` class supporting both text and image watermarks on videos and images
+  - **USER INTERFACE**: Added watermark settings to task management interface with dedicated "🏷️ العلامة المائية" section
+  - **CUSTOMIZATION OPTIONS**: Implemented full control over:
+    - Watermark type (text/image with transparent PNG support)
+    - Position (top-left, top-right, bottom-left, bottom-right, center)
+    - Size percentage (5-50%)
+    - Opacity/transparency (10-100%)
+    - Text color (including original color preservation)
+    - Font size configuration
+  - **MEDIA TYPE SELECTION**: Added granular control for applying watermarks to:
+    - Photos (JPG, PNG, WebP)
+    - Videos (MP4, AVI, MOV)
+    - Documents (image files as documents)
+  - **DATABASE INTEGRATION**: Created `task_watermark_settings` table with comprehensive configuration storage
+  - **USERBOT INTEGRATION**: Enhanced message forwarding to automatically apply watermarks when enabled:
+    - Integrated in all media forwarding scenarios
+    - Supports album splitting and grouping
+    - Maintains original filename structure
+  - **TASK HANDLER**: Added complete watermark management interface:
+    - Toggle watermark on/off
+    - Configure watermark settings
+    - Select media types for application
+    - Real-time settings preview
+  - **TECHNICAL IMPLEMENTATION**: Used OpenCV and Pillow for robust image/video processing
+  - **USER EXPERIENCE**: All watermark controls accessible through task settings with intuitive Arabic interface
+  - **DATE**: August 11, 2025
+
 - **COMPLETE INLINE BUTTON PRESERVATION FIX**: Resolved critical root cause where original inline buttons were being stripped from forwarded messages in copy mode:
   - **ROOT CAUSE IDENTIFIED**: While filter logic was working correctly, the forwarding mechanism in copy mode was recreating messages without preserving original `reply_markup` from source messages
   - **COMPREHENSIVE SOLUTION**: Implemented preservation of original `reply_markup` when inline button filter is disabled:
@@ -39,7 +67,7 @@ Preferred communication style: Simple, everyday language.
 The system features a Flask-based web application with Jinja2 templating and Bootstrap 5, providing full RTL support for its Arabic interface. Client-side interactions utilize vanilla JavaScript for form validation and real-time updates. Custom CSS ensures proper Arabic typography and responsive design. The Telegram bot interface is entirely in Arabic, facilitating intuitive management of forwarding tasks.
 
 ## Technical Implementations
-The core functionality relies on two main services: a Telegram bot for user interaction (using `python-telegram-bot`) and a Telethon-based userbot for automated message forwarding using user account sessions. These services operate concurrently in separate threads. Phone-based authentication with SMS verification and 2FA support is implemented for session management. Advanced features include comprehensive text cleaning (link, emoji, hashtag, phone number removal, keyword-based line filtering), sophisticated text formatting (supporting various Telegram markdown types including spoilers and hyperlinks), and advanced message filtering (by day, working hours, language, admin, duplicate, inline buttons, forwarded messages). Additional forwarding settings include link preview control, message pinning, notification control, and auto-delete with customizable timing. Message processing incorporates character limits, rate limiting per source message, forwarding delay, and sending intervals between targets. The system now supports preserving original inline buttons from forwarded messages in copy mode, alongside custom inline buttons, and includes an advanced admin filtering system utilizing Telegram's native Author Signature feature for channel messages. Working hours filtering has been enhanced with toggle functionality and dual modes (work hours/sleep hours) with a 24-hour visual scheduling interface. The language filter has been upgraded to support allow/block modes and quick selection of common languages, alongside custom language support.
+The core functionality relies on two main services: a Telegram bot for user interaction (using `python-telegram-bot`) and a Telethon-based userbot for automated message forwarding using user account sessions. These services operate concurrently in separate threads. Phone-based authentication with SMS verification and 2FA support is implemented for session management. Advanced features include comprehensive text cleaning (link, emoji, hashtag, phone number removal, keyword-based line filtering), sophisticated text formatting (supporting various Telegram markdown types including spoilers and hyperlinks), advanced message filtering (by day, working hours, language, admin, duplicate, inline buttons, forwarded messages), and **watermark functionality for media protection** (supporting both text and image watermarks with full customization of position, size, opacity, and color on photos, videos, and documents). Additional forwarding settings include link preview control, message pinning, notification control, and auto-delete with customizable timing. Message processing incorporates character limits, rate limiting per source message, forwarding delay, and sending intervals between targets. The system now supports preserving original inline buttons from forwarded messages in copy mode, alongside custom inline buttons, and includes an advanced admin filtering system utilizing Telegram's native Author Signature feature for channel messages. Working hours filtering has been enhanced with toggle functionality and dual modes (work hours/sleep hours) with a 24-hour visual scheduling interface. The language filter has been upgraded to support allow/block modes and quick selection of common languages, alongside custom language support.
 
 ## System Design Choices
 The system is designed for multi-threaded operation to manage concurrent bot and userbot services. It prioritizes a complete Arabic user experience for both the web interface and the Telegram bot. Architectural decisions focus on modularity, allowing independent development and integration of features such as text cleaning, formatting, and various filtering mechanisms. The database schema stores diverse configurations, including forwarding tasks, user sessions, advanced routing settings, message formatting preferences, text replacements, and word filters. Session management is handled through Flask sessions for web authentication and Telethon's StringSession for persistent userbot operation. Security is managed through Flask session encryption and Telegram's built-in authentication mechanisms.
@@ -54,6 +82,8 @@ The system is designed for multi-threaded operation to manage concurrent bot and
 - **Python Libraries**:
     - Flask
     - deep-translator
+    - opencv-python (for watermark processing)
+    - pillow (for image manipulation)
 - **Database**:
     - SQLite (with a custom wrapper)
 - **Configuration**:
