@@ -740,7 +740,7 @@ class UserbotService:
                                         target_entity,
                                         file=media_to_send,
                                         caption=final_text,
-                                        silent=task_info['forwarding_settings']['silent_notifications'],
+                                        silent=forwarding_settings['silent_notifications'],
                                         parse_mode='HTML',
                                         buttons=reply_markup,
                                         force_document=False
@@ -749,7 +749,7 @@ class UserbotService:
                                     forwarded_msg = await client.send_file(
                                         target_entity,
                                         file=media_to_send,
-                                        silent=task_info['forwarding_settings']['silent_notifications'],
+                                        silent=forwarding_settings['silent_notifications'],
                                         buttons=reply_markup,
                                         force_document=False
                                     )
