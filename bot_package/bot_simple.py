@@ -27,6 +27,18 @@ class SimpleTelegramBot:
         self.conversation_states = {}
         self.user_states = {}  # For handling user input states
 
+    def set_user_state(self, user_id, state, data=None):
+        """Set user conversation state"""
+        self.user_states[user_id] = {'state': state, 'data': data or {}}
+    
+    def get_user_state(self, user_id):
+        """Get user conversation state"""
+        return self.user_states.get(user_id, {}).get('state', None)
+    
+    def clear_user_state(self, user_id):
+        """Clear user conversation state"""
+        self.user_states.pop(user_id, None)
+
     async def start(self):
         """Start the bot"""
         if not BOT_TOKEN or BOT_TOKEN == 'your_bot_token_here':
@@ -428,14 +440,24 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل حجم خط العلامة المائية: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("watermark_position_"): # Change watermark position
+            elif data.startswith("watermark_position_selector_"): # Show watermark position selector
                 parts = data.split("_")
-                if len(parts) >= 3:
+                if len(parts) >= 4:
                     try:
-                        task_id = int(parts[2])
-                        await self.change_watermark_position(event, task_id)
+                        task_id = int(parts[3])
+                        await self.show_watermark_position_selector(event, task_id)
                     except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتغيير موضع العلامة المائية: {e}")
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض أختيار موضع العلامة المائية: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_watermark_position_"): # Set watermark position
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        position = parts[3]
+                        task_id = int(parts[4])
+                        await self.set_watermark_position(event, task_id, position)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعيين موضع العلامة المائية: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("set_watermark_type_"): # Set watermark type
                 parts = data.split("_")
@@ -1686,13 +1708,15 @@ class SimpleTelegramBot:
             elif state == 'adding_text_cleaning_keywords': # Handle adding text cleaning keywords
                 await self.handle_adding_text_cleaning_keywords(event, state_data)
                 return
-            elif state == 'waiting_watermark_text': # Handle setting watermark text
-                task_id = int(data)
-                await self.handle_watermark_text_input(event, task_id, event.text)
+            elif state.startswith('watermark_text_input_'): # Handle watermark text input
+                task_id = data.get('task_id')
+                if task_id:
+                    await self.handle_watermark_text_input(event, task_id)
                 return
-            elif state == 'waiting_watermark_image': # Handle setting watermark image
-                task_id = int(data)
-                await self.handle_watermark_image_input(event, task_id)
+            elif state.startswith('watermark_image_input_'): # Handle watermark image input
+                task_id = data.get('task_id')
+                if task_id:
+                    await self.handle_watermark_image_input(event, task_id)
                 return
             elif state == 'waiting_watermark_size': # Handle setting watermark size
                 task_id = int(data)
@@ -2989,26 +3013,26 @@ class SimpleTelegramBot:
         buttons = [
             [
                 Button.inline("🔺", f"watermark_size_up_{task_id}"),
-                Button.inline(f"الحجم: {size}%", f"watermark_position_{task_id}"),
+                Button.inline(f"الحجم: {size}%", f"watermark_appearance_info_{task_id}"),
                 Button.inline("🔻", f"watermark_size_down_{task_id}")
             ],
             [
                 Button.inline("🔺", f"watermark_opacity_up_{task_id}"),
-                Button.inline(f"الشفافية: {opacity}%", f"watermark_position_{task_id}"),
+                Button.inline(f"الشفافية: {opacity}%", f"watermark_appearance_info_{task_id}"),
                 Button.inline("🔻", f"watermark_opacity_down_{task_id}")
             ],
             [
                 Button.inline("🔺", f"watermark_font_up_{task_id}"),
-                Button.inline(f"الخط: {font_size}px", f"watermark_position_{task_id}"),
+                Button.inline(f"الخط: {font_size}px", f"watermark_appearance_info_{task_id}"),
                 Button.inline("🔻", f"watermark_font_down_{task_id}")
             ],
-            [Button.inline("📍 تغيير الموقع", f"watermark_position_{task_id}")],
+            [Button.inline("📍 تغيير الموقع", f"watermark_position_selector_{task_id}")],
             [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
         ]
         
         await event.edit(
             f"🎨 إعدادات مظهر العلامة المائية - المهمة #{task_id}\n\n"
-            f"📏 **الحجم الحالي**: {size}% (المدى: 5-80%)\n"
+            f"📏 **الحجم الحالي**: {size}% (المدى: 5-50%)\n"
             f"🌫️ **الشفافية**: {opacity}% (المدى: 10-100%)\n"
             f"📝 **حجم الخط**: {font_size}px (المدى: 12-72px)\n\n"
             f"🔧 **التحكم**: استخدم الأزرار أعلاه لتعديل الإعدادات\n"
@@ -3023,7 +3047,7 @@ class SimpleTelegramBot:
         current_size = watermark_settings.get('size_percentage', 20)
         
         if increase:
-            new_size = min(80, current_size + 5)  # Max 80%
+            new_size = min(50, current_size + 5)  # Max 50% per database constraint
         else:
             new_size = max(5, current_size - 5)   # Min 5%
         
@@ -3065,15 +3089,10 @@ class SimpleTelegramBot:
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
 
-    async def change_watermark_position(self, event, task_id):
-        """Change watermark position"""
+    async def show_watermark_position_selector(self, event, task_id):
+        """Show watermark position selection with individual buttons"""
         watermark_settings = self.db.get_watermark_settings(task_id)
         current_position = watermark_settings.get('position', 'bottom_right')
-        
-        # Cycle through positions (using underscore format to match database constraint)
-        positions = ['top_left', 'top_right', 'center', 'bottom_left', 'bottom_right']
-        current_index = positions.index(current_position) if current_position in positions else 0
-        new_position = positions[(current_index + 1) % len(positions)]
         
         position_map = {
             'top_left': 'أعلى يسار',
@@ -3083,11 +3102,35 @@ class SimpleTelegramBot:
             'center': 'الوسط'
         }
         
-        self.db.update_watermark_settings(task_id, position=new_position)
-        await event.answer(f"✅ تم تغيير الموقع إلى: {position_map.get(new_position, new_position)}")
+        buttons = []
+        for position, display_name in position_map.items():
+            checkmark = " ✅" if position == current_position else ""
+            buttons.append([Button.inline(f"{display_name}{checkmark}", f"set_watermark_position_{position}_{task_id}")])
         
-        # Refresh display
-        await self.show_watermark_appearance(event, task_id)
+        buttons.append([Button.inline("🔙 عودة لإعدادات المظهر", f"watermark_appearance_{task_id}")])
+        
+        await event.edit(
+            f"📍 اختيار موقع العلامة المائية - المهمة #{task_id}\n\n"
+            f"الموقع الحالي: {position_map.get(current_position, current_position)}\n\n"
+            f"اختر الموقع المطلوب:",
+            buttons=buttons
+        )
+
+    async def set_watermark_position(self, event, task_id, position):
+        """Set watermark position"""
+        position_map = {
+            'top_left': 'أعلى يسار',
+            'top_right': 'أعلى يمين', 
+            'bottom_left': 'أسفل يسار',
+            'bottom_right': 'أسفل يمين',
+            'center': 'الوسط'
+        }
+        
+        self.db.update_watermark_settings(task_id, position=position)
+        await event.answer(f"✅ تم تغيير الموقع إلى: {position_map.get(position, position)}")
+        
+        # Refresh position selector display
+        await self.show_watermark_position_selector(event, task_id)
 
     async def show_watermark_type(self, event, task_id):
         """Show watermark type selection"""
@@ -3141,8 +3184,100 @@ class SimpleTelegramBot:
         type_display = "📝 نص" if watermark_type == 'text' else "🖼️ صورة"
         await event.answer(f"✅ تم تعديل نوع العلامة المائية إلى: {type_display}")
         
-        # Refresh display
-        await self.show_watermark_type(event, task_id)
+        # Start input process based on type
+        if watermark_type == 'text':
+            await self.start_watermark_text_input(event, task_id)
+        else:
+            await self.start_watermark_image_input(event, task_id)
+
+    async def start_watermark_text_input(self, event, task_id):
+        """Start watermark text input process"""
+        self.set_user_state(event.sender_id, f'watermark_text_input_{task_id}', {'task_id': task_id})
+        await event.edit(
+            f"📝 إدخال نص العلامة المائية - المهمة #{task_id}\n\n"
+            f"أرسل النص الذي تريد استخدامه كعلامة مائية:\n\n"
+            f"💡 **ملاحظات**:\n"
+            f"• يمكنك استخدام النصوص العربية والإنجليزية\n"
+            f"• تجنب النصوص الطويلة جداً\n"
+            f"• يمكنك تعديل اللون والحجم من إعدادات المظهر\n\n"
+            f"أرسل /cancel للإلغاء",
+            buttons=[[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
+        )
+
+    async def start_watermark_image_input(self, event, task_id):
+        """Start watermark image input process"""
+        self.set_user_state(event.sender_id, f'watermark_image_input_{task_id}', {'task_id': task_id})
+        await event.edit(
+            f"🖼️ رفع صورة العلامة المائية - المهمة #{task_id}\n\n"
+            f"أرسل الصورة التي تريد استخدامها كعلامة مائية:\n\n"
+            f"📋 **متطلبات الصورة**:\n"
+            f"• صيغة PNG مع خلفية شفافة (مُفضل)\n"
+            f"• أو صيغة JPG/JPEG\n"
+            f"• حجم مناسب (أقل من 5 ميجابايت)\n"
+            f"• وضوح جيد للنتيجة المطلوبة\n\n"
+            f"أرسل /cancel للإلغاء",
+            buttons=[[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
+        )
+
+    async def handle_watermark_text_input(self, event, task_id):
+        """Handle watermark text input"""
+        text = event.message.text.strip()
+        
+        if not text:
+            await event.respond("❌ يرجى إرسال نص صالح للعلامة المائية.")
+            return
+        
+        # Update watermark settings with the text
+        self.db.update_watermark_settings(task_id, watermark_text=text)
+        
+        # Clear user state
+        self.clear_user_state(event.sender_id)
+        
+        await event.respond(
+            f"✅ تم حفظ نص العلامة المائية بنجاح!\n\n"
+            f"📝 **النص المحفوظ**: {text}\n\n"
+            f"يمكنك الآن تعديل إعدادات المظهر من قائمة العلامة المائية.",
+            buttons=[[Button.inline("🎨 إعدادات المظهر", f"watermark_appearance_{task_id}")],
+                     [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]]
+        )
+
+    async def handle_watermark_image_input(self, event, task_id):
+        """Handle watermark image input"""
+        if not event.message.media:
+            await event.respond("❌ يرجى إرسال صورة.")
+            return
+        
+        try:
+            # Create watermark_images directory if not exists
+            os.makedirs("watermark_images", exist_ok=True)
+            
+            # Download the image
+            file_path = await event.message.download_media(file="watermark_images/")
+            
+            if not file_path:
+                await event.respond("❌ فشل في تحميل الصورة.")
+                return
+            
+            # Update watermark settings with the image path
+            self.db.update_watermark_settings(task_id, watermark_image_path=file_path)
+            
+            # Clear user state
+            self.clear_user_state(event.sender_id)
+            
+            await event.respond(
+                f"✅ تم رفع صورة العلامة المائية بنجاح!\n\n"
+                f"📁 **مسار الصورة**: {os.path.basename(file_path)}\n\n"
+                f"يمكنك الآن تعديل إعدادات المظهر من قائمة العلامة المائية.",
+                buttons=[[Button.inline("🎨 إعدادات المظهر", f"watermark_appearance_{task_id}")],
+                         [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]]
+            )
+            
+        except Exception as e:
+            logger.error(f"خطأ في معالجة صورة العلامة المائية: {e}")
+            await event.respond("❌ حدث خطأ في رفع الصورة. يرجى المحاولة مرة أخرى.")
+            
+            # Clear user state
+            self.clear_user_state(event.sender_id)
 
     async def toggle_watermark_media_type(self, event, task_id, media_type):
         """Toggle watermark application for specific media type"""

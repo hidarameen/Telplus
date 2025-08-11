@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, AuthKeyUnregisteredError
 from telethon.sessions import StringSession
-from telethon.tl.types import MessageEntitySpoiler
+from telethon.tl.types import MessageEntitySpoiler, DocumentAttributeFilename
 from database.database import Database
 from bot_package.config import API_ID, API_HASH
 import time
@@ -791,15 +791,28 @@ class UserbotService:
                                                 # Apply watermark if enabled
                                                 watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
                                                 
-                                                forwarded_msg = await client.send_file(
-                                                    target_entity,
-                                                    watermarked_media,
-                                                    caption=caption_text,
-                                                    silent=forwarding_settings['silent_notifications'],
-                                                    force_document=False,
-                                                    buttons=original_reply_markup or inline_buttons,
-                                                    file_name=modified_filename or "media_file",
-                                                )
+                                                # For photos with watermarks, ensure they're sent as photos
+                                                if is_photo and watermarked_media != event.message.media:
+                                                    # Send watermarked photo as photo (not document)
+                                                    forwarded_msg = await client.send_file(
+                                                        target_entity,
+                                                        watermarked_media,
+                                                        caption=caption_text,
+                                                        silent=forwarding_settings['silent_notifications'],
+                                                        force_document=False,
+                                                        buttons=original_reply_markup or inline_buttons,
+                                                    )
+                                                else:
+                                                    # Send other media types normally
+                                                    forwarded_msg = await client.send_file(
+                                                        target_entity,
+                                                        watermarked_media,
+                                                        caption=caption_text,
+                                                        silent=forwarding_settings['silent_notifications'],
+                                                        force_document=False,
+                                                        buttons=original_reply_markup or inline_buttons,
+                                                        file_name=modified_filename or "media_file",
+                                                    )
                                             else:
                                                 # Keep album grouped
                                                 logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']}")
@@ -815,15 +828,30 @@ class UserbotService:
                                                     # Apply watermark if enabled
                                                     watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
                                                     
-                                                    forwarded_msg = await client.send_file(
-                                                        target_entity,
-                                                        watermarked_media,
-                                                        caption=caption_text,
-                                                        silent=forwarding_settings['silent_notifications'],
-                                                        force_document=False,
-                                                        buttons=original_reply_markup or inline_buttons,
-                                                        file_name=modified_filename or "media_file",
-                                                    )
+                                                    # Determine media type for proper sending
+                                                    is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
+                                                    
+                                                    if is_photo and watermarked_media != event.message.media:
+                                                        # Send watermarked photo as photo (not document)
+                                                        forwarded_msg = await client.send_file(
+                                                            target_entity,
+                                                            watermarked_media,
+                                                            caption=caption_text,
+                                                            silent=forwarding_settings['silent_notifications'],
+                                                            force_document=False,
+                                                            buttons=original_reply_markup or inline_buttons,
+                                                        )
+                                                    else:
+                                                        # Send other media types normally
+                                                        forwarded_msg = await client.send_file(
+                                                            target_entity,
+                                                            watermarked_media,
+                                                            caption=caption_text,
+                                                            silent=forwarding_settings['silent_notifications'],
+                                                            force_document=False,
+                                                            buttons=original_reply_markup or inline_buttons,
+                                                            file_name=modified_filename or "media_file",
+                                                        )
                                     else:
                                         # Regular text forward
                                         forwarded_msg = await client.forward_messages(
