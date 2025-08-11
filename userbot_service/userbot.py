@@ -1655,21 +1655,26 @@ class UserbotService:
                 logger.debug(f"👮‍♂️ لا يمكن تحديد معرف المرسل للرسالة - سيتم السماح")
                 return False
             
+            # Skip admin filter for channel messages (negative IDs starting with -100)
+            if str(sender_id).startswith('-100'):
+                logger.debug(f"👮‍♂️ الرسالة من قناة {sender_id} - تجاهل فلتر المشرفين")
+                return False
+            
             # Check if this sender is in the admin filter list
             admin_setting = self.db.get_admin_filter_setting(task_id, sender_id)
             if admin_setting is None:
-                # Admin not in filter list, allow message
-                logger.debug(f"👮‍♂️ المرسل {sender_id} غير موجود في قائمة فلتر المشرفين - سيتم السماح")
+                # Admin not in filter list - ALLOW by default (only block admins explicitly added to block list)
+                logger.debug(f"👮‍♂️ المرسل {sender_id} غير موجود في قائمة فلتر المشرفين - سيتم السماح (الافتراضي)")
                 return False
             
-            # If admin is in list and not allowed, block the message
+            # If admin is in list, check their permission setting
             is_allowed = admin_setting.get('is_allowed', True)
             
             if not is_allowed:
-                logger.info(f"👮‍♂️ فلتر المشرفين: المرسل {sender_id} محظور - سيتم حظر الرسالة")
+                logger.info(f"👮‍♂️ فلتر المشرفين: المرسل {sender_id} محظور صراحة - سيتم حظر الرسالة")
                 return True
             else:
-                logger.info(f"👮‍♂️ فلتر المشرفين: المرسل {sender_id} مسموح - سيتم توجيه الرسالة")
+                logger.info(f"👮‍♂️ فلتر المشرفين: المرسل {sender_id} مسموح صراحة - سيتم توجيه الرسالة")
                 return False
                 
         except Exception as e:
