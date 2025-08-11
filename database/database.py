@@ -1367,6 +1367,30 @@ class Database:
                 }
             return None
 
+    def get_admin_filters(self, task_id: int) -> List[Dict]:
+        """Get all admin filters for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT admin_user_id, admin_username, admin_first_name, is_allowed
+                    FROM task_admin_filters 
+                    WHERE task_id = ?
+                    ORDER BY admin_first_name, admin_username
+                ''', (task_id,))
+                
+                results = cursor.fetchall()
+                return [{
+                    'admin_user_id': row['admin_user_id'],
+                    'admin_username': row['admin_username'] or '',
+                    'admin_first_name': row['admin_first_name'] or '',
+                    'is_allowed': bool(row['is_allowed'])
+                } for row in results]
+                
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على فلاتر المشرفين: {e}")
+            return []
+
     # Text Replacement Management
     def get_text_replacement_id(self, task_id: int):
         """Get or create text replacement configuration for task"""

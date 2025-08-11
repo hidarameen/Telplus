@@ -8,6 +8,15 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **ADMIN FILTER SIGNATURE SYSTEM**: Revolutionary enhancement enabling admin filtering for channel messages:
+  - **SIGNATURE EXTRACTION**: Advanced regex patterns to extract sender signatures from message text (~Name, -Name, 🔸Name, etc.)
+  - **DUAL DETECTION METHOD**: Uses sender ID for groups/supergroups and signature matching for channels
+  - **INTELLIGENT MATCHING**: Compares extracted signatures against admin names and usernames in database
+  - **CHANNEL COMPATIBILITY**: Now works with channels where traditional sender ID detection fails
+  - **FLEXIBLE PATTERNS**: Supports multiple signature formats commonly used in Arabic channels
+  - **SMART FILTERING**: Allows non-listed admins by default, only blocks explicitly banned admins
+  - **COMPREHENSIVE TESTING**: Created test suite to verify signature extraction and admin matching logic
+
 - **FILTER SYSTEM CRITICAL FIXES**: Resolved all major filter functionality issues with complete testing and verification:
   - **DAY FILTER INTEGRATION**: Fixed missing day filter check in message processing - now properly blocks messages on restricted days
   - **ADMIN FILTER COMPLETE OVERHAUL**: Fixed admin filter system with proper Telethon sender ID detection and database integration
