@@ -4020,11 +4020,19 @@ class Database:
             logger.error(f"خطأ في الحصول على إعدادات العلامة المائية: {e}")
             return {}
 
-    def update_watermark_settings(self, task_id: int, settings: dict) -> bool:
-        """Update watermark settings for a task"""
+    def update_watermark_settings(self, task_id: int, **kwargs) -> bool:
+        """Update watermark settings for a task with individual parameters"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Get current settings first
+                current_settings = self.get_watermark_settings(task_id)
+                
+                # Update with new values
+                for key, value in kwargs.items():
+                    current_settings[key] = value
+                
                 cursor.execute('''
                     INSERT OR REPLACE INTO task_watermark_settings (
                         task_id, enabled, watermark_type, watermark_text, watermark_image_path,
@@ -4034,19 +4042,19 @@ class Database:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ''', (
                     task_id,
-                    settings.get('enabled', False),
-                    settings.get('watermark_type', 'text'),
-                    settings.get('watermark_text', ''),
-                    settings.get('watermark_image_path', ''),
-                    settings.get('position', 'bottom_right'),
-                    settings.get('size_percentage', 10),
-                    settings.get('opacity', 70),
-                    settings.get('text_color', '#FFFFFF'),
-                    settings.get('use_original_color', False),
-                    settings.get('apply_to_photos', True),
-                    settings.get('apply_to_videos', True),
-                    settings.get('apply_to_documents', False),
-                    settings.get('font_size', 24)
+                    current_settings.get('enabled', False),
+                    current_settings.get('watermark_type', 'text'),
+                    current_settings.get('watermark_text', ''),
+                    current_settings.get('watermark_image_path', ''),
+                    current_settings.get('position', 'bottom-right'),
+                    current_settings.get('size_percentage', 10),
+                    current_settings.get('opacity', 70),
+                    current_settings.get('text_color', '#FFFFFF'),
+                    current_settings.get('use_original_color', False),
+                    current_settings.get('apply_to_photos', True),
+                    current_settings.get('apply_to_videos', True),
+                    current_settings.get('apply_to_documents', False),
+                    current_settings.get('font_size', 24)
                 ))
                 conn.commit()
                 return True
