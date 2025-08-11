@@ -8,6 +8,13 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **BOT SETTINGS INTERFACE ENHANCEMENT**: Added comprehensive user preference management in Telegram bot:
+  - **LANGUAGE SETTINGS**: Added language change button in main settings menu with 6 language options (Arabic, English, French, German, Spanish, Russian)
+  - **TIMEZONE SETTINGS**: Added timezone change button with 24 timezone options covering Middle East, Europe, America, Asia, and Australia
+  - **USER PREFERENCES STORAGE**: Integrated with existing user_settings database table for persistent preference storage
+  - **REAL-TIME FEEDBACK**: Users receive confirmation messages when settings are successfully changed
+  - **NAVIGATION FLOW**: Added proper back navigation between settings menus and main menu
+
 - **COMPREHENSIVE FILTER INTERFACE FIXES**: Resolved all major UI responsiveness issues across the filter system:
   - **TOGGLE BUTTONS FIXED**: All filter toggle buttons now properly update interface text and status indicators
   - **WORKING HOURS MODE TOGGLE**: Fixed button handler to correctly parse task IDs and refresh interfaces
