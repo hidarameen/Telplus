@@ -33,8 +33,8 @@ class SimpleTelegramBot:
             logger.error("❌ BOT_TOKEN غير محدد في متغيرات البيئة")
             return False
 
-        # Create bot client
-        self.bot = TelegramClient('bot_session', int(API_ID), API_HASH)
+        # Create bot client with unique session name
+        self.bot = TelegramClient('simple_bot_session', int(API_ID), API_HASH)
         await self.bot.start(bot_token=BOT_TOKEN)
 
         # Add event handlers
@@ -50,15 +50,21 @@ class SimpleTelegramBot:
 
     async def handle_start(self, event):
         """Handle /start command"""
+        logger.info(f"📥 تم استلام أمر /start من المستخدم: {event.sender_id}")
+        
         # Only respond to /start in private chats
         if not event.is_private:
             logger.info(f"🚫 تجاهل أمر /start في محادثة غير خاصة: {event.chat_id}")
             return
 
         user_id = event.sender_id
+        logger.info(f"🔍 فحص حالة المصادقة للمستخدم: {user_id}")
 
         # Check if user is authenticated
-        if self.db.is_user_authenticated(user_id):
+        is_authenticated = self.db.is_user_authenticated(user_id)
+        logger.info(f"🔐 حالة المصادقة للمستخدم {user_id}: {'مُصادق عليه' if is_authenticated else 'غير مُصادق عليه'}")
+        
+        if is_authenticated:
             # Show main menu
             buttons = [
                 [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
@@ -66,6 +72,7 @@ class SimpleTelegramBot:
                 [Button.inline("ℹ️ حول البوت", b"about")]
             ]
 
+            logger.info(f"📤 إرسال قائمة رئيسية للمستخدم المُصادق عليه: {user_id}")
             await event.respond(
                 f"🎉 أهلاً بك في بوت التوجيه التلقائي!\n\n"
                 f"👋 مرحباً {event.sender.first_name}\n"
@@ -73,12 +80,14 @@ class SimpleTelegramBot:
                 f"اختر ما تريد فعله:",
                 buttons=buttons
             )
+            logger.info(f"✅ تم إرسال الرد بنجاح للمستخدم: {user_id}")
         else:
             # Show authentication menu
             buttons = [
                 [Button.inline("📱 تسجيل الدخول برقم الهاتف", b"auth_phone")]
             ]
 
+            logger.info(f"📤 إرسال قائمة تسجيل الدخول للمستخدم غير المُصادق عليه: {user_id}")
             await event.respond(
                 f"🤖 مرحباً بك في بوت التوجيه التلقائي!\n\n"
                 f"📋 هذا البوت يساعدك في:\n"
@@ -88,6 +97,7 @@ class SimpleTelegramBot:
                 f"🔐 يجب تسجيل الدخول أولاً:",
                 buttons=buttons
             )
+            logger.info(f"✅ تم إرسال رد التسجيل بنجاح للمستخدم: {user_id}")
 
 
     async def handle_callback(self, event):
