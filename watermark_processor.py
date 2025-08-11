@@ -652,24 +652,36 @@ class WatermarkProcessor:
         try:
             media_type = self.get_media_type_from_file(file_name)
             
+            logger.info(f"🔍 معالجة الوسائط: {file_name} (النوع: {media_type}, الحجم: {len(media_bytes)} بايت)")
+            logger.info(f"🔧 إعدادات العلامة المائية: مفعلة={watermark_settings.get('enabled')}, النوع={watermark_settings.get('watermark_type')}")
+            
             if not self.should_apply_watermark(media_type, watermark_settings):
-                logger.info(f"تخطي العلامة المائية للملف {file_name} - غير مفعلة لنوع {media_type}")
+                logger.info(f"⏭️ تخطي العلامة المائية للملف {file_name} - غير مفعلة لنوع {media_type}")
                 return media_bytes
             
             if media_type == 'photo':
                 logger.info(f"🖼️ تطبيق العلامة المائية على الصورة: {file_name}")
-                return self.apply_watermark_to_image(media_bytes, watermark_settings)
+                result = self.apply_watermark_to_image(media_bytes, watermark_settings)
+                if result != media_bytes:
+                    logger.info(f"✅ تم تطبيق العلامة المائية على الصورة بنجاح")
+                else:
+                    logger.warning(f"⚠️ لم يتم تعديل الصورة")
+                return result
             
             elif media_type == 'video':
-                logger.info(f"🎬 تطبيق العلامة المائية على الفيديو: {file_name}")
+                logger.info(f"🎬 بدء معالجة الفيديو: {file_name}")
+                logger.info(f"📊 حجم الفيديو: {len(media_bytes) / (1024*1024):.1f} MB")
                 
                 # حفظ الفيديو مؤقتاً
                 temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1])
                 temp_input.write(media_bytes)
                 temp_input.close()
                 
+                logger.info(f"💾 حُفظ الفيديو المؤقت في: {temp_input.name}")
+                
                 try:
                     # تطبيق العلامة المائية
+                    logger.info(f"🔧 بدء تطبيق العلامة المائية على الفيديو...")
                     watermarked_path = self.apply_watermark_to_video(temp_input.name, watermark_settings)
                     
                     if watermarked_path and os.path.exists(watermarked_path):
@@ -677,23 +689,33 @@ class WatermarkProcessor:
                         with open(watermarked_path, 'rb') as f:
                             watermarked_bytes = f.read()
                         
+                        original_size = len(media_bytes) / (1024*1024)
+                        processed_size = len(watermarked_bytes) / (1024*1024)
+                        
                         logger.info(f"✅ تم تطبيق العلامة المائية على الفيديو بنجاح")
+                        logger.info(f"📊 الحجم الأصلي: {original_size:.1f} MB → الحجم المعالج: {processed_size:.1f} MB")
                         
                         # حذف الملفات المؤقتة
                         try:
                             os.unlink(temp_input.name)
                             os.unlink(watermarked_path)
-                        except:
-                            pass
+                            logger.info(f"🗑️ تم حذف الملفات المؤقتة")
+                        except Exception as cleanup_error:
+                            logger.warning(f"⚠️ مشكلة في تنظيف الملفات المؤقتة: {cleanup_error}")
                         
                         return watermarked_bytes
                     else:
-                        logger.warning(f"⚠️ فشل في معالجة الفيديو، إرجاع الملف الأصلي")
-                        os.unlink(temp_input.name)
+                        logger.error(f"❌ فشل في معالجة الفيديو، إرجاع الملف الأصلي")
+                        try:
+                            os.unlink(temp_input.name)
+                        except:
+                            pass
                         return media_bytes
                         
                 except Exception as video_error:
                     logger.error(f"❌ خطأ في معالجة الفيديو: {video_error}")
+                    import traceback
+                    logger.error(f"🔍 تفاصيل الخطأ: {traceback.format_exc()}")
                     try:
                         os.unlink(temp_input.name)
                     except:
@@ -702,11 +724,13 @@ class WatermarkProcessor:
             
             else:
                 # نوع وسائط غير مدعوم للعلامة المائية
-                logger.debug(f"نوع الوسائط {media_type} غير مدعوم للعلامة المائية")
+                logger.info(f"⏭️ نوع الوسائط {media_type} غير مدعوم للعلامة المائية")
                 return media_bytes
                 
         except Exception as e:
-            logger.error(f"خطأ في معالجة الوسائط بالعلامة المائية: {e}")
+            logger.error(f"❌ خطأ عام في معالجة الوسائط بالعلامة المائية: {e}")
+            import traceback
+            logger.error(f"🔍 تفاصيل الخطأ العام: {traceback.format_exc()}")
             return media_bytes
 
     def get_video_info(self, video_path: str) -> dict:
