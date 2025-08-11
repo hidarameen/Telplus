@@ -8,6 +8,15 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **INLINE BUTTON FILTER LOGIC FIX**: Fixed critical issue where inline buttons were being removed despite filter being disabled:
+  - **ROOT CAUSE**: Logic incorrectly processed messages when `inline_button_filter_enabled=0` but `block_messages_with_buttons=1`
+  - **SOLUTION**: Implemented proper filter enablement check that respects the filter being disabled
+  - **NEW BEHAVIOR**: When filter is disabled, messages with inline buttons pass through unchanged regardless of block setting
+  - **COMPATIBILITY**: Added legacy compatibility handling for existing configurations with conflicting settings
+  - **VERIFICATION**: Comprehensive test suite confirms buttons are preserved when filter is disabled
+  - **LOGGING**: Enhanced debug logging to track filter decisions and settings conflicts
+  - **DATE**: August 11, 2025
+
 - **ADMIN SIGNATURE MATCHING CRITICAL FIX**: Fixed priority issue in signature matching logic that prevented proper blocking of admin "H":
   - **ROOT CAUSE**: The signature matching algorithm processed admins sequentially and stopped at first match, allowing partial matches from allowed admins to override exact matches from blocked admins
   - **SOLUTION**: Implemented two-tier matching system with exact matches processed before partial matches

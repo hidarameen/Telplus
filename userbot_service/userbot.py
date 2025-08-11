@@ -1579,22 +1579,35 @@ class UserbotService:
                         should_remove_forward = True
             
             # Check inline button filter 
-            if not should_block and advanced_settings.get('inline_button_filter_enabled', False):
+            if not should_block:
+                inline_button_filter_enabled = advanced_settings.get('inline_button_filter_enabled', False)
                 inline_button_setting = self.db.get_inline_button_filter_setting(task_id)
                 
-                # Check if message has inline buttons
+                logger.debug(f"🔍 فحص فلتر الأزرار الشفافة: المهمة {task_id}, فلتر مفعل={inline_button_filter_enabled}, إعداد الحظر={inline_button_setting}")
+                
+                # Check if message has inline buttons first
                 has_buttons = (hasattr(message, 'reply_markup') and 
                              message.reply_markup is not None and
                              hasattr(message.reply_markup, 'rows') and
                              message.reply_markup.rows)
                 
+                logger.debug(f"🔍 الرسالة تحتوي على أزرار: {has_buttons}")
+                
                 if has_buttons:
-                    if inline_button_setting:  # True = block mode
-                        logger.info(f"🚫 رسالة تحتوي على أزرار شفافة - سيتم حظرها (وضع الحظر)")
-                        should_block = True
-                    else:  # False = remove buttons mode
-                        logger.info(f"🗑️ رسالة تحتوي على أزرار شفافة - سيتم حذف الأزرار (وضع الحذف)")
-                        should_remove_buttons = True
+                    # Case 1: Filter is enabled - use both settings
+                    if inline_button_filter_enabled:
+                        if inline_button_setting:  # True = block mode
+                            logger.info(f"🚫 رسالة تحتوي على أزرار شفافة - سيتم حظرها (وضع الحظر)")
+                            should_block = True
+                        else:  # False = remove buttons mode
+                            logger.info(f"🗑️ رسالة تحتوي على أزرار شفافة - سيتم حذف الأزرار (وضع الحذف)")
+                            should_remove_buttons = True
+                    # Case 2: Filter is disabled but block setting exists (legacy compatibility)
+                    elif not inline_button_filter_enabled and inline_button_setting:
+                        logger.info(f"⚠️ فلتر الأزرار معطل لكن إعداد الحظر مفعل - تجاهل الإعداد وتمرير الرسالة كما هي")
+                        # Don't block or remove buttons - pass message as is
+                    else:
+                        logger.debug(f"✅ فلتر الأزرار الشفافة غير مفعل - تمرير الرسالة كما هي")
             
             # Check duplicate filter
             if not should_block and advanced_settings.get('duplicate_filter_enabled', False):
