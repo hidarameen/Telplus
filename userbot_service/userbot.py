@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, AuthKeyUnregisteredError
 from telethon.sessions import StringSession
-from telethon.tl.types import MessageEntitySpoiler, DocumentAttributeFilename, InputMediaUploadedPhoto, InputMediaUploadedDocument
+from telethon.tl.types import MessageEntitySpoiler, DocumentAttributeFilename
 from database.database import Database
 from bot_package.config import API_ID, API_HASH
 import time
@@ -17,7 +17,6 @@ from collections import defaultdict
 from watermark_processor import WatermarkProcessor
 import tempfile
 import os
-import io
 
 # Import translation service  
 try:
@@ -35,14 +34,14 @@ class AlbumCollector:
         self.albums: Dict[int, List] = defaultdict(list)
         self.timers: Dict[int, asyncio.Task] = {}
         self.processed_albums: set = set()
-
+    
     def should_collect_album(self, message, forward_mode: str, split_album: bool) -> bool:
         """Check if message should be collected as part of album"""
         return (hasattr(message, 'grouped_id') and 
                 message.grouped_id and 
                 forward_mode == 'copy' and 
                 not split_album)
-
+    
     def add_message(self, message, task_info):
         """Add message to album collection"""
         group_id = message.grouped_id
@@ -51,19 +50,19 @@ class AlbumCollector:
             'task_info': task_info
         })
         return group_id
-
+        
     def is_album_processed(self, group_id: int) -> bool:
         """Check if album was already processed"""
         return group_id in self.processed_albums
-
+        
     def mark_album_processed(self, group_id: int):
         """Mark album as processed"""
         self.processed_albums.add(group_id)
-
+        
     def get_album_messages(self, group_id: int) -> List:
         """Get all messages in album"""
         return self.albums.get(group_id, [])
-
+        
     def cleanup_album(self, group_id: int):
         """Clean up album data"""
         if group_id in self.albums:
@@ -81,7 +80,6 @@ class UserbotService:
         self.running = True
         self.album_collectors: Dict[int, AlbumCollector] = {}  # user_id -> collector
         self.watermark_processor = WatermarkProcessor()  # معالج العلامة المائية
-        self.pending_admin_tasks = [] # List to hold admin fetch tasks
 
     async def start_with_session(self, user_id: int, session_string: str):
         """Start userbot for a specific user with session string"""
@@ -103,14 +101,14 @@ class UserbotService:
             # Store client
             self.clients[user_id] = client
 
+            # Load user tasks
+            await self.refresh_user_tasks(user_id)
+
             # Set up event handlers for this user
             await self._setup_event_handlers(user_id, client)
 
             user = await client.get_me()
             logger.info(f"✅ تم تشغيل UserBot للمستخدم {user_id} ({user.first_name})")
-
-            # Load user tasks after client is ready and handlers are set
-            await self.refresh_user_tasks(user_id)
 
             return True
 
@@ -312,11 +310,11 @@ class UserbotService:
 
                         # Check admin filter first (if enabled)
                         logger.error(f"🚨 === بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id} ===")
-
+                        
                         # Log message details for debugging
                         author_signature = getattr(event.message, 'post_author', None)
                         logger.error(f"🚨 === تفاصيل الرسالة: sender_id={event.sender_id}, post_author='{author_signature}' ===")
-
+                        
                         admin_allowed = await self.is_admin_allowed_with_message(task_id, event.message)
                         logger.error(f"🚨 === نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed} ===")
 
@@ -390,7 +388,7 @@ class UserbotService:
                 # Initialize album collector for this user if needed
                 if user_id not in self.album_collectors:
                     self.album_collectors[user_id] = AlbumCollector()
-
+                
                 album_collector = self.album_collectors[user_id]
 
                 # Check advanced filters before forwarding to any targets
@@ -398,7 +396,7 @@ class UserbotService:
                 should_block, should_remove_buttons, should_remove_forward = await self._check_message_advanced_filters(
                     first_task['id'], message
                 )
-
+                
                 if should_block:
                     logger.info(f"🚫 الرسالة محظورة بواسطة فلاتر متقدمة - تم رفضها لجميع الأهداف")
                     return
@@ -414,7 +412,7 @@ class UserbotService:
                         forwarding_settings = self.get_forwarding_settings(task['id'])
                         split_album_enabled = forwarding_settings.get('split_album_enabled', False)
                         mode_text = "نسخ" if forward_mode == 'copy' else "توجيه"
-
+                        
                         # Apply forwarded message filter mode
                         if should_remove_forward:
                             forward_mode = 'copy'  # Force copy mode to remove forwarded header
@@ -430,7 +428,7 @@ class UserbotService:
                             if album_collector.is_album_processed(group_id):
                                 logger.info(f"📸 تجاهل رسالة الألبوم - تم معالجتها بالفعل: {group_id}")
                                 continue
-
+                            
                             # Add to album collection
                             album_collector.add_message(event.message, {
                                 'task': task,
@@ -442,15 +440,15 @@ class UserbotService:
                                 'user_id': user_id,
                                 'index': i
                             })
-
+                            
                             # Set timer to process album (give time for all messages to arrive)
                             if group_id in album_collector.timers:
                                 album_collector.timers[group_id].cancel()
-
+                            
                             album_collector.timers[group_id] = asyncio.create_task(
                                 self._process_album_delayed(user_id, group_id, client)
                             )
-
+                            
                             continue  # Skip individual processing
 
                         # Parse target chat ID
@@ -509,12 +507,12 @@ class UserbotService:
                         # Determine which buttons to use (original or custom)
                         inline_buttons = None
                         original_reply_markup = None
-
+                        
                         # Preserve original reply markup if inline button filter is disabled
                         if not should_remove_buttons and event.message.reply_markup:
                             original_reply_markup = event.message.reply_markup
                             logger.info(f"🔘 الحفاظ على الأزرار الأصلية - فلتر الأزرار الشفافة معطل للمهمة {task['id']}")
-
+                        
                         # Build custom inline buttons if enabled and not filtered out
                         if message_settings['inline_buttons_enabled'] and not should_remove_buttons:
                             inline_buttons = self.build_inline_buttons(task['id'])
@@ -537,379 +535,366 @@ class UserbotService:
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة...")
 
-                        # Prepare media for sending, potentially applying watermark
-                        media_to_send = event.message.media
-                        reply_markup = original_reply_markup or inline_buttons
-
-                        # Get watermark settings first and check if we have media
-                        watermark_settings = self.db.get_watermark_settings(task['id'])
-                        
-                        # Apply watermark only if enabled and we have media
-                        if watermark_settings.get('enabled', False) and media_to_send is not None:
-                            logger.info(f"🏷️ بدء تطبيق العلامة المائية على الوسائط...")
-                            try:
-                                watermark_processor = WatermarkProcessor()
-
-                                if isinstance(media_to_send, list):
-                                    # معالجة الألبوم
-                                    logger.info(f"🎬 معالجة ألبوم يحتوي على {len(media_to_send)} عنصر")
-                                    processed_media = []
-
-                                    for i, media_item in enumerate(media_to_send):
-                                        logger.info(f"📁 معالجة العنصر {i+1}/{len(media_to_send)}")
-
-                                        if hasattr(media_item, 'media') and media_item.media:
-                                            # تحديد نوع الوسائط واسم الملف
-                                            file_name = f'media_{int(time.time())}_{i}'
-
-                                            if hasattr(media_item.media, 'document'):
-                                                # فيديو أو مستند
-                                                doc = media_item.media.document
-                                                for attr in getattr(doc, 'attributes', []):
-                                                    if hasattr(attr, 'file_name') and attr.file_name:
-                                                        file_name = attr.file_name
-                                                        break
-
-                                                # تحديد امتداد الملف حسب نوع الوسائط
-                                                if any('video' in getattr(doc, 'mime_type', '')):
-                                                    if not file_name.endswith(('.mp4', '.avi', '.mov', '.mkv')):
-                                                        file_name += '.mp4'
-                                                elif any('image' in getattr(doc, 'mime_type', '')):
-                                                    if not file_name.endswith(('.jpg', '.png', '.jpeg')):
-                                                        file_name += '.jpg'
-                                            else:
-                                                # صورة
-                                                file_name += '.jpg'
-
-                                            logger.info(f"📥 تحميل الوسائط: {file_name}")
-
-                                            # تحميل الوسائط
-                                            media_bytes = await client.download_media(media_item.media, bytes_io=True)
-
-                                            if isinstance(media_bytes, io.BytesIO):
-                                                media_bytes = media_bytes.getvalue()
-
-                                            if media_bytes:
-                                                logger.info(f"✅ تم تحميل {len(media_bytes)} بايت")
-                                                logger.info(f"🔧 تطبيق العلامة المائية على: {file_name}")
-
-                                                # تطبيق العلامة المائية
-                                                processed_bytes = watermark_processor.process_media_with_watermark(
-                                                    media_bytes, 
-                                                    file_name,
-                                                    watermark_settings
-                                                )
-
-                                                if processed_bytes and processed_bytes != media_bytes:
-                                                    logger.info(f"✅ تم تطبيق العلامة المائية بنجاح")
-                                                    # إنشاء ملف مؤقت للوسائط المعالجة
-                                                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1])
-                                                    temp_file.write(processed_bytes)
-                                                    temp_file.close()
-                                                    processed_media.append(temp_file.name)
-                                                    logger.info(f"💾 حُفظت الوسائط المعالجة في: {temp_file.name}")
-                                                else:
-                                                    logger.warning(f"⚠️ لم يتم تطبيق العلامة المائية، استخدام الأصلي")
-                                                    processed_media.append(media_item)
-                                            else:
-                                                logger.error(f"❌ فشل تحميل الوسائط")
-                                                processed_media.append(media_item)
-                                        else:
-                                            processed_media.append(media_item)
-
-                                    media_to_send = processed_media
-                                    logger.info(f"🎯 انتهت معالجة الألبوم: {len(processed_media)} عنصر")
-                                else:
-                                    # معالجة وسائط واحدة
-                                    logger.info(f"🎬 معالجة وسائط واحدة")
-
-                                    if hasattr(media_to_send, 'media') and media_to_send.media:
-                                        # تحديد نوع الوسائط واسم الملف
-                                        file_name = f'media_{int(time.time())}'
-
-                                        if hasattr(media_to_send.media, 'document'):
-                                            # فيديو أو مستند
-                                            doc = media_to_send.media.document
-                                            for attr in getattr(doc, 'attributes', []):
-                                                if hasattr(attr, 'file_name') and attr.file_name:
-                                                    file_name = attr.file_name
-                                                    break
-
-                                            # تحديد امتداد الملف حسب نوع الوسائط
-                                            if 'video' in getattr(doc, 'mime_type', ''):
-                                                if not file_name.endswith(('.mp4', '.avi', '.mov', '.mkv')):
-                                                    file_name += '.mp4'
-                                            elif 'image' in getattr(doc, 'mime_type', ''):
-                                                if not file_name.endswith(('.jpg', '.png', '.jpeg')):
-                                                    file_name += '.jpg'
-                                        else:
-                                            # صورة
-                                            file_name += '.jpg'
-
-                                        logger.info(f"📥 تحميل الوسائط: {file_name}")
-
-                                        media_bytes = await client.download_media(media_to_send.media, bytes_io=True)
-
-                                        if isinstance(media_bytes, io.BytesIO):
-                                            media_bytes = media_bytes.getvalue()
-
-                                        if media_bytes:
-                                            logger.info(f"✅ تم تحميل {len(media_bytes)} بايت")
-                                            logger.info(f"🔧 تطبيق العلامة المائية على: {file_name}")
-
-                                            processed_bytes = watermark_processor.process_media_with_watermark(
-                                                media_bytes,
-                                                file_name,
-                                                watermark_settings
-                                            )
-
-                                            if processed_bytes and processed_bytes != media_bytes:
-                                                logger.info(f"✅ تم تطبيق العلامة المائية بنجاح")
-                                                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1])
-                                                temp_file.write(processed_bytes)
-                                                temp_file.close()
-                                                media_to_send = temp_file.name
-                                                logger.info(f"💾 حُفظت الوسائط المعالجة في: {temp_file.name}")
-                                            else:
-                                                logger.warning(f"⚠️ لم يتم تطبيق العلامة المائية، استخدام الأصلي")
-                                        else:
-                                            logger.error(f"❌ فشل تحميل الوسائط")
-
-                            except Exception as watermark_error:
-                                logger.error(f"❌ خطأ في تطبيق العلامة المائية: {watermark_error}")
-                                import traceback
-                                logger.error(f"🔍 تفاصيل خطأ العلامة المائية: {traceback.format_exc()}")
-                        else:
-                            logger.info(f"⏭️ تخطي العلامة المائية - غير مفعلة")
-
-                        # Send message based on forward mode
                         if forward_mode == 'copy' or requires_copy_mode:
                             # Copy mode: send as new message with all formatting applied
                             if requires_copy_mode:
                                 logger.info(f"🔄 استخدام وضع النسخ بسبب التنسيق المطبق")
 
-                            # Check if we have media to send
-                            if media_to_send is None:
-                                # Text-only message
-                                logger.info(f"📝 إرسال رسالة نصية")
-                                forwarded_msg = await client.send_message(
-                                    target_entity,
-                                    final_text or "رسالة فارغة",
-                                    link_preview=forwarding_settings['link_preview_enabled'],
-                                    silent=forwarding_settings['silent_notifications'],
-                                    parse_mode='HTML',
-                                    buttons=reply_markup
-                                )
-                            elif isinstance(media_to_send, list) and len(media_to_send) > 1:
-                                # إرسال ألبوم
-                                logger.info(f"📤 إرسال ألبوم يحتوي على {len(media_to_send)} عنصر")
-                                target_items = []
-
-                                for media_item in media_to_send:
-                                    if isinstance(media_item, str):  # مسار ملف مؤقت
-                                        logger.info(f"📁 إضافة ملف: {media_item}")
-                                        target_items.append(media_item)
-                                    else:
-                                        target_items.append(media_item)
-
-                                # إرسال الألبوم
-                                if final_text:
-                                    forwarded_msg = await client.send_file(
-                                        target_entity,
-                                        file=target_items,
-                                        caption=final_text,
-                                        silent=task_info['forwarding_settings']['silent_notifications'],
-                                        parse_mode='HTML',
-                                        buttons=reply_markup,
-                                        force_document=False
-                                    )
-                                else:
-                                    forwarded_msg = await client.send_file(
-                                        target_entity,
-                                        file=target_items,
-                                        silent=task_info['forwarding_settings']['silent_notifications'],
-                                        buttons=reply_markup,
-                                        force_document=False
-                                    )
-                                
-                                # تنظيف الملفات المؤقتة
-                                for media_item in target_items:
-                                    if isinstance(media_item, str) and os.path.exists(media_item):
-                                        try:
-                                            os.unlink(media_item)
-                                            logger.info(f"🗑️ تم حذف الملف المؤقت: {media_item}")
-                                        except:
-                                            pass
-
-                            else:
-                                # إرسال وسائط واحدة
-                                logger.info(f"📤 إرسال وسائط واحدة")
-                                if isinstance(media_to_send, str):
-                                    logger.info(f"📁 إرسال ملف معالج: {media_to_send}")
-
-                                if final_text:
-                                    forwarded_msg = await client.send_file(
-                                        target_entity,
-                                        file=media_to_send,
-                                        caption=final_text,
-                                        silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='HTML',
-                                        buttons=reply_markup,
-                                        force_document=False
-                                    )
-                                else:
-                                    forwarded_msg = await client.send_file(
-                                        target_entity,
-                                        file=media_to_send,
-                                        silent=forwarding_settings['silent_notifications'],
-                                        buttons=reply_markup,
-                                        force_document=False
-                                    )
-
-                                # تنظيف الملفات المؤقتة
-                                if isinstance(media_to_send, str) and os.path.exists(media_to_send):
-                                    try:
-                                        os.unlink(media_to_send)
-                                        logger.info(f"🗑️ تم حذف الملف المؤقت: {media_to_send}")
-                                    except:
-                                        pass
-                        else:
-                            # Forward mode: check if we need copy mode for caption removal or album splitting on media
-                            text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
-                            needs_copy_for_caption = (event.message.media and 
-                                                    text_cleaning_settings and 
-                                                    text_cleaning_settings.get('remove_caption', False))
-                            needs_copy_for_album = (event.message.media and 
-                                                  forwarding_settings.get('split_album_enabled', False))
-
-                            if needs_copy_for_caption or needs_copy_for_album or requires_copy_mode:
-                                # Use copy mode for media modifications
-                                if event.message.media:
-                                    from telethon.tl.types import MessageMediaWebPage
-                                    if isinstance(event.message.media, MessageMediaWebPage):
-                                        # Web page - send as text message
+                            if event.message.media:
+                                # Check media type to handle web page separately
+                                from telethon.tl.types import MessageMediaWebPage
+                                if isinstance(event.message.media, MessageMediaWebPage):
+                                    # Web page - send as text message
+                                    # Process spoiler entities if present
+                                    message_text = final_text or event.message.text or "رسالة"
+                                    processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                    
+                                    if spoiler_entities:
+                                        # Send with spoiler entities and buttons
                                         forwarded_msg = await client.send_message(
                                             target_entity,
-                                            event.message.text or "رسالة",
+                                            processed_text,
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
-                                            buttons=reply_markup,
+                                            formatting_entities=spoiler_entities,
+                                            buttons=original_reply_markup or inline_buttons,
                                         )
                                     else:
-                                        # Regular media message with caption handling
-                                        caption_text = event.message.text
-                                        if needs_copy_for_caption:
-                                            caption_text = None
-                                            logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
-
-                                        # Handle album splitting logic
-                                        if needs_copy_for_album:
-                                            # Split album: send each media individually
-                                            logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
-
-                                            # Apply watermark if enabled
-                                            watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
-                                            logger.info(f"📁 سيتم إرسال الملف باسم (تفكيك الألبوم): {modified_filename}")
-
-                                            # Determine media type for proper sending
-                                            is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
-
-                                            # Use InputMediaUploaded for processed files, otherwise original media
-                                            media_file_to_send = watermarked_media if isinstance(watermarked_media, str) else media_to_send.media
-                                            
-                                            if is_photo and isinstance(watermarked_media, str):
-                                                logger.info(f"📸 إرسال صورة مُعالجة كصورة: {modified_filename}")
-                                                forwarded_msg = await client.send_file(
-                                                    target_entity,
-                                                    file=media_file_to_send,
-                                                    caption=caption_text,
-                                                    silent=forwarding_settings['silent_notifications'],
-                                                    parse_mode='HTML' if caption_text else None,
-                                                    buttons=reply_markup,
-                                                    force_document=False
-                                                )
-                                            else:
-                                                logger.info(f"📁 إرسال ملف وسائط آخر: {modified_filename}")
-                                                forwarded_msg = await client.send_file(
-                                                    target_entity,
-                                                    file=media_file_to_send,
-                                                    caption=caption_text,
-                                                    silent=forwarding_settings['silent_notifications'],
-                                                    parse_mode='HTML' if caption_text else None,
-                                                    buttons=reply_markup,
-                                                    force_document=False
-                                                )
-
-                                            # تنظيف الملفات المؤقتة
-                                            if isinstance(media_file_to_send, str) and os.path.exists(media_file_to_send):
-                                                try:
-                                                    os.unlink(media_file_to_send)
-                                                    logger.info(f"🗑️ تم حذف الملف المؤقت: {media_file_to_send}")
-                                                except:
-                                                    pass
-                                        else:
-                                            # Keep album grouped
-                                            logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']}")
-                                            if hasattr(event.message, 'grouped_id') and event.message.grouped_id:
-                                                # Forward as album
-                                                forwarded_msg = await client.forward_messages(
-                                                    target_entity,
-                                                    event.message,
-                                                    silent=forwarding_settings['silent_notifications']
-                                                )
-                                            else:
-                                                # Single media
-                                                # Apply watermark if enabled
-                                                watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
-                                                logger.info(f"📁 سيتم إرسال الملف باسم (وضع التوجيه): {modified_filename}")
-
-                                                # Determine media type for proper sending
-                                                is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
-
-                                                media_file_to_send = watermarked_media if isinstance(watermarked_media, str) else media_to_send.media
-
-                                                if is_photo and isinstance(watermarked_media, str):
-                                                    logger.info(f"📸 إرسال صورة مُعالجة كصورة: {modified_filename}")
-                                                    forwarded_msg = await client.send_file(
-                                                        target_entity,
-                                                        file=media_file_to_send,
-                                                        caption=caption_text,
-                                                        silent=forwarding_settings['silent_notifications'],
-                                                        buttons=reply_markup,
-                                                        force_document=False
-                                                    )
-                                                else:
-                                                    logger.info(f"📁 إرسال ملف وسائط آخر: {modified_filename}")
-                                                    forwarded_msg = await client.send_file(
-                                                        target_entity,
-                                                        file=media_file_to_send,
-                                                        caption=caption_text,
-                                                        silent=forwarding_settings['silent_notifications'],
-                                                        buttons=reply_markup,
-                                                        force_document=False
-                                                    )
-
-                                                # تنظيف الملفات المؤقتة
-                                                if isinstance(media_file_to_send, str) and os.path.exists(media_file_to_send):
-                                                    try:
-                                                        os.unlink(media_file_to_send)
-                                                        logger.info(f"🗑️ تم حذف الملف المؤقت: {media_file_to_send}")
-                                                    except:
-                                                        pass
+                                        # Send normally with buttons
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML',
+                                            buttons=original_reply_markup or inline_buttons,
+                                        )
                                 else:
-                                    # Regular text forward
-                                    forwarded_msg = await client.forward_messages(
+                                    # Regular media message with caption handling
+                                    # Check if caption should be removed
+                                    caption_text = final_text
+                                    text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                                    if text_cleaning_settings and text_cleaning_settings.get('remove_caption', False):
+                                        caption_text = None
+                                        logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
+                                    
+                                    # Check if album should be split
+                                    split_album_enabled = forwarding_settings.get('split_album_enabled', False)
+                                    
+                                    # Handle album splitting logic
+                                    if split_album_enabled:
+                                        # Split album: send each media individually
+                                        logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                        
+                                        # Apply watermark if enabled
+                                        watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                        logger.info(f"📁 سيتم إرسال الملف باسم: {modified_filename}")
+                                        
+                                        from send_file_helper import TelethonFileSender
+                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                            client,
+                                            target_entity,
+                                            watermarked_media,
+                                            modified_filename or "media_file.jpg",
+                                            caption=caption_text,
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML' if caption_text else None,
+                                            force_document=False,
+                                            buttons=original_reply_markup or inline_buttons,
+                                        )
+                                    else:
+                                        # Keep album grouped: send as new media (copy mode)
+                                        logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
+                                        
+                                        # Apply watermark if enabled
+                                        watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                        
+                                        # In copy mode, we always send as new media, not forward
+                                        from send_file_helper import TelethonFileSender
+                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                            client,
+                                            target_entity,
+                                            watermarked_media,
+                                            modified_filename or "media_file.jpg",
+                                            caption=caption_text,
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML' if caption_text else None,
+                                            force_document=False,
+                                            buttons=original_reply_markup or inline_buttons,
+                                        )
+                            elif event.message.text or final_text:
+                                # Pure text message
+                                # Process spoiler entities if present
+                                message_text = final_text or "رسالة"
+                                processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                
+                                if spoiler_entities:
+                                    # Send with spoiler entities and buttons
+                                    forwarded_msg = await client.send_message(
                                         target_entity,
-                                        event.message,
-                                        silent=forwarding_settings['silent_notifications']
+                                        processed_text,
+                                        link_preview=forwarding_settings['link_preview_enabled'],
+                                        silent=forwarding_settings['silent_notifications'],
+                                        formatting_entities=spoiler_entities,
+                                        buttons=original_reply_markup or inline_buttons,
+                                    )
+                                else:
+                                    # Send normally with buttons
+                                    # Combine original and custom buttons for Telethon
+                                    combined_buttons = original_reply_markup or inline_buttons
+                                    
+                                    forwarded_msg = await client.send_message(
+                                        target_entity,
+                                        processed_text,
+                                        link_preview=forwarding_settings['link_preview_enabled'],
+                                        silent=forwarding_settings['silent_notifications'],
+                                        parse_mode='HTML',
+                                        buttons=combined_buttons
                                     )
                             else:
-                                # No formatting changes, forward normally
+                                # Fallback to forward for other types
                                 forwarded_msg = await client.forward_messages(
                                     target_entity,
                                     event.message,
                                     silent=forwarding_settings['silent_notifications']
                                 )
+                        else:
+                            # Forward mode: check if we need copy mode
+                            if requires_copy_mode:
+                                logger.info(f"🔄 تحويل إلى وضع النسخ بسبب التنسيق")
+                                if event.message.media:
+                                    # Check media type to handle web page separately
+                                    from telethon.tl.types import MessageMediaWebPage
+                                    if isinstance(event.message.media, MessageMediaWebPage):
+                                        # Web page - send as text message
+                                        # Process spoiler entities if present
+                                        message_text = final_text or event.message.text or "رسالة"
+                                        processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                        
+                                        if spoiler_entities:
+                                            # Send with spoiler entities and buttons
+                                            forwarded_msg = await client.send_message(
+                                                target_entity,
+                                                processed_text,
+                                                link_preview=forwarding_settings['link_preview_enabled'],
+                                                silent=forwarding_settings['silent_notifications'],
+                                                formatting_entities=spoiler_entities,
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
+                                        else:
+                                            # Send normally with buttons
+                                            forwarded_msg = await client.send_message(
+                                                target_entity,
+                                                processed_text,
+                                                link_preview=forwarding_settings['link_preview_enabled'],
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML',
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
+                                    else:
+                                        # Regular media message with caption handling
+                                        # Check if caption should be removed
+                                        caption_text = final_text
+                                        text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                                        if text_cleaning_settings and text_cleaning_settings.get('remove_caption', False):
+                                            caption_text = None
+                                            logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
+                                        
+                                        # Check if album should be split
+                                        split_album_enabled = forwarding_settings.get('split_album_enabled', False)
+                                        
+                                        # Handle album splitting logic
+                                        if split_album_enabled:
+                                            # Split album: send each media individually
+                                            logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                            
+                                            # Apply watermark if enabled
+                                            watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                            
+                                            # استخدام مساعد إرسال الملفات للتعامل مع أسماء الملفات بشكل صحيح
+                                            from send_file_helper import TelethonFileSender
+                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                client,
+                                                target_entity,
+                                                watermarked_media,
+                                                modified_filename or "media_file.jpg",
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                force_document=False,
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
+                                        else:
+                                            # Keep album grouped: send as new media (copy mode)
+                                            logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (تحويل لوضع النسخ)")
+                                            
+                                            # Apply watermark if enabled
+                                            watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                            logger.info(f"📁 سيتم إرسال الملف باسم: {modified_filename}")
+                                            
+                                            # In forward mode with requires_copy_mode, we also send as new media
+                                            from send_file_helper import TelethonFileSender
+                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                client,
+                                                target_entity,
+                                                watermarked_media,
+                                                modified_filename or "media_file.jpg",
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                force_document=False,
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
+                                else:
+                                    # Process spoiler entities if present
+                                    message_text = final_text or "رسالة"
+                                    processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                    
+                                    if spoiler_entities:
+                                        # Send with spoiler entities and buttons
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            formatting_entities=spoiler_entities,
+                                            buttons=original_reply_markup or inline_buttons,
+                                        )
+                                    else:
+                                        # Send normally with buttons
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML',
+                                            buttons=original_reply_markup or inline_buttons,
+                                        )
+                            else:
+                                # Check if we need copy mode for caption removal or album splitting on media
+                                text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                                needs_copy_for_caption = (event.message.media and 
+                                                        text_cleaning_settings and 
+                                                        text_cleaning_settings.get('remove_caption', False))
+                                needs_copy_for_album = (event.message.media and 
+                                                      forwarding_settings.get('split_album_enabled', False))
+                                
+                                if needs_copy_for_caption or needs_copy_for_album:
+                                    # Use copy mode for media modifications
+                                    if event.message.media:
+                                        from telethon.tl.types import MessageMediaWebPage
+                                        if isinstance(event.message.media, MessageMediaWebPage):
+                                            # Web page - send as text message
+                                            forwarded_msg = await client.send_message(
+                                                target_entity,
+                                                event.message.text or "رسالة",
+                                                link_preview=forwarding_settings['link_preview_enabled'],
+                                                silent=forwarding_settings['silent_notifications'],
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
+                                        else:
+                                            # Regular media message with caption handling
+                                            caption_text = event.message.text
+                                            if needs_copy_for_caption:
+                                                caption_text = None
+                                                logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
+                                            
+                                            # Handle album splitting logic
+                                            if needs_copy_for_album:
+                                                # Split album: send each media individually
+                                                logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                                
+                                                # Apply watermark if enabled
+                                                watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                                logger.info(f"📁 سيتم إرسال الملف باسم (تفكيك الألبوم): {modified_filename}")
+                                                
+                                                # For photos with watermarks, ensure they're sent as photos
+                                                if is_photo and watermarked_media != event.message.media:
+                                                    # Send watermarked photo as photo (not document)
+                                                    from send_file_helper import TelethonFileSender
+                                                    forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                        client,
+                                                        target_entity,
+                                                        watermarked_media,
+                                                        modified_filename or "photo.jpg",
+                                                        caption=caption_text,
+                                                        silent=forwarding_settings['silent_notifications'],
+                                                        force_document=False,
+                                                        buttons=original_reply_markup or inline_buttons,
+                                                    )
+                                                else:
+                                                    # Send other media types normally
+                                                    from send_file_helper import TelethonFileSender
+                                                    forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                        client,
+                                                        target_entity,
+                                                        watermarked_media,
+                                                        modified_filename or "media_file.jpg",
+                                                        caption=caption_text,
+                                                        silent=forwarding_settings['silent_notifications'],
+                                                        force_document=False,
+                                                        buttons=original_reply_markup or inline_buttons,
+                                                    )
+                                            else:
+                                                # Keep album grouped
+                                                logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']}")
+                                                if hasattr(event.message, 'grouped_id') and event.message.grouped_id:
+                                                    # Forward as album
+                                                    forwarded_msg = await client.forward_messages(
+                                                        target_entity,
+                                                        event.message,
+                                                        silent=forwarding_settings['silent_notifications']
+                                                    )
+                                                else:
+                                                    # Single media
+                                                    # Apply watermark if enabled
+                                                    watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                                    logger.info(f"📁 سيتم إرسال الملف باسم (وضع التوجيه): {modified_filename}")
+                                                    
+                                                    # Determine media type for proper sending
+                                                    is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
+                                                    
+                                                    if is_photo and watermarked_media != event.message.media:
+                                                        logger.info(f"📸 إرسال صورة مُعالجة كصورة: {modified_filename}")
+                                                        # Send watermarked photo as photo (not document)
+                                                        from send_file_helper import TelethonFileSender
+                                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                            client,
+                                                            target_entity,
+                                                            watermarked_media,
+                                                            modified_filename or "photo.jpg",
+                                                            caption=caption_text,
+                                                            silent=forwarding_settings['silent_notifications'],
+                                                            force_document=False,
+                                                            buttons=original_reply_markup or inline_buttons,
+                                                        )
+                                                    else:
+                                                        # Send other media types normally
+                                                        from send_file_helper import TelethonFileSender
+                                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                            client,
+                                                            target_entity,
+                                                            watermarked_media,
+                                                            modified_filename or "media_file.jpg",
+                                                            caption=caption_text,
+                                                            silent=forwarding_settings['silent_notifications'],
+                                                            force_document=False,
+                                                            buttons=original_reply_markup or inline_buttons,
+                                                        )
+                                    else:
+                                        # Regular text forward
+                                        forwarded_msg = await client.forward_messages(
+                                            target_entity,
+                                            event.message,
+                                            silent=forwarding_settings['silent_notifications']
+                                        )
+                                else:
+                                    # No formatting changes, forward normally
+                                    forwarded_msg = await client.forward_messages(
+                                        target_entity,
+                                        event.message,
+                                        silent=forwarding_settings['silent_notifications']
+                                    )
 
                         if forwarded_msg:
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
@@ -1195,7 +1180,7 @@ class UserbotService:
             # Use the actual message object with proper author signature
             is_blocked = await self._check_admin_filter(task_id, message)
             is_allowed = not is_blocked  # Invert because _check_admin_filter returns True if blocked
-
+            
             logger.info(f"👮‍♂️ [ADMIN FILTER] نتيجة فحص جديد: المرسل {message.sender_id}, محظور: {is_blocked}, مسموح: {is_allowed}")
             return is_allowed
         except Exception as e:
@@ -1226,11 +1211,11 @@ class UserbotService:
                 'post_author': None,  # No author signature in this context
                 'from_id': None
             })()
-
+            
             # Use the new admin filter logic
             is_blocked = await self._check_admin_filter(task_id, fake_message)
             is_allowed = not is_blocked  # Invert because _check_admin_filter returns True if blocked
-
+            
             logger.info(f"👮‍♂️ [ADMIN FILTER] نتيجة فحص جديد: المرسل {sender_id}, محظور: {is_blocked}, مسموح: {is_allowed}")
             return is_allowed
         except Exception as e:
@@ -1270,7 +1255,7 @@ class UserbotService:
         try:
             # Get translation settings for this task
             settings = self.db.get_translation_settings(task_id)
-
+            
             if not settings or not settings.get('enabled', False):
                 return message_text
 
@@ -1283,19 +1268,19 @@ class UserbotService:
                 return message_text
 
             logger.info(f"🌐 بدء ترجمة النص من {source_lang} إلى {target_lang} للمهمة {task_id}")
-
+            
             try:
                 # Use deep-translator for more reliable translation
                 translator = GoogleTranslator(source=source_lang, target=target_lang)
                 translated_text = translator.translate(message_text)
-
+                
                 if translated_text and translated_text != message_text:
                     logger.info(f"🌐 تم ترجمة النص بنجاح للمهمة {task_id}: '{message_text[:30]}...' → '{translated_text[:30]}...'")
                     return translated_text
                 else:
                     logger.debug(f"🌐 لم تتم الترجمة: النص مطابق أو فارغ")
                     return message_text
-
+                    
             except Exception as translate_error:
                 logger.error(f"❌ مشكلة في الترجمة: {translate_error}")
                 return message_text
@@ -1308,18 +1293,18 @@ class UserbotService:
         """Process collected album messages after delay"""
         try:
             await asyncio.sleep(1.5)  # Wait for all album messages to arrive
-
+            
             album_collector = self.album_collectors.get(user_id)
             if not album_collector:
                 return
-
+                
             album_data = album_collector.get_album_messages(group_id)
             if not album_data:
                 return
-
+                
             album_collector.mark_album_processed(group_id)
             logger.info(f"📸 معالجة ألبوم مجمع: {len(album_data)} رسائل (المجموعة: {group_id})")
-
+            
             # Group by target to send albums together per target
             targets = {}
             for item in album_data:
@@ -1327,7 +1312,7 @@ class UserbotService:
                 if target_id not in targets:
                     targets[target_id] = []
                 targets[target_id].append(item)
-
+            
             # Process each target
             for target_chat_id, target_items in targets.items():
                 try:
@@ -1336,17 +1321,17 @@ class UserbotService:
                         target_entity = target_chat_id
                     else:
                         target_entity = int(target_chat_id)
-
+                        
                     target_chat = await client.get_entity(target_entity)
                     task_info = target_items[0]['task_info']  # Use first item's task info
                     task = task_info['task']
-
+                    
                     logger.info(f"📸 إرسال ألبوم إلى {target_chat_id} ({len(target_items)} رسائل)")
-
+                    
                     # Process text for first message (albums usually share caption)
                     first_message = target_items[0]['message']
                     original_text = first_message.text or ""
-
+                    
                     # Apply text processing
                     message_settings = self.get_message_settings(task['id'])
                     cleaned_text = self.apply_text_cleaning(original_text, task['id']) if original_text else original_text
@@ -1354,18 +1339,18 @@ class UserbotService:
                     translated_text = await self.apply_translation(task['id'], modified_text) if modified_text else modified_text
                     formatted_text = self.apply_text_formatting(task['id'], translated_text) if translated_text else translated_text
                     final_text = self.apply_message_formatting(formatted_text, message_settings)
-
+                    
                     # Check if caption should be removed
                     text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
                     if text_cleaning_settings and text_cleaning_settings.get('remove_caption', False):
                         final_text = None
                         logger.info(f"🗑️ تم حذف التسمية التوضيحية للألبوم {task['id']}")
-
+                    
                     # Send album as grouped media files (copy mode)
                     media_files = []
                     for item in target_items:
                         media_files.append(item['message'].media)
-
+                    
                     # Send as single album
                     if final_text:
                         forwarded_msg = await client.send_file(
@@ -1374,7 +1359,6 @@ class UserbotService:
                             caption=final_text,
                             silent=task_info['forwarding_settings']['silent_notifications'],
                             parse_mode='HTML',
-                            buttons=original_reply_markup or inline_buttons,
                             force_document=False
                         )
                     else:
@@ -1382,21 +1366,11 @@ class UserbotService:
                             target_entity,
                             file=media_files,
                             silent=task_info['forwarding_settings']['silent_notifications'],
-                            buttons=original_reply_markup or inline_buttons,
                             force_document=False
                         )
-
+                    
                     logger.info(f"✅ تم إرسال ألبوم بنجاح إلى {target_chat_id}")
-
-                    # تنظيف الملفات المؤقتة
-                    for media_item in media_files:
-                        if isinstance(media_item, str) and os.path.exists(media_item):
-                            try:
-                                os.unlink(media_item)
-                                logger.info(f"🗑️ تم حذف الملف المؤقت: {media_item}")
-                            except:
-                                pass
-
+                    
                     # Save message mappings for all items
                     if isinstance(forwarded_msg, list):
                         for i, item in enumerate(target_items):
@@ -1412,13 +1386,13 @@ class UserbotService:
                                     )
                                 except Exception as mapping_error:
                                     logger.error(f"❌ فشل في حفظ تطابق رسالة الألبوم: {mapping_error}")
-
+                    
                 except Exception as target_error:
                     logger.error(f"❌ فشل في إرسال ألبوم إلى {target_chat_id}: {target_error}")
-
+                    
             # Cleanup
             album_collector.cleanup_album(group_id)
-
+            
         except Exception as e:
             logger.error(f"❌ خطأ في معالجة الألبوم {group_id}: {e}")
             # Cleanup on error
@@ -1467,22 +1441,22 @@ class UserbotService:
             # Get watermark settings
             watermark_settings = self.db.get_watermark_settings(task_id)
             logger.info(f"🏷️ فحص إعدادات العلامة المائية للمهمة {task_id}: {watermark_settings}")
-
+            
             if not watermark_settings.get('enabled', False):
                 logger.info(f"🏷️ العلامة المائية معطلة للمهمة {task_id}")
                 return event.message.media, None
-
+            
             # Check if message has media
             if not event.message.media:
                 return event.message.media, None
-
+            
             # Check media type and watermark settings
             is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
             is_video = hasattr(event.message.media, 'document') and event.message.media.document and event.message.media.document.mime_type and event.message.media.document.mime_type.startswith('video/')
             is_document = hasattr(event.message.media, 'document') and event.message.media.document and not is_video
-
+            
             logger.info(f"🏷️ نوع الوسائط للمهمة {task_id}: صورة={is_photo}, فيديو={is_video}, مستند={is_document}")
-
+            
             # Check if watermark should be applied to this media type
             if is_photo and not watermark_settings.get('apply_to_photos', True):
                 logger.debug(f"تخطي الصورة - العلامة المائية معطلة للصور في المهمة {task_id}")
@@ -1493,24 +1467,21 @@ class UserbotService:
             elif is_document and not watermark_settings.get('apply_to_documents', False):
                 logger.debug(f"تخطي المستند - العلامة المائية معطلة للمستندات في المهمة {task_id}")
                 return event.message.media, None
-
+            
             # Download media
-            media_bytes = await event.message.download_media(bytes_io=True)
-            if isinstance(media_bytes, io.BytesIO):
-                media_bytes = media_bytes.getvalue()
-
+            media_bytes = await event.message.download_media(bytes)
             if not media_bytes:
                 logger.warning(f"فشل في تحميل الوسائط للمهمة {task_id}")
                 return event.message.media, None
-
+            
             # Get file name with proper extension
             file_name = "media_file"
             file_extension = ""
-
+            
             # Try to get original filename from any media type first
             if hasattr(event.message.media, 'document') and event.message.media.document:
                 doc = event.message.media.document
-
+                
                 # Try to get original filename first
                 if hasattr(doc, 'attributes'):
                     for attr in doc.attributes:
@@ -1521,18 +1492,18 @@ class UserbotService:
                                 file_extension = '.' + file_name.split('.')[-1].lower()
                                 file_name = file_name.rsplit('.', 1)[0]
                             break
-
+                
             # If still no filename found and it's a photo, get from message attributes or generate
             elif is_photo:
                 file_name = "photo"
                 file_extension = ".jpg"  # Default for photos without document attributes
-
+                
                 # Try to get more specific info if available 
                 if hasattr(event.message.media, 'photo') and hasattr(event.message.media.photo, 'sizes'):
                     # Generate a unique filename based on photo ID if available
                     if hasattr(event.message.media.photo, 'id'):
                         file_name = f"photo_{event.message.media.photo.id}"
-
+                        
             # If no filename found, use mime type for documents
             if file_name == "media_file" and hasattr(event.message.media, 'document') and event.message.media.document and event.message.media.document.mime_type:
                 doc = event.message.media.document
@@ -1548,28 +1519,28 @@ class UserbotService:
                     'video/mkv': '.mkv',
                     'video/webm': '.webm'
                 }
-
+                
                 file_extension = mime_to_ext.get(doc.mime_type, '.bin')
-
+                
                 if doc.mime_type.startswith('video/'):
                     file_name = "video"
                 elif doc.mime_type.startswith('image/'):
                     file_name = "image"
                 else:
                     file_name = "document"
-
+            
             # Combine name and extension
             full_file_name = file_name + file_extension
-
+            
             logger.info(f"🏷️ تطبيق العلامة المائية على {full_file_name} للمهمة {task_id}")
-
+            
             # Apply watermark
             watermarked_media = self.watermark_processor.process_media_with_watermark(
                 media_bytes, 
                 full_file_name, 
                 watermark_settings
             )
-
+            
             if watermarked_media and watermarked_media != media_bytes:
                 logger.info(f"✅ تم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
                 logger.info(f"📁 اسم الملف المُرجع: {full_file_name}")
@@ -1579,7 +1550,7 @@ class UserbotService:
                 logger.info(f"📁 اسم الملف المُرجع (بدون علامة مائية): {full_file_name}")
                 # Even if watermark wasn't applied, return the improved filename
                 return event.message.media, full_file_name
-
+                
         except Exception as e:
             logger.error(f"خطأ في تطبيق العلامة المائية: {e}")
             return event.message.media, None
@@ -1702,7 +1673,7 @@ class UserbotService:
         try:
             settings = self.db.get_character_limit_settings(task_id)
             logger.info(f"🔍 إعدادات حد الأحرف للمهمة {task_id}: {settings}")
-
+            
             if not settings or not settings.get('enabled', False):
                 logger.info(f"✅ حد الأحرف غير مفعل للمهمة {task_id}")
                 return True
@@ -1761,7 +1732,7 @@ class UserbotService:
 
             # Check if rate limit is exceeded
             is_rate_limited = self.db.check_rate_limit(task_id)
-
+            
             if is_rate_limited:
                 logger.info(f"⏰ تم الوصول لحد المعدل: {max_messages} رسالة في {time_period_seconds} ثانية")
                 return False
@@ -1818,18 +1789,18 @@ class UserbotService:
         try:
             # Get advanced filter settings
             advanced_settings = self.db.get_advanced_filters_settings(task_id)
-
+            
             should_block = False
             should_remove_buttons = False  
             should_remove_forward = False
-
+            
             # Check forwarded message filter
             if advanced_settings.get('forwarded_message_filter_enabled', False):
                 forwarded_setting = self.db.get_forwarded_message_filter_setting(task_id)
-
+                
                 # Check if message is forwarded
                 is_forwarded = (hasattr(message, 'forward') and message.forward is not None)
-
+                
                 if is_forwarded:
                     if forwarded_setting:  # True = block mode
                         logger.info(f"🚫 رسالة معاد توجيهها - سيتم حظرها (وضع الحظر)")
@@ -1837,22 +1808,22 @@ class UserbotService:
                     else:  # False = remove forward mode
                         logger.info(f"📋 رسالة معاد توجيهها - سيتم إرسالها كنسخة (وضع حذف علامة التوجيه)")
                         should_remove_forward = True
-
+            
             # Check inline button filter 
             if not should_block:
                 inline_button_filter_enabled = advanced_settings.get('inline_button_filter_enabled', False)
                 inline_button_setting = self.db.get_inline_button_filter_setting(task_id)
-
+                
                 logger.debug(f"🔍 فحص فلتر الأزرار الشفافة: المهمة {task_id}, فلتر مفعل={inline_button_filter_enabled}, إعداد الحظر={inline_button_setting}")
-
+                
                 # Check if message has inline buttons first
                 has_buttons = (hasattr(message, 'reply_markup') and 
                              message.reply_markup is not None and
                              hasattr(message.reply_markup, 'rows') and
                              message.reply_markup.rows)
-
+                
                 logger.debug(f"🔍 الرسالة تحتوي على أزرار: {has_buttons}")
-
+                
                 if has_buttons:
                     # Case 1: Filter is enabled - use both settings
                     if inline_button_filter_enabled:
@@ -1868,44 +1839,44 @@ class UserbotService:
                         # Don't block or remove buttons - pass message as is
                     else:
                         logger.debug(f"✅ فلتر الأزرار الشفافة غير مفعل - تمرير الرسالة كما هي")
-
+            
             # Check duplicate filter
             if not should_block and advanced_settings.get('duplicate_filter_enabled', False):
                 duplicate_detected = await self._check_duplicate_message(task_id, message)
                 if duplicate_detected:
                     logger.info(f"🔄 رسالة مكررة - سيتم حظرها (فلتر التكرار)")
                     should_block = True
-
+            
             # Check language filter
             if not should_block and advanced_settings.get('language_filter_enabled', False):
                 language_blocked = await self._check_language_filter(task_id, message)
                 if language_blocked:
                     logger.info(f"🌍 رسالة محظورة بواسطة فلتر اللغة")
                     should_block = True
-
+            
             # Check day filter
             if not should_block and advanced_settings.get('day_filter_enabled', False):
                 day_blocked = self._check_day_filter(task_id)
                 if day_blocked:
                     logger.info(f"📅 رسالة محظورة بواسطة فلتر الأيام")
                     should_block = True
-
+            
             # Check admin filter
             if not should_block and advanced_settings.get('admin_filter_enabled', False):
                 admin_blocked = await self._check_admin_filter(task_id, message)
                 if admin_blocked:
                     logger.info(f"👮‍♂️ رسالة محظورة بواسطة فلتر المشرفين")
                     should_block = True
-
+            
             # Check working hours filter
             if not should_block and advanced_settings.get('working_hours_enabled', False):
                 working_hours_blocked = self._check_working_hours_filter(task_id)
                 if working_hours_blocked:
                     logger.info(f"⏰ رسالة محظورة بواسطة فلتر ساعات العمل")
                     should_block = True
-
+            
             return should_block, should_remove_buttons, should_remove_forward
-
+            
         except Exception as e:
             logger.error(f"خطأ في فحص الفلاتر المتقدمة: {e}")
             return False, False, False
@@ -1914,33 +1885,33 @@ class UserbotService:
         """Check if current day is allowed by day filter"""
         try:
             import datetime
-
+            
             # Get current day (0=Monday, 1=Tuesday, ..., 6=Sunday)
             today = datetime.datetime.now().weekday()
-
+            
             # Get day filter settings
             day_filters = self.db.get_day_filters(task_id)
             if not day_filters:
                 logger.debug(f"📅 لا توجد إعدادات فلتر الأيام للمهمة {task_id}")
                 return False
-
+            
             # Find today's setting
             today_allowed = True  # Default is allowed
             for day in day_filters:
                 if day['day_number'] == today:
                     today_allowed = day['is_allowed']
                     break
-
+            
             day_names = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
             today_name = day_names[today] if today < len(day_names) else f"يوم {today}"
-
+            
             if not today_allowed:
                 logger.info(f"📅 فلتر الأيام: اليوم {today_name} محظور - سيتم حظر الرسالة")
                 return True
             else:
                 logger.info(f"📅 فلتر الأيام: اليوم {today_name} مسموح - سيتم توجيه الرسالة")
                 return False
-
+                
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر الأيام: {e}")
             return False
@@ -1950,7 +1921,7 @@ class UserbotService:
         try:
             # Method 1: Try to get sender ID directly (for groups)
             sender_id = None
-
+            
             # For regular messages
             if hasattr(message, 'sender_id') and message.sender_id:
                 sender_id = message.sender_id
@@ -1960,39 +1931,39 @@ class UserbotService:
                     sender_id = message.from_id.user_id
                 else:
                     sender_id = message.from_id
-
+            
             # Method 2: Check for Telegram Author Signature (for channels)
             author_signature = None
-
+            
             # Check for post_author (Telegram's Author Signature feature)
             if hasattr(message, 'post_author') and message.post_author:
                 author_signature = message.post_author.strip()
                 logger.info(f"👮‍♂️ توقيع المؤلف (Author Signature): '{author_signature}'")
-
+            
             # Determine if this is a channel message (sender_id is channel ID)
             is_channel_message = sender_id and str(sender_id).startswith('-100')
-
+            
             # For channel messages with author signature, use signature matching
             if is_channel_message and author_signature:
                 logger.info(f"👮‍♂️ رسالة قناة مع توقيع المؤلف: '{author_signature}'")
                 return await self._check_admin_by_signature(task_id, author_signature)
-
+            
             # For user messages (groups), use ID matching
             elif sender_id and not is_channel_message:
                 logger.info(f"👮‍♂️ فحص المرسل بالمعرف: {sender_id}")
                 return await self._check_admin_by_id(task_id, sender_id)
-
+            
             # For channel messages without author signature, allow by default
             elif is_channel_message and not author_signature:
                 logger.debug(f"👮‍♂️ رسالة قناة بدون توقيع المؤلف - سيتم السماح")
                 return False
-
+            
             # If no valid identification method, allow message
             else:
                 logger.debug(f"👮‍♂️ لا يمكن تحديد هوية المرسل - سيتم السماح")
                 return False
-
-
+            
+                
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
             return False
@@ -2007,24 +1978,30 @@ class UserbotService:
             if not admin_filters:
                 logger.debug(f"👮‍♂️ لا توجد فلاتر مشرفين للمهمة {task_id}")
                 return False
-
+            
             # First pass: Look for exact matches (higher priority)
             exact_matches = []
             partial_matches = []
-
+            
             for admin in admin_filters:
                 admin_name = admin.get('admin_first_name', '').strip()
                 admin_username = admin.get('admin_username', '').strip()
                 is_allowed = admin.get('is_allowed', True)
-
+                
                 # Exact matching logic (highest priority)
                 exact_name_match = admin_name and author_signature.lower() == admin_name.lower()
                 exact_username_match = admin_username and author_signature.lower() == admin_username.lower()
-
+                
                 # Partial matching logic (lower priority)  
-                partial_name_match = admin_name and author_signature.lower() in admin_name.lower()
-                partial_username_match = admin_username and author_signature.lower() in admin_username.lower()
-
+                partial_name_match = admin_name and admin_name != author_signature and (
+                    author_signature.lower() in admin_name.lower() or
+                    admin_name.lower() in author_signature.lower()
+                )
+                
+                partial_username_match = admin_username and admin_username != author_signature and (
+                    author_signature.lower() in admin_username.lower()
+                )
+                
                 # Collect matches by priority
                 if exact_name_match or exact_username_match:
                     exact_matches.append((admin, 'exact'))
@@ -2032,37 +2009,37 @@ class UserbotService:
                 elif partial_name_match or partial_username_match:
                     partial_matches.append((admin, 'partial'))
                     logger.debug(f"🔍 تطابق جزئي مع المشرف '{admin_name}' (@{admin_username})")
-
+            
             # Process exact matches first (highest priority)
             for admin, match_type in exact_matches:
                 admin_name = admin.get('admin_first_name', '').strip()
                 admin_username = admin.get('admin_username', '').strip()
                 is_allowed = admin.get('is_allowed', True)
-
+                
                 if not is_allowed:
                     logger.error(f"🚫 [SIGNATURE BLOCK - EXACT] توقيع المؤلف '{author_signature}' محظور (تطابق دقيق مع '{admin_name}' أو '{admin_username}') - سيتم حظر الرسالة")
                     return True
                 else:
                     logger.info(f"✅ [SIGNATURE ALLOW - EXACT] توقيع المؤلف '{author_signature}' مسموح (تطابق دقيق مع '{admin_name}' أو '{admin_username}') - سيتم توجيه الرسالة")
                     return False
-
+            
             # Process partial matches only if no exact matches found
             for admin, match_type in partial_matches:
                 admin_name = admin.get('admin_first_name', '').strip()
                 admin_username = admin.get('admin_username', '').strip()
                 is_allowed = admin.get('is_allowed', True)
-
+                
                 if not is_allowed:
                     logger.error(f"🚫 [SIGNATURE BLOCK - PARTIAL] توقيع المؤلف '{author_signature}' محظور (تطابق جزئي مع '{admin_name}' أو '{admin_username}') - سيتم حظر الرسالة")
                     return True
                 else:
                     logger.info(f"✅ [SIGNATURE ALLOW - PARTIAL] توقيع المؤلف '{author_signature}' مسموح (تطابق جزئي مع '{admin_name}' أو '{admin_username}') - سيتم توجيه الرسالة")
                     return False
-
+            
             # If signature not found in admin list, allow by default
             logger.debug(f"👮‍♂️ توقيع المؤلف '{author_signature}' غير موجود في قائمة المشرفين - سيتم السماح")
             return False
-
+            
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر المشرفين بتوقيع المؤلف: {e}")
             return False
@@ -2076,17 +2053,17 @@ class UserbotService:
                 # Admin not in filter list - ALLOW by default
                 logger.debug(f"👮‍♂️ المرسل {sender_id} غير موجود في قائمة فلتر المشرفين - سيتم السماح (الافتراضي)")
                 return False
-
+            
             # If admin is in list, check their permission setting
             is_allowed = admin_setting.get('is_allowed', True)
-
+            
             if not is_allowed:
                 logger.info(f"👮‍♂️ فلتر المشرفين (بالمعرف): المرسل {sender_id} محظور صراحة - سيتم حظر الرسالة")
                 return True
             else:
                 logger.info(f"👮‍♂️ فلتر المشرفين (بالمعرف): المرسل {sender_id} مسموح صراحة - سيتم توجيه الرسالة")
                 return False
-
+                
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر المشرفين بالمعرف: {e}")
             return False
@@ -2095,34 +2072,34 @@ class UserbotService:
         """Check if current time is within working hours configuration"""
         try:
             import datetime
-
+            
             # Get working hours configuration
             working_hours = self.db.get_working_hours(task_id)
             if not working_hours:
                 logger.debug(f"⏰ لا توجد إعدادات ساعات العمل للمهمة {task_id}")
                 return False
-
+            
             mode = working_hours.get('mode', 'work_hours')  # 'work_hours' or 'sleep_hours'
             enabled_hours = working_hours.get('enabled_hours', [])
-
+            
             # For now, use UTC+3 (Riyadh timezone) as default
             timezone_offset = 3
-
+            
             # If no hours are configured, don't block
             if not enabled_hours:
                 logger.debug(f"⏰ لا توجد ساعات محددة في فلتر ساعات العمل للمهمة {task_id}")
                 return False
-
+            
             # Get current time with timezone offset (Riyadh = UTC+3)
             now = datetime.datetime.now() + datetime.timedelta(hours=timezone_offset)
             current_hour = now.hour
-
+            
             logger.info(f"⏰ فحص ساعات العمل للمهمة {task_id}: الساعة الحالية={current_hour:02d} (الرياض), الوضع={mode}")
             logger.info(f"⏰ الساعات المُحددة: {sorted(enabled_hours)}")
-
+            
             # Check if current hour is in enabled hours
             is_in_enabled_hours = current_hour in enabled_hours
-
+            
             if mode == 'work_hours':
                 # Work hours mode: Block if NOT in working hours
                 should_block = not is_in_enabled_hours
@@ -2137,9 +2114,9 @@ class UserbotService:
                     logger.info(f"⏰ وضع ساعات النوم: الساعة الحالية {current_hour:02d} في ساعات النوم - سيتم حظر الرسالة")
                 else:
                     logger.info(f"⏰ وضع ساعات النوم: الساعة الحالية {current_hour:02d} خارج ساعات النوم - سيتم توجيه الرسالة")
-
+            
             return should_block
-
+            
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر ساعات العمل: {e}")
             return False
@@ -2149,29 +2126,29 @@ class UserbotService:
         try:
             # Get duplicate filter settings
             settings = self.db.get_duplicate_settings(task_id)
-
+            
             if not settings:
                 logger.debug(f"❌ لا توجد إعدادات فلتر التكرار للمهمة {task_id}")
                 return False
-
+                
             # Check if any checks are enabled
             check_text = settings.get('check_text_similarity', False)
             check_media = settings.get('check_media_similarity', False)
-
+            
             if not check_text and not check_media:
                 logger.debug(f"❌ فحوصات فلتر التكرار معطلة للمهمة {task_id}")
                 return False
-
+                
             threshold = settings.get('similarity_threshold', 0.8)
             time_window_hours = settings.get('time_window_hours', 24)
-
+            
             logger.info(f"🔍 فحص تكرار الرسالة للمهمة {task_id}: نص={check_text}, وسائط={check_media}, نسبة={threshold*100:.0f}%, نافذة={time_window_hours}ساعة")
-
+            
             # Get message content to check
             message_text = message.message or ""
             message_media = None
             media_hash = None
-
+            
             # Extract media hash if exists
             if hasattr(message, 'media') and message.media:
                 if hasattr(message.media, 'photo'):
@@ -2184,37 +2161,37 @@ class UserbotService:
                     if hasattr(message.media.document, 'id'):
                         media_hash = str(message.media.document.id)
                         message_media = 'document'
-
+            
             # Check for duplicates in database
             import time
             current_time = int(time.time())
             time_window_seconds = time_window_hours * 3600
             cutoff_time = current_time - time_window_seconds
-
+            
             # Get recent messages from database
             recent_messages = self.db.get_recent_messages_for_duplicate_check(task_id, cutoff_time)
-
+            
             for stored_msg in recent_messages:
                 is_duplicate = False
-
+                
                 # Check text similarity if enabled
                 if check_text and message_text and stored_msg.get('message_text'):
                     similarity = self._calculate_text_similarity(message_text, stored_msg['message_text'])
                     if similarity >= threshold:
                         logger.info(f"🔄 نص مكرر: تشابه={similarity*100:.1f}% >= {threshold*100:.0f}%")
                         is_duplicate = True
-
+                
                 # Check media similarity if enabled
                 if check_media and media_hash and stored_msg.get('media_hash'):
                     if media_hash == stored_msg['media_hash']:
                         logger.info(f"🔄 وسائط مكررة: {media_hash}")
                         is_duplicate = True
-
+                
                 if is_duplicate:
                     # Update stored message timestamp to current time
                     self.db.update_message_timestamp_for_duplicate(stored_msg['id'], current_time)
                     return True
-
+            
             # Store this message for future duplicate checks
             self.db.store_message_for_duplicate_check(
                 task_id=task_id,
@@ -2223,35 +2200,35 @@ class UserbotService:
                 media_type=message_media,
                 timestamp=current_time
             )
-
+            
             logger.debug(f"✅ رسالة غير مكررة للمهمة {task_id}")
             return False
-
+            
         except Exception as e:
             logger.error(f"خطأ في فحص تكرار الرسالة: {e}")
             return False  # Allow message if check fails
-
+            
     def _calculate_text_similarity(self, text1: str, text2: str) -> float:
         """Calculate similarity between two texts"""
         try:
             if not text1 or not text2:
                 return 0.0
-
+                
             # Simple similarity based on common words
             words1 = set(text1.lower().split())
             words2 = set(text2.lower().split())
-
+            
             if not words1 and not words2:
                 return 1.0
             if not words1 or not words2:
                 return 0.0
-
+                
             intersection = len(words1.intersection(words2))
             union = len(words1.union(words2))
-
+            
             similarity = intersection / union if union > 0 else 0.0
             return similarity
-
+            
         except Exception as e:
             logger.error(f"خطأ في حساب تشابه النص: {e}")
             return 0.0
@@ -2263,28 +2240,28 @@ class UserbotService:
             language_data = self.db.get_language_filters(task_id)
             filter_mode = language_data['mode']  # 'allow' or 'block'
             languages = language_data['languages']
-
+            
             # If no languages configured, don't block
             if not languages:
                 logger.debug(f"🌍 لا توجد لغات محددة في الفلتر للمهمة {task_id}")
                 return False
-
+            
             # Extract message text
             message_text = message.message or ""
             if not message_text.strip():
                 logger.debug(f"🌍 رسالة بدون نص - لن يتم فلترتها")
                 return False
-
+            
             # Simple language detection based on script/characters
             detected_language = self._detect_message_language(message_text)
             logger.info(f"🌍 لغة الرسالة المكتشفة: {detected_language}")
-
+            
             # Check if language is in filter list
             selected_languages = [lang['language_code'] for lang in languages if lang['is_allowed']]
             is_language_selected = detected_language in selected_languages
-
+            
             logger.info(f"🌍 فلتر اللغة - الوضع: {filter_mode}, اللغة المكتشفة: {detected_language}, اللغات المحددة: {selected_languages}")
-
+            
             # Apply filter logic
             if filter_mode == 'allow':
                 # Allow mode: block if language NOT in selected list
@@ -2296,9 +2273,9 @@ class UserbotService:
                 should_block = is_language_selected  
                 if should_block:
                     logger.info(f"🚫 حظر الرسالة - وضع الحظر: اللغة {detected_language} محظورة")
-
+            
             return should_block
-
+            
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر اللغة: {e}")
             return False
@@ -2308,24 +2285,24 @@ class UserbotService:
         try:
             # Remove spaces and punctuation for analysis
             clean_text = ''.join(c for c in text if c.isalpha())
-
+            
             if not clean_text:
                 return 'unknown'
-
+            
             # Count character types
             arabic_chars = sum(1 for c in clean_text if '\u0600' <= c <= '\u06FF' or '\u0750' <= c <= '\u077F')
             latin_chars = sum(1 for c in clean_text if 'a' <= c.lower() <= 'z')
             cyrillic_chars = sum(1 for c in clean_text if '\u0400' <= c <= '\u04FF')
-
+            
             total_chars = len(clean_text)
-
+            
             # Calculate percentages
             arabic_ratio = arabic_chars / total_chars if total_chars > 0 else 0
             latin_ratio = latin_chars / total_chars if total_chars > 0 else 0
             cyrillic_ratio = cyrillic_chars / total_chars if total_chars > 0 else 0
-
+            
             logger.debug(f"🔍 تحليل النص: عربي={arabic_ratio:.2f}, لاتيني={latin_ratio:.2f}, كيريلي={cyrillic_ratio:.2f}")
-
+            
             # Determine primary language (threshold: 30%)
             if arabic_ratio > 0.3:
                 return 'ar'
@@ -2347,7 +2324,7 @@ class UserbotService:
                 elif any(word in text_lower for word in ['مرحبا', 'أهلا', 'نعم', 'لا', 'شكرا']):
                     return 'ar'
                 return 'unknown'
-
+                
         except Exception as e:
             logger.error(f"خطأ في كشف اللغة: {e}")
             return 'unknown'
@@ -2559,7 +2536,7 @@ class UserbotService:
             logger.error(f"خطأ في جلب مشرفي القناة {channel_id}: {e}")
             return -1
 
-    def _try_immediate_fetch(self, user_id: int, channel_id: str, task_id: int):
+    def _try_immediate_fetch(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Try to fetch admins using a different approach"""
         try:
             import threading
@@ -2938,7 +2915,7 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في اختبار تنسيق النص: {e}")
             return message_text
-
+    
     def _process_spoiler_entities(self, text: str) -> Tuple[str, List]:
         """
         معالجة علامات spoiler وتحويلها إلى MessageEntitySpoiler
@@ -2946,24 +2923,24 @@ class UserbotService:
         """
         entities = []
         processed_text = text
-
+        
         # البحث عن جميع علامات spoiler
         pattern = r'TELETHON_SPOILER_START(.*?)TELETHON_SPOILER_END'
         matches = list(re.finditer(pattern, text))
-
+        
         if not matches:
             return text, []
-
+        
         # معالجة المطابقات بترتيب عكسي للحفاظ على الفهارس
         offset_adjustment = 0
         for match in reversed(matches):
             start_pos = match.start()
             end_pos = match.end()
             spoiler_text = match.group(1)
-
+            
             # استبدال العلامة بالنص العادي أولاً
             processed_text = processed_text[:start_pos] + spoiler_text + processed_text[end_pos:]
-
+        
         # الآن إضافة الكيانات بالمواضع الصحيحة
         offset = 0
         for match in re.finditer(pattern, text):
@@ -2976,9 +2953,9 @@ class UserbotService:
             # تحديث الفهرس بطول العلامات المُزالة
             marker_length = len('TELETHON_SPOILER_START') + len('TELETHON_SPOILER_END')
             offset += marker_length
-
+        
         logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler في النص")
-
+        
         return processed_text, entities
 
 # Global userbot instance

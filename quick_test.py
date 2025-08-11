@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """اختبار سريع للتحديثات الجديدة في خوارزمية تحديد حجم العلامة المائية"""
 
@@ -65,72 +64,19 @@ def test_with_real_settings():
             settings.get('position', 'bottom')
         )
         
-        print(f"🎯 النتيجة مع الإعدادات الفعلية:")
-        print(f"   ➤ حجم العلامة الأصلي: {watermark_size}")
+        actual_percentage = (calculated_size[0] / test_image_size[0]) * 100
+        
+        print("📈 النتيجة مع الإعدادات الفعلية:")
+        print(f"   ➤ العلامة المائية الأصلية: {watermark_size}")
         print(f"   ➤ الحجم المحسوب: {calculated_size}")
-        print(f"   ➤ نسبة التغيير: {(calculated_size[0]/watermark_size[0]*100):.1f}%")
-    else:
-        print("⚠️ لا توجد علامة مائية صورة في الإعدادات")
-
-def test_video_capabilities():
-    """اختبار قدرات معالجة الفيديو"""
-    print("\n🎬 اختبار قدرات معالجة الفيديو:")
-    
-    try:
-        import cv2
-        print("✅ OpenCV متاح")
-        
-        # اختبار إنشاء فيديو بسيط
-        import tempfile
-        import numpy as np
-        
-        temp_video = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        temp_video.close()
-        
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(temp_video.name, fourcc, 20.0, (320, 240))
-        
-        # إنشاء 10 إطارات
-        for i in range(10):
-            frame = np.zeros((240, 320, 3), dtype=np.uint8)
-            frame[:, :, i % 3] = 255  # لون مختلف لكل إطار
-            out.write(frame)
-        
-        out.release()
-        
-        # قراءة الفيديو للتأكد
-        cap = cv2.VideoCapture(temp_video.name)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
-        
-        print(f"✅ تم إنشاء فيديو اختبار بـ {frame_count} إطار")
-        
-        # تنظيف
-        os.unlink(temp_video.name)
-        
-    except ImportError:
-        print("❌ OpenCV غير متاح")
-    except Exception as e:
-        print(f"❌ خطأ في اختبار الفيديو: {e}")
-    
-    # اختبار FFmpeg
-    try:
-        import subprocess
-        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            print("✅ FFmpeg متاح")
-        else:
-            print("⚠️ FFmpeg غير متاح")
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        print("⚠️ FFmpeg غير مثبت")
-    except Exception as e:
-        print(f"❌ خطأ في فحص FFmpeg: {e}")
+        print(f"   ➤ النسبة الفعلية: {actual_percentage:.1f}%")
+        print(f"   ➤ مقارنة مع الـ logs السابقة: {'✅ تحسن كبير' if actual_percentage > 50 else '❌ ما زال صغيراً'}")
 
 if __name__ == "__main__":
-    print("🚀 بدء الاختبار السريع...")
-    
+    print("🚀 بدء اختبار الحسابات الجديدة...")
+    print("=" * 50)
     test_size_calculation()
-    test_with_real_settings() 
-    test_video_capabilities()
-    
-    print("\n🎉 انتهى الاختبار السريع")
+    print("=" * 50)
+    test_with_real_settings()
+    print("=" * 50)
+    print("✅ انتهى الاختبار")
