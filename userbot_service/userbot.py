@@ -500,16 +500,26 @@ class UserbotService:
                         if original_text != final_text and original_text:
                             logger.info(f"🔄 تم تطبيق تنسيق الرسالة: '{original_text}' → '{final_text}'")
 
-                        # Prepare inline buttons if enabled and not filtered out
+                        # Determine which buttons to use (original or custom)
                         inline_buttons = None
+                        original_reply_markup = None
+                        
+                        # Preserve original reply markup if inline button filter is disabled
+                        if not should_remove_buttons and event.message.reply_markup:
+                            original_reply_markup = event.message.reply_markup
+                            logger.info(f"🔘 الحفاظ على الأزرار الأصلية - فلتر الأزرار الشفافة معطل للمهمة {task['id']}")
+                        
+                        # Build custom inline buttons if enabled and not filtered out
                         if message_settings['inline_buttons_enabled'] and not should_remove_buttons:
                             inline_buttons = self.build_inline_buttons(task['id'])
                             if inline_buttons:
-                                logger.info(f"🔘 تم بناء {len(inline_buttons)} صف من الأزرار الإنلاين للمهمة {task['id']}")
+                                logger.info(f"🔘 تم بناء {len(inline_buttons)} صف من الأزرار الإنلاين المخصصة للمهمة {task['id']}")
                             else:
-                                logger.warning(f"⚠️ فشل في بناء الأزرار الإنلاين للمهمة {task['id']}")
+                                logger.warning(f"⚠️ فشل في بناء الأزرار الإنلاين المخصصة للمهمة {task['id']}")
                         elif should_remove_buttons and message_settings['inline_buttons_enabled']:
                             logger.info(f"🗑️ تم تجاهل الأزرار الشفافة بسبب إعدادات الفلتر للمهمة {task['id']}")
+                        elif should_remove_buttons:
+                            logger.info(f"🗑️ تم حذف الأزرار الأصلية بسبب فلتر الأزرار الشفافة للمهمة {task['id']}")
 
                         # Get forwarding settings
                         forwarding_settings = self.get_forwarding_settings(task['id'])
@@ -536,22 +546,26 @@ class UserbotService:
                                     processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
                                     
                                     if spoiler_entities:
-                                        # Send with spoiler entities
+                                        # Send with spoiler entities and buttons
                                         forwarded_msg = await client.send_message(
                                             target_entity,
                                             processed_text,
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
-                                            formatting_entities=spoiler_entities
+                                            formatting_entities=spoiler_entities,
+                                            buttons=inline_buttons,
+                                            reply_markup=original_reply_markup
                                         )
                                     else:
-                                        # Send normally
+                                        # Send normally with buttons
                                         forwarded_msg = await client.send_message(
                                             target_entity,
                                             processed_text,
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML'
+                                            parse_mode='HTML',
+                                            buttons=inline_buttons,
+                                            reply_markup=original_reply_markup
                                         )
                                 else:
                                     # Regular media message with caption handling
@@ -575,7 +589,9 @@ class UserbotService:
                                             caption=caption_text,
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if caption_text else None,
-                                            force_document=False
+                                            force_document=False,
+                                            buttons=inline_buttons,
+                                            reply_markup=original_reply_markup
                                         )
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
@@ -587,7 +603,9 @@ class UserbotService:
                                             caption=caption_text,
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if caption_text else None,
-                                            force_document=False
+                                            force_document=False,
+                                            buttons=inline_buttons,
+                                            reply_markup=original_reply_markup
                                         )
                             elif event.message.text or final_text:
                                 # Pure text message
@@ -603,7 +621,8 @@ class UserbotService:
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
                                         formatting_entities=spoiler_entities,
-                                        buttons=inline_buttons
+                                        buttons=inline_buttons,
+                                        reply_markup=original_reply_markup
                                     )
                                 else:
                                     # Send normally with buttons
@@ -613,7 +632,8 @@ class UserbotService:
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
                                         parse_mode='HTML',
-                                        buttons=inline_buttons
+                                        buttons=inline_buttons,
+                                        reply_markup=original_reply_markup
                                     )
                             else:
                                 # Fallback to forward for other types
@@ -636,22 +656,26 @@ class UserbotService:
                                         processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
                                         
                                         if spoiler_entities:
-                                            # Send with spoiler entities
+                                            # Send with spoiler entities and buttons
                                             forwarded_msg = await client.send_message(
                                                 target_entity,
                                                 processed_text,
                                                 link_preview=forwarding_settings['link_preview_enabled'],
                                                 silent=forwarding_settings['silent_notifications'],
-                                                formatting_entities=spoiler_entities
+                                                formatting_entities=spoiler_entities,
+                                                buttons=inline_buttons,
+                                                reply_markup=original_reply_markup
                                             )
                                         else:
-                                            # Send normally
+                                            # Send normally with buttons
                                             forwarded_msg = await client.send_message(
                                                 target_entity,
                                                 processed_text,
                                                 link_preview=forwarding_settings['link_preview_enabled'],
                                                 silent=forwarding_settings['silent_notifications'],
-                                                parse_mode='HTML'
+                                                parse_mode='HTML',
+                                                buttons=inline_buttons,
+                                                reply_markup=original_reply_markup
                                             )
                                     else:
                                         # Regular media message with caption handling
@@ -675,7 +699,9 @@ class UserbotService:
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
-                                                force_document=False
+                                                force_document=False,
+                                                buttons=inline_buttons,
+                                                reply_markup=original_reply_markup
                                             )
                                         else:
                                             # Keep album grouped: send as new media (copy mode)
@@ -687,7 +713,9 @@ class UserbotService:
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
-                                                force_document=False
+                                                force_document=False,
+                                                buttons=inline_buttons,
+                                                reply_markup=original_reply_markup
                                             )
                                 else:
                                     # Process spoiler entities if present
@@ -695,22 +723,26 @@ class UserbotService:
                                     processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
                                     
                                     if spoiler_entities:
-                                        # Send with spoiler entities
+                                        # Send with spoiler entities and buttons
                                         forwarded_msg = await client.send_message(
                                             target_entity,
                                             processed_text,
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
-                                            formatting_entities=spoiler_entities
+                                            formatting_entities=spoiler_entities,
+                                            buttons=inline_buttons,
+                                            reply_markup=original_reply_markup
                                         )
                                     else:
-                                        # Send normally
+                                        # Send normally with buttons
                                         forwarded_msg = await client.send_message(
                                             target_entity,
                                             processed_text,
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML'
+                                            parse_mode='HTML',
+                                            buttons=inline_buttons,
+                                            reply_markup=original_reply_markup
                                         )
                             else:
                                 # Check if we need copy mode for caption removal or album splitting on media
@@ -731,7 +763,9 @@ class UserbotService:
                                                 target_entity,
                                                 event.message.text or "رسالة",
                                                 link_preview=forwarding_settings['link_preview_enabled'],
-                                                silent=forwarding_settings['silent_notifications']
+                                                silent=forwarding_settings['silent_notifications'],
+                                                buttons=inline_buttons,
+                                                reply_markup=original_reply_markup
                                             )
                                         else:
                                             # Regular media message with caption handling
@@ -749,7 +783,9 @@ class UserbotService:
                                                     event.message.media,
                                                     caption=caption_text,
                                                     silent=forwarding_settings['silent_notifications'],
-                                                    force_document=False
+                                                    force_document=False,
+                                                    buttons=inline_buttons,
+                                                    reply_markup=original_reply_markup
                                                 )
                                             else:
                                                 # Keep album grouped
@@ -768,7 +804,9 @@ class UserbotService:
                                                         event.message.media,
                                                         caption=caption_text,
                                                         silent=forwarding_settings['silent_notifications'],
-                                                        force_document=False
+                                                        force_document=False,
+                                                        buttons=inline_buttons,
+                                                        reply_markup=original_reply_markup
                                                     )
                                     else:
                                         # Regular text forward
