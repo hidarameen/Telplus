@@ -32,8 +32,10 @@ class WatermarkProcessor:
         position_map = {
             'top_left': (margin, margin),
             'top_right': (base_width - watermark_width - margin, margin),
+            'top': ((base_width - watermark_width) // 2, margin),
             'bottom_left': (margin, base_height - watermark_height - margin),
             'bottom_right': (base_width - watermark_width - margin, base_height - watermark_height - margin),
+            'bottom': ((base_width - watermark_width) // 2, base_height - watermark_height - margin),
             'center': ((base_width - watermark_width) // 2, (base_height - watermark_height) // 2)
         }
         

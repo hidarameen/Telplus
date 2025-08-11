@@ -1709,14 +1709,32 @@ class SimpleTelegramBot:
                 await self.handle_adding_text_cleaning_keywords(event, state_data)
                 return
             elif state.startswith('watermark_text_input_'): # Handle watermark text input
-                task_id = data.get('task_id')
-                if task_id:
-                    await self.handle_watermark_text_input(event, task_id)
+                try:
+                    task_id = data.get('task_id')
+                    if task_id:
+                        await self.handle_watermark_text_input(event, task_id)
+                    else:
+                        # Extract task_id from state if not in data
+                        task_id = int(state.split('_')[-1])
+                        await self.handle_watermark_text_input(event, task_id)
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة إدخال نص العلامة المائية: {e}")
+                    await event.respond("❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    self.clear_user_state(user_id)
                 return
             elif state.startswith('watermark_image_input_'): # Handle watermark image input
-                task_id = data.get('task_id')
-                if task_id:
-                    await self.handle_watermark_image_input(event, task_id)
+                try:
+                    task_id = data.get('task_id')
+                    if task_id:
+                        await self.handle_watermark_image_input(event, task_id)
+                    else:
+                        # Extract task_id from state if not in data
+                        task_id = int(state.split('_')[-1])
+                        await self.handle_watermark_image_input(event, task_id)
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة إدخال صورة العلامة المائية: {e}")
+                    await event.respond("❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    self.clear_user_state(user_id)
                 return
             elif state == 'waiting_watermark_size': # Handle setting watermark size
                 task_id = int(data)
@@ -2938,12 +2956,14 @@ class SimpleTelegramBot:
         type_display = "📝 نص" if watermark_type == 'text' else "🖼️ صورة"
         
         # Get position
-        position = watermark_settings.get('position', 'bottom-right')
+        position = watermark_settings.get('position', 'bottom_right')
         position_map = {
-            'top-left': 'أعلى يسار',
-            'top-right': 'أعلى يمين', 
-            'bottom-left': 'أسفل يسار',
-            'bottom-right': 'أسفل يمين',
+            'top_left': 'أعلى يسار',
+            'top': 'أعلى وسط',
+            'top_right': 'أعلى يمين', 
+            'bottom_left': 'أسفل يسار',
+            'bottom': 'أسفل وسط',
+            'bottom_right': 'أسفل يمين',
             'center': 'الوسط'
         }
         position_display = position_map.get(position, position)
@@ -3096,8 +3116,10 @@ class SimpleTelegramBot:
         
         position_map = {
             'top_left': 'أعلى يسار',
+            'top': 'أعلى وسط',
             'top_right': 'أعلى يمين', 
             'bottom_left': 'أسفل يسار',
+            'bottom': 'أسفل وسط',
             'bottom_right': 'أسفل يمين',
             'center': 'الوسط'
         }
@@ -3120,8 +3142,10 @@ class SimpleTelegramBot:
         """Set watermark position"""
         position_map = {
             'top_left': 'أعلى يسار',
+            'top': 'أعلى وسط',
             'top_right': 'أعلى يمين', 
             'bottom_left': 'أسفل يسار',
+            'bottom': 'أسفل وسط',
             'bottom_right': 'أسفل يمين',
             'center': 'الوسط'
         }
@@ -3130,6 +3154,10 @@ class SimpleTelegramBot:
         await event.answer(f"✅ تم تغيير الموقع إلى: {position_map.get(position, position)}")
         
         # Refresh position selector display
+        await self.show_watermark_position_selector(event, task_id)
+    
+    async def show_watermark_position_settings(self, event, task_id):
+        """Show watermark position settings (alias for position selector)"""
         await self.show_watermark_position_selector(event, task_id)
 
     async def show_watermark_type(self, event, task_id):
