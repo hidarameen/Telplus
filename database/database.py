@@ -4434,3 +4434,71 @@ class Database:
             logger.error(f"خطأ في تحديث إعدادات الوسائط للعلامة المائية: {e}")
             return False
 
+    # ===== Pending Messages Management (Manual Publishing Mode) =====
+
+    def add_pending_message(self, task_id: int, user_id: int, source_chat_id: str, 
+                           source_message_id: int, message_data: str, message_type: str = 'text') -> int:
+        """Add a pending message for manual approval"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO pending_messages 
+                (task_id, user_id, source_chat_id, source_message_id, message_data, message_type)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (task_id, user_id, source_chat_id, source_message_id, message_data, message_type))
+            conn.commit()
+            pending_id = cursor.lastrowid
+            logger.info(f"✅ تم حفظ رسالة للموافقة اليدوية - ID: {pending_id}")
+            return pending_id
+
+    def get_pending_message(self, pending_id: int) -> Optional[Dict]:
+        """Get a specific pending message"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM pending_messages WHERE id = ?
+            ''', (pending_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return dict(result)
+            return None
+
+    def get_pending_messages(self, user_id: int, task_id: int = None) -> List[Dict]:
+        """Get all pending messages for a user"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if task_id:
+                cursor.execute('''
+                    SELECT * FROM pending_messages 
+                    WHERE user_id = ? AND task_id = ? AND status = 'pending'
+                    ORDER BY created_at DESC
+                ''', (user_id, task_id))
+            else:
+                cursor.execute('''
+                    SELECT * FROM pending_messages 
+                    WHERE user_id = ? AND status = 'pending'
+                    ORDER BY created_at DESC
+                ''', (user_id,))
+            
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_pending_message_status(self, pending_id: int, status: str, approval_message_id: int = None):
+        """Update the status of a pending message"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if approval_message_id:
+                cursor.execute('''
+                    UPDATE pending_messages 
+                    SET status = ?, approval_message_id = ?
+                    WHERE id = ?
+                ''', (status, approval_message_id, pending_id))
+            else:
+                cursor.execute('''
+                    UPDATE pending_messages 
+                    SET status = ?
+                    WHERE id = ?
+                ''', (status, pending_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
