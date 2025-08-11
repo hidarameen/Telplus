@@ -1708,7 +1708,7 @@ class UserbotService:
                 admin_username = admin.get('admin_username', '').strip()
                 is_allowed = admin.get('is_allowed', True)
                 
-                # Match by name or username (exact or partial match)
+                # Enhanced matching logic with detailed logging
                 name_match = admin_name and (
                     author_signature.lower() == admin_name.lower() or
                     author_signature.lower() in admin_name.lower() or
@@ -1720,12 +1720,17 @@ class UserbotService:
                     author_signature.lower() in admin_username.lower()
                 )
                 
+                # Detailed logging for debugging
+                logger.info(f"👮‍♂️ [SIGNATURE DEBUG] فحص المشرف: اسم='{admin_name}', مستخدم='{admin_username}', مسموح={is_allowed}")
+                logger.info(f"👮‍♂️ [SIGNATURE DEBUG] توقيع المؤلف: '{author_signature}'")
+                logger.info(f"👮‍♂️ [SIGNATURE DEBUG] تطابق الاسم: {name_match}, تطابق المستخدم: {username_match}")
+                
                 if name_match or username_match:
                     if not is_allowed:
-                        logger.info(f"👮‍♂️ فلتر المشرفين (بتوقيع المؤلف): '{author_signature}' محظور - سيتم حظر الرسالة")
+                        logger.error(f"🚫 [SIGNATURE BLOCK] توقيع المؤلف '{author_signature}' محظور (تطابق مع '{admin_name}' أو '{admin_username}') - سيتم حظر الرسالة")
                         return True
                     else:
-                        logger.info(f"👮‍♂️ فلتر المشرفين (بتوقيع المؤلف): '{author_signature}' مسموح - سيتم توجيه الرسالة")
+                        logger.info(f"✅ [SIGNATURE ALLOW] توقيع المؤلف '{author_signature}' مسموح (تطابق مع '{admin_name}' أو '{admin_username}') - سيتم توجيه الرسالة")
                         return False
             
             # If signature not found in admin list, allow by default
