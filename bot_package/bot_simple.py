@@ -900,7 +900,7 @@ class SimpleTelegramBot:
                 if len(parts) >= 4:
                     try:
                         task_id = int(parts[3])
-                        await self.toggle_inline_button_block(event, task_id)
+                        await self.toggle_inline_button_filter(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الأزرار: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -1802,7 +1802,7 @@ class SimpleTelegramBot:
         # Get current settings
         settings = self.db.get_advanced_filters_settings(task_id)
         is_enabled = settings.get('day_filter_enabled', False)
-        day_filters = self.db.get_task_day_filters(task_id)
+        day_filters = self.db.get_day_filters(task_id)
         
         status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
         
@@ -1845,16 +1845,16 @@ class SimpleTelegramBot:
         
         try:
             # Get current day filters
-            day_filters = self.db.get_task_day_filters(task_id)
+            day_filters = self.db.get_day_filters(task_id)
             is_selected = any(df['day_number'] == day_number for df in day_filters)
             
             if is_selected:
-                # Remove the day
-                success = self.db.remove_day_filter(task_id, day_number)
+                # Remove the day by setting to False
+                success = self.db.set_day_filter(task_id, day_number, False)
                 action = "تم إلغاء تحديد"
             else:
-                # Add the day
-                success = self.db.add_day_filter(task_id, day_number)
+                # Add the day by setting to True
+                success = self.db.set_day_filter(task_id, day_number, True)
                 action = "تم تحديد"
             
             if success:
@@ -1869,8 +1869,14 @@ class SimpleTelegramBot:
                 except Exception as e:
                     logger.error(f"خطأ في تحديث مهام UserBot: {e}")
                 
-                # Refresh the menu
-                await self.show_day_filters(event, task_id)
+                # Refresh the menu - catch content modification error
+                try:
+                    await self.show_day_filters(event, task_id)
+                except Exception as e:
+                    if "Content of the message was not modified" in str(e):
+                        logger.debug("المحتوى لم يتغير، تجاهل الخطأ")
+                    else:
+                        raise e
             else:
                 await event.answer("❌ فشل في التحديث")
                 
@@ -1884,14 +1890,14 @@ class SimpleTelegramBot:
         
         try:
             if select_all:
-                # Add all days
+                # Add all days using set_day_filter
                 for day_num in range(1, 8):
-                    self.db.add_day_filter(task_id, day_num)
+                    self.db.set_day_filter(task_id, day_num, True)
                 await event.answer("✅ تم تحديد جميع الأيام")
             else:
-                # Remove all days
+                # Remove all days using set_day_filter with False
                 for day_num in range(1, 8):
-                    self.db.remove_day_filter(task_id, day_num)
+                    self.db.set_day_filter(task_id, day_num, False)
                 await event.answer("✅ تم إلغاء تحديد جميع الأيام")
             
             # Force refresh UserBot tasks
@@ -1902,8 +1908,14 @@ class SimpleTelegramBot:
             except Exception as e:
                 logger.error(f"خطأ في تحديث مهام UserBot: {e}")
             
-            # Refresh the menu
-            await self.show_day_filters(event, task_id)
+            # Refresh the menu - catch content modification error
+            try:
+                await self.show_day_filters(event, task_id)
+            except Exception as e:
+                if "Content of the message was not modified" in str(e):
+                    logger.debug("المحتوى لم يتغير، تجاهل الخطأ")
+                else:
+                    raise e
             
         except Exception as e:
             logger.error(f"خطأ في تحديد/إلغاء جميع الأيام: {e}")
@@ -1994,16 +2006,6 @@ class SimpleTelegramBot:
             f"اختر الميزة التي تريد إدارتها:",
             buttons=buttons
         )
-
-
-        except Exception as e:
-            import traceback
-            logger.error(f"خطأ في معالج الأزرار: {e}, data='{data}', user_id={user_id}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            try:
-                await event.answer("❌ حدث خطأ، حاول مرة أخرى")
-            except:
-                pass  # Sometimes event.answer fails if callback is already processed
 
     async def handle_message(self, event):
         """Handle text messages"""
@@ -2591,11 +2593,17 @@ class SimpleTelegramBot:
             return
             
         # Get current settings
-        settings = self.db.get_working_hours_settings(task_id)
-        is_enabled = settings.get('enabled', False)
-        mode = settings.get('mode', 'block')
-        start_hour = settings.get('start_hour', 9)
-        end_hour = settings.get('end_hour', 17)
+        advanced_settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = advanced_settings.get('working_hours_enabled', False)
+        settings = self.db.get_working_hours(task_id)
+        if settings:
+            mode = settings.get('mode', 'work_hours')
+            start_hour = settings.get('start_hour', 9)
+            end_hour = settings.get('end_hour', 17)
+        else:
+            mode = 'work_hours'
+            start_hour = 9
+            end_hour = 17
         
         status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
         mode_text = "حظر خارج الساعات" if mode == 'block' else "السماح في الساعات فقط"
@@ -2626,10 +2634,11 @@ class SimpleTelegramBot:
             return
             
         # Get current settings
-        settings = self.db.get_language_filter_settings(task_id)
-        is_enabled = settings.get('enabled', False)
-        mode = settings.get('mode', 'block')
-        languages = self.db.get_task_languages(task_id)
+        settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = settings.get('language_filter_enabled', False)
+        filter_settings = self.db.get_language_filters(task_id)
+        mode = filter_settings.get('mode', 'allow')
+        languages = filter_settings.get('languages', [])
         
         status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
         mode_text = "حظر اللغات المحددة" if mode == 'block' else "السماح للغات المحددة فقط"
@@ -2662,7 +2671,7 @@ class SimpleTelegramBot:
         # Get current settings
         settings = self.db.get_advanced_filters_settings(task_id)
         is_enabled = settings.get('admin_filter_enabled', False)
-        admins = self.db.get_task_admin_filters(task_id)
+        admins = self.db.get_admin_filters(task_id)
         
         status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
         
@@ -2691,7 +2700,7 @@ class SimpleTelegramBot:
             return
             
         # Get current settings
-        settings = self.db.get_duplicate_filter_settings(task_id)
+        settings = self.db.get_duplicate_settings(task_id)
         is_enabled = settings.get('enabled', False)
         threshold = settings.get('similarity_threshold', 80)
         time_window = settings.get('time_window_hours', 24)
@@ -4488,6 +4497,156 @@ class SimpleTelegramBot:
             "يمكنك المحاولة مرة أخرى في أي وقت",
             buttons=buttons
         )
+
+    # Add missing methods for advanced filters
+    async def toggle_working_hours(self, event, task_id):
+        """Toggle working hours filter"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Get current setting
+            settings = self.db.get_advanced_filters_settings(task_id)
+            current_setting = settings.get('working_hours_enabled', False)
+            new_setting = not current_setting
+            
+            # Update setting
+            success = self.db.toggle_advanced_filter(task_id, 'working_hours', new_setting)
+            
+            if success:
+                status = "🟢 مفعل" if new_setting else "🔴 معطل"
+                await event.answer(f"✅ تم تحديث فلتر ساعات العمل: {status}")
+                
+                # Force refresh UserBot tasks
+                try:
+                    from userbot_service.userbot import userbot_instance
+                    if user_id in userbot_instance.clients:
+                        await userbot_instance.refresh_user_tasks(user_id)
+                        logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير فلتر ساعات العمل")
+                except Exception as e:
+                    logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+                
+                # Return to working hours filter menu
+                await self.show_working_hours_filter(event, task_id)
+            else:
+                await event.answer("❌ فشل في تحديث الإعداد")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل فلتر ساعات العمل: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def start_set_working_hours(self, event, task_id):
+        """Start setting working hours"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Set conversation state for working hours input
+        state_data = {
+            'task_id': task_id,
+            'step': 'start_hour'
+        }
+        self.db.set_conversation_state(user_id, 'setting_working_hours', json.dumps(state_data))
+        
+        await event.edit(
+            "🕐 **تحديد ساعات العمل**\n\n"
+            "أدخل ساعة البداية (0-23):\n"
+            "مثال: 9 للساعة 9 صباحاً\n"
+            "أو 13 للساعة 1 ظهراً",
+            buttons=[[Button.inline("❌ إلغاء", f"working_hours_filter_{task_id}")]]
+        )
+
+    async def toggle_inline_button_filter(self, event, task_id):
+        """Toggle inline button filter"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Get current setting
+            settings = self.db.get_advanced_filters_settings(task_id)
+            current_setting = settings.get('inline_button_filter_enabled', False)
+            new_setting = not current_setting
+            
+            # Update setting
+            success = self.db.toggle_advanced_filter(task_id, 'inline_button', new_setting)
+            
+            if success:
+                status = "🟢 مفعل" if new_setting else "🔴 معطل"
+                await event.answer(f"✅ تم تحديث فلتر الأزرار الإنلاين: {status}")
+                
+                # Force refresh UserBot tasks
+                try:
+                    from userbot_service.userbot import userbot_instance
+                    if user_id in userbot_instance.clients:
+                        await userbot_instance.refresh_user_tasks(user_id)
+                        logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير فلتر الأزرار الإنلاين")
+                except Exception as e:
+                    logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+                
+                # Return to inline button filter menu
+                await self.show_inline_button_filter(event, task_id)
+            else:
+                await event.answer("❌ فشل في تحديث الإعداد")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل فلتر الأزرار الإنلاين: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+    
+    # Add alias for backward compatibility
+    async def toggle_inline_button_block(self, event, task_id):
+        """Alias for toggle_inline_button_filter"""
+        await self.toggle_inline_button_filter(event, task_id)
+
+    async def toggle_working_hours_mode(self, event, task_id):
+        """Toggle working hours mode"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Get current settings
+            settings = self.db.get_working_hours(task_id)
+            current_mode = settings.get('mode', 'work_hours')
+            new_mode = 'off_hours' if current_mode == 'work_hours' else 'work_hours'
+            
+            # Update mode
+            success = self.db.update_working_hours(task_id, mode=new_mode)
+            
+            if success:
+                mode_text = "ساعات العمل فقط" if new_mode == 'work_hours' else "خارج ساعات العمل"
+                await event.answer(f"✅ تم تحديث وضع ساعات العمل: {mode_text}")
+                
+                # Force refresh UserBot tasks
+                try:
+                    from userbot_service.userbot import userbot_instance
+                    if user_id in userbot_instance.clients:
+                        await userbot_instance.refresh_user_tasks(user_id)
+                        logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير وضع ساعات العمل")
+                except Exception as e:
+                    logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+                
+                # Return to working hours filter menu
+                await self.show_working_hours_filter(event, task_id)
+            else:
+                await event.answer("❌ فشل في تحديث الإعداد")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل وضع ساعات العمل: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
 
     async def handle_task_action(self, event, data):
         """Handle task actions"""

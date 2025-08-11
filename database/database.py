@@ -2206,7 +2206,7 @@ class Database:
             ''', (task_id,))
             conn.commit()
 
-    def toggle_advanced_filter(self, task_id: int, filter_type: str) -> bool:
+    def toggle_advanced_filter(self, task_id: int, filter_type: str, enabled: bool = None) -> bool:
         """Toggle a specific advanced filter on/off"""
         # Get current settings
         settings = self.get_advanced_filters_settings(task_id)
@@ -2219,15 +2219,29 @@ class Database:
             'admin': 'admin_filter_enabled',
             'duplicate': 'duplicate_filter_enabled',
             'inline_button': 'inline_button_filter_enabled',
-            'forwarded_message': 'forwarded_message_filter_enabled'
+            'forwarded_message': 'forwarded_message_filter_enabled',
+            # Support for _enabled suffix patterns from UI
+            'day_filter_enabled': 'day_filter_enabled',
+            'working_hours_enabled': 'working_hours_enabled',
+            'language_filter_enabled': 'language_filter_enabled',
+            'admin_filter_enabled': 'admin_filter_enabled',
+            'duplicate_filter_enabled': 'duplicate_filter_enabled',
+            'inline_button_filter_enabled': 'inline_button_filter_enabled',
+            'forwarded_message_filter_enabled': 'forwarded_message_filter_enabled'
         }
         
         if filter_type not in filter_mapping:
+            logger.error(f"نوع فلتر غير مدعوم: {filter_type}. الأنواع المدعومة: {list(filter_mapping.keys())}")
             return False
             
         column_name = filter_mapping[filter_type]
-        current_value = settings.get(column_name, False)
-        new_value = not current_value
+        
+        # If enabled parameter is provided, use it; otherwise toggle current value
+        if enabled is not None:
+            new_value = enabled
+        else:
+            current_value = settings.get(column_name, False)
+            new_value = not current_value
         
         # Update the setting
         return self.update_advanced_filter_setting(task_id, filter_type, new_value)
@@ -2248,7 +2262,15 @@ class Database:
             'language': 'language_filter_enabled',
             'duplicate': 'duplicate_filter_enabled',
             'inline_button': 'inline_button_filter_enabled',
-            'forwarded_message': 'forwarded_message_filter_enabled'
+            'forwarded_message': 'forwarded_message_filter_enabled',
+            # Support for _enabled suffix patterns from UI
+            'day_filter_enabled': 'day_filter_enabled',
+            'working_hours_enabled': 'working_hours_enabled',
+            'language_filter_enabled': 'language_filter_enabled',
+            'admin_filter_enabled': 'admin_filter_enabled',
+            'duplicate_filter_enabled': 'duplicate_filter_enabled',
+            'inline_button_filter_enabled': 'inline_button_filter_enabled',
+            'forwarded_message_filter_enabled': 'forwarded_message_filter_enabled'
         }
 
         if filter_type not in valid_filters:
@@ -2308,7 +2330,7 @@ class Database:
 
     def set_day_filter(self, task_id: int, day_number: int, is_allowed: bool):
         """Set day filter for a specific day"""
-        if day_number < 0 or day_number > 6:
+        if day_number < 1 or day_number > 7:
             logger.error(f"رقم يوم غير صالح: {day_number}")
             return False
 
@@ -4124,6 +4146,39 @@ class Database:
                 
         except Exception as e:
             logger.error(f"خطأ في إضافة دعم أوضاع فلتر اللغة: {e}")
+
+    # Add missing methods for day filters
+    def add_day_filter(self, task_id: int, day_number: int, is_allowed: bool = True):
+        """Add or update a day filter"""
+        return self.set_day_filter(task_id, day_number, is_allowed)
+    
+    def remove_day_filter(self, task_id: int, day_number: int):
+        """Remove a day filter"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM task_day_filters
+                    WHERE task_id = ? AND day_number = ?
+                ''', (task_id, day_number))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في حذف فلتر اليوم: {e}")
+            return False
+    
+    def get_task_day_filters(self, task_id: int):
+        """Alias for get_day_filters for backward compatibility"""
+        return self.get_day_filters(task_id)
+    
+    def get_task_languages(self, task_id: int):
+        """Get languages for a task - alias for compatibility"""
+        filters = self.get_language_filters(task_id)
+        return filters.get('languages', [])
+    
+    def get_task_admin_filters(self, task_id: int):
+        """Alias for get_admin_filters for backward compatibility"""
+        return self.get_admin_filters(task_id)
     # ===== User Settings Methods =====
     
     def get_user_settings(self, user_id):
