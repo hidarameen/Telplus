@@ -2062,7 +2062,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                UPDATE task_routing_settings 
+                UPDATE task_forwarding_settings 
                 SET publishing_mode = ?
                 WHERE task_id = ?
             ''', (publishing_mode, task_id))

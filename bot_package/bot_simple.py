@@ -7089,33 +7089,29 @@ class SimpleTelegramBot:
         task_name = task.get('task_name', 'مهمة بدون اسم')
         
         buttons = [
-            # Row 1 - Basic Features
-            [Button.inline("🔄 إعدادات التوجيه", f"forwarding_settings_{task_id}"),
-             Button.inline("🧼 تنظيف النصوص", f"text_cleaning_{task_id}")],
+            # Row 1 - Character & Rate Limits
+            [Button.inline("🔢 حد الأحرف", f"character_limit_{task_id}"),
+             Button.inline("⏱️ تحكم المعدل", f"rate_limit_{task_id}")],
             
-            # Row 2 - Text & Media
-            [Button.inline("✨ تنسيق النصوص", f"text_formatting_{task_id}"),
-             Button.inline("🔢 حد الأحرف", f"character_limit_{task_id}")],
+            # Row 2 - Timing Settings
+            [Button.inline("⏳ تأخير التوجيه", f"forwarding_delay_{task_id}"),
+             Button.inline("📊 فترات الإرسال", f"sending_interval_{task_id}")],
             
-            # Row 3 - Rate & Timing  
-            [Button.inline("⏱️ تحكم المعدل", f"rate_limit_{task_id}"),
-             Button.inline("⏳ تأخير التوجيه", f"forwarding_delay_{task_id}")],
+            # Row 3 - Publishing Mode
+            [Button.inline("📋 وضع النشر", f"toggle_publishing_mode_{task_id}")],
             
-            # Row 4 - Intervals & Publishing
-            [Button.inline("📊 فترات الإرسال", f"sending_interval_{task_id}"),
-             Button.inline("📋 وضع النشر", f"publishing_mode_{task_id}")],
-            
-            # Row 5 - Translation & Replacements
-            [Button.inline("🌍 إعدادات الترجمة", f"translation_settings_{task_id}"),
-             Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
-            
-            # Row 6 - Back
+            # Row 4 - Back
             [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ]
         
         await event.edit(
             f"⚙️ المميزات المتقدمة: {task_name}\n\n"
-            f"🔧 اختر الميزة التي تريد تكوينها:",
+            f"🔧 إعدادات التحكم المتقدمة:\n\n"
+            f"🔢 حد الأحرف - تحديد طول النصوص\n"
+            f"⏱️ تحكم المعدل - السيطرة على سرعة الإرسال\n"
+            f"⏳ تأخير التوجيه - تأخير زمني للرسائل\n"
+            f"📊 فترات الإرسال - توقيت بين الرسائل\n"
+            f"📋 وضع النشر - تلقائي أو يدوي",
             buttons=buttons
         )
 
@@ -7129,7 +7125,9 @@ class SimpleTelegramBot:
             return
             
         task_name = task.get('task_name', 'مهمة بدون اسم')
-        current_mode = task.get('publishing_mode', 'auto')
+        # Get publishing mode from forwarding settings
+        forwarding_settings = self.db.get_forwarding_settings(task_id)
+        current_mode = forwarding_settings.get('publishing_mode', 'auto')
         
         status_text = {
             'auto': '🟢 تلقائي - يتم إرسال الرسائل فوراً',
@@ -7166,7 +7164,9 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
             
-        current_mode = task.get('publishing_mode', 'auto')
+        # Get publishing mode from forwarding settings
+        forwarding_settings = self.db.get_forwarding_settings(task_id)
+        current_mode = forwarding_settings.get('publishing_mode', 'auto')
         new_mode = 'manual' if current_mode == 'auto' else 'auto'
         
         success = self.db.update_task_publishing_mode(task_id, new_mode)
@@ -7185,6 +7185,196 @@ class SimpleTelegramBot:
             await self.show_publishing_mode_settings(event, task_id)
         else:
             await event.answer("❌ فشل في تغيير وضع النشر")
+
+    async def show_character_limit_settings(self, event, task_id):
+        """Show character limit settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_character_limit_settings(task_id)
+        
+        status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        limit_text = str(settings['max_chars']) if settings['max_chars'] else "غير محدد"
+        mode_text = "نطاق محدد" if settings['use_range'] else "حد أقصى فقط"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_char_limit_{task_id}")],
+            [Button.inline(f"🔢 تعديل الحد الأقصى ({limit_text})", f"edit_char_limit_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الإجراء ({mode_text})", f"toggle_char_mode_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"🔢 إعدادات حد الأحرف للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"📏 الحد الأقصى: {limit_text} حرف\n"
+            f"⚙️ الإجراء: {mode_text}\n\n"
+            f"📝 شرح الأوضاع:\n"
+            f"📏 نطاق محدد: يتم قبول النصوص ضمن نطاق محدد\n"
+            f"⬆️ حد أقصى فقط: يتم قبول النصوص تحت الحد الأقصى",
+            buttons=buttons
+        )
+
+    async def show_rate_limit_settings(self, event, task_id):
+        """Show rate limit settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_rate_limit_settings(task_id)
+        
+        status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        limit_text = str(settings['message_count']) if settings['message_count'] else "غير محدد"
+        period_text = f"{settings['time_period_seconds']} ثانية" if settings['time_period_seconds'] else "غير محدد"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_rate_limit_{task_id}")],
+            [Button.inline(f"📊 تعديل العدد ({limit_text})", f"edit_rate_limit_count_{task_id}")],
+            [Button.inline(f"⏱️ تعديل المدة ({period_text})", f"edit_rate_limit_period_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"⏱️ إعدادات تحكم المعدل للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"📈 عدد الرسائل: {limit_text} رسالة\n"
+            f"⏱️ خلال: {period_text}\n\n"
+            f"📝 الوصف:\n"
+            f"يحدد هذا الإعداد عدد الرسائل المسموح بإرسالها خلال فترة زمنية محددة",
+            buttons=buttons
+        )
+
+    async def show_forwarding_delay_settings(self, event, task_id):
+        """Show forwarding delay settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_forwarding_delay_settings(task_id)
+        
+        status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        
+        if settings['delay_seconds']:
+            if settings['delay_seconds'] >= 3600:
+                delay_text = f"{settings['delay_seconds'] // 3600} ساعة"
+            elif settings['delay_seconds'] >= 60:
+                delay_text = f"{settings['delay_seconds'] // 60} دقيقة"
+            else:
+                delay_text = f"{settings['delay_seconds']} ثانية"
+        else:
+            delay_text = "غير محدد"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_forwarding_delay_{task_id}")],
+            [Button.inline(f"⏱️ تعديل التأخير ({delay_text})", f"edit_forwarding_delay_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"⏳ إعدادات تأخير التوجيه للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"⏱️ مدة التأخير: {delay_text}\n\n"
+            f"📝 الوصف:\n"
+            f"يضيف تأخير زمني قبل إرسال الرسائل المُوجهة",
+            buttons=buttons
+        )
+
+    async def show_sending_interval_settings(self, event, task_id):
+        """Show sending interval settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_sending_interval_settings(task_id)
+        
+        status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        
+        if settings['interval_seconds']:
+            if settings['interval_seconds'] >= 3600:
+                interval_text = f"{settings['interval_seconds'] // 3600} ساعة"
+            elif settings['interval_seconds'] >= 60:
+                interval_text = f"{settings['interval_seconds'] // 60} دقيقة"
+            else:
+                interval_text = f"{settings['interval_seconds']} ثانية"
+        else:
+            interval_text = "غير محدد"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_sending_interval_{task_id}")],
+            [Button.inline(f"📊 تعديل الفترة ({interval_text})", f"edit_sending_interval_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"📊 إعدادات فترات الإرسال للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"⏱️ الفترة بين الرسائل: {interval_text}\n\n"
+            f"📝 الوصف:\n"
+            f"يحدد الفترة الزمنية بين إرسال كل رسالة والتي تليها",
+            buttons=buttons
+        )
+
+    async def toggle_forwarding_delay(self, event, task_id):
+        """Toggle forwarding delay setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_forwarding_delay(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} تأخير التوجيه")
+        await self.show_forwarding_delay_settings(event, task_id)
+
+    async def toggle_sending_interval(self, event, task_id):
+        """Toggle sending interval setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_sending_interval(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} فترات الإرسال")
+        await self.show_sending_interval_settings(event, task_id)
+
+    async def toggle_rate_limit(self, event, task_id):
+        """Toggle rate limit setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        new_state = self.db.toggle_rate_limit(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} تحكم المعدل")
+        await self.show_rate_limit_settings(event, task_id)
 
 async def run_simple_bot():
     """Run the simple telegram bot"""
