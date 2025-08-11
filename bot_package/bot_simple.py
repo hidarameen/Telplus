@@ -11,6 +11,8 @@ from database.database import Database
 from userbot_service.userbot import userbot_instance
 from bot_package.config import BOT_TOKEN, API_ID, API_HASH
 import json
+import time
+import os
 from datetime import datetime
 
 # Set up logging
@@ -1667,7 +1669,38 @@ class SimpleTelegramBot:
 
         user_id = event.sender_id
 
-        # Check if user is in authentication or task creation process
+        # Check user state from both systems (user_states and database)
+        user_state_data = self.user_states.get(user_id, {})
+        current_user_state = user_state_data.get('state')
+        current_user_data = user_state_data.get('data', {})
+        
+        # If we have a user state (new system), handle it first
+        if current_user_state:
+            if current_user_state.startswith('watermark_text_input_'):
+                try:
+                    task_id = current_user_data.get('task_id')
+                    if task_id:
+                        await self.handle_watermark_text_input(event, task_id)
+                        return
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة إدخال نص العلامة المائية: {e}")
+                    await event.respond("❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    self.clear_user_state(user_id)
+                    return
+                    
+            elif current_user_state.startswith('watermark_image_input_'):
+                try:
+                    task_id = current_user_data.get('task_id')
+                    if task_id:
+                        await self.handle_watermark_image_input(event, task_id)
+                        return
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة إدخال صورة العلامة المائية: {e}")
+                    await event.respond("❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    self.clear_user_state(user_id)
+                    return
+
+        # Check if user is in authentication or task creation process (old system)
         state_data = self.db.get_conversation_state(user_id)
 
         if state_data:
@@ -3238,10 +3271,15 @@ class SimpleTelegramBot:
         await event.edit(
             f"🖼️ رفع صورة العلامة المائية - المهمة #{task_id}\n\n"
             f"أرسل الصورة التي تريد استخدامها كعلامة مائية:\n\n"
-            f"📋 **متطلبات الصورة**:\n"
-            f"• صيغة PNG مع خلفية شفافة (مُفضل)\n"
-            f"• أو صيغة JPG/JPEG\n"
-            f"• حجم مناسب (أقل من 5 ميجابايت)\n"
+            f"📋 **طرق الإرسال المدعومة**:\n"
+            f"• 📷 كصورة عادية (Photo)\n"
+            f"• 📄 كملف/مستند (Document)\n\n"
+            f"🎯 **الصيغ المدعومة**:\n"
+            f"• PNG (مُفضل للخلفية الشفافة)\n"
+            f"• JPG/JPEG\n"
+            f"• BMP, WebP\n\n"
+            f"⚙️ **المتطلبات**:\n"
+            f"• حجم أقل من 10 ميجابايت\n"
             f"• وضوح جيد للنتيجة المطلوبة\n\n"
             f"أرسل /cancel للإلغاء",
             buttons=[[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
@@ -3270,20 +3308,86 @@ class SimpleTelegramBot:
         )
 
     async def handle_watermark_image_input(self, event, task_id):
-        """Handle watermark image input"""
-        if not event.message.media:
-            await event.respond("❌ يرجى إرسال صورة.")
+        """Handle watermark image input (supports both photos and documents)"""
+        media = event.message.media
+        document = event.message.document
+        photo = event.message.photo
+        
+        # Check if it's a photo or a document (file)
+        if not media and not document and not photo:
+            await event.respond("❌ يرجى إرسال صورة أو ملف PNG للعلامة المائية.")
             return
+        
+        # Validate file type if it's a document
+        if document:
+            file_name = getattr(document, 'file_name', '') or ''
+            mime_type = getattr(document, 'mime_type', '') or ''
+            
+            # Check if it's an image file
+            valid_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.webp']
+            valid_mime_types = ['image/png', 'image/jpeg', 'image/jpg', 'image/bmp', 'image/webp']
+            
+            is_valid_extension = any(file_name.lower().endswith(ext) for ext in valid_extensions)
+            is_valid_mime = mime_type in valid_mime_types
+            
+            if not is_valid_extension and not is_valid_mime:
+                await event.respond(
+                    "❌ نوع الملف غير مدعوم!\n\n"
+                    "📋 **الصيغ المدعومة**:\n"
+                    "• PNG (مُفضل للخلفية الشفافة)\n"
+                    "• JPG/JPEG\n"
+                    "• BMP\n"
+                    "• WebP\n\n"
+                    "يرجى رفع ملف بإحدى هذه الصيغ."
+                )
+                return
+                
+            # Check file size (limit to 10MB)
+            if hasattr(document, 'size') and document.size > 10 * 1024 * 1024:
+                await event.respond("❌ حجم الملف كبير جداً! الحد الأقصى 10 ميجابايت.")
+                return
         
         try:
             # Create watermark_images directory if not exists
             os.makedirs("watermark_images", exist_ok=True)
             
-            # Download the image
-            file_path = await event.message.download_media(file="watermark_images/")
+            # Generate filename
+            if document and hasattr(document, 'file_name') and document.file_name:
+                # Use original filename if available
+                original_name = document.file_name
+                file_extension = os.path.splitext(original_name)[1] or '.png'
+                safe_filename = f"watermark_{task_id}_{int(time.time())}{file_extension}"
+            else:
+                # Generate filename for photos
+                safe_filename = f"watermark_{task_id}_{int(time.time())}.jpg"
+            
+            # Download the media
+            file_path = await event.message.download_media(
+                file=os.path.join("watermark_images", safe_filename)
+            )
             
             if not file_path:
                 await event.respond("❌ فشل في تحميل الصورة.")
+                return
+            
+            # Verify the downloaded file is actually an image
+            try:
+                from PIL import Image
+                with Image.open(file_path) as img:
+                    width, height = img.size
+                    format_name = img.format or 'Unknown'
+                    logger.info(f"✅ تم تحميل صورة العلامة المائية: {width}x{height}, صيغة: {format_name}")
+            except Exception as img_error:
+                logger.error(f"❌ الملف المُحمل ليس صورة صالحة: {img_error}")
+                # Clean up invalid file
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                await event.respond(
+                    "❌ الملف المُرسل ليس صورة صالحة!\n\n"
+                    "يرجى إرسال صورة بصيغة PNG، JPG، أو أي صيغة صورة مدعومة."
+                )
                 return
             
             # Update watermark settings with the image path
@@ -3292,9 +3396,15 @@ class SimpleTelegramBot:
             # Clear user state
             self.clear_user_state(event.sender_id)
             
+            file_type_display = "📄 ملف PNG" if file_path.lower().endswith('.png') else "📷 صورة"
+            
             await event.respond(
                 f"✅ تم رفع صورة العلامة المائية بنجاح!\n\n"
-                f"📁 **مسار الصورة**: {os.path.basename(file_path)}\n\n"
+                f"📁 **اسم الملف**: {os.path.basename(file_path)}\n"
+                f"🎭 **نوع الملف**: {file_type_display}\n"
+                f"📏 **الحجم**: {width}x{height} بكسل\n"
+                f"📋 **الصيغة**: {format_name}\n\n"
+                f"💡 **ملاحظة**: صيغة PNG توفر أفضل جودة مع دعم الشفافية\n\n"
                 f"يمكنك الآن تعديل إعدادات المظهر من قائمة العلامة المائية.",
                 buttons=[[Button.inline("🎨 إعدادات المظهر", f"watermark_appearance_{task_id}")],
                          [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]]
@@ -3302,7 +3412,14 @@ class SimpleTelegramBot:
             
         except Exception as e:
             logger.error(f"خطأ في معالجة صورة العلامة المائية: {e}")
-            await event.respond("❌ حدث خطأ في رفع الصورة. يرجى المحاولة مرة أخرى.")
+            await event.respond(
+                "❌ حدث خطأ في رفع الصورة\n\n"
+                "يرجى التأكد من:\n"
+                "• الملف هو صورة صالحة\n"
+                "• حجم الملف أقل من 10 ميجابايت\n"
+                "• الصيغة مدعومة (PNG, JPG, etc.)\n\n"
+                "ثم حاول مرة أخرى."
+            )
             
             # Clear user state
             self.clear_user_state(event.sender_id)
