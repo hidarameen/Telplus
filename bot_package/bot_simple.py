@@ -829,7 +829,7 @@ class SimpleTelegramBot:
                         task_id = int(parts[3])
                         await self.toggle_watermark_media_type(event, task_id, 'photos')
                     except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للصور: {e}, data='{data}', parts={parts}")
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_videos_"): # Handler for toggle watermark videos
                 parts = data.split("_")
@@ -838,7 +838,7 @@ class SimpleTelegramBot:
                         task_id = int(parts[3])
                         await self.toggle_watermark_media_type(event, task_id, 'videos')
                     except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للفيديو: {e}, data='{data}', parts={parts}")
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_documents_"): # Handler for toggle watermark documents
                 parts = data.split("_")
@@ -847,7 +847,7 @@ class SimpleTelegramBot:
                         task_id = int(parts[3])
                         await self.toggle_watermark_media_type(event, task_id, 'documents')
                     except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للمستندات: {e}, data='{data}', parts={parts}")
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_inline_block_"): # Handler for toggle inline button block
                 parts = data.split("_")
@@ -3085,7 +3085,7 @@ class SimpleTelegramBot:
         
         await event.edit(
             f"🎨 إعدادات مظهر العلامة المائية - المهمة #{task_id}\n\n"
-            f"📏 **الحجم الحالي**: {size}% (المدى: 5-50%)\n"
+            f"📏 **الحجم الحالي**: {size}% (المدى: 5-100%)\n"
             f"🌫️ **الشفافية**: {opacity}% (المدى: 10-100%)\n"
             f"📝 **حجم الخط**: {font_size}px (المدى: 12-72px)\n\n"
             f"🔧 **التحكم**: استخدم الأزرار أعلاه لتعديل الإعدادات\n"
@@ -3100,9 +3100,9 @@ class SimpleTelegramBot:
         current_size = watermark_settings.get('size_percentage', 20)
         
         if increase:
-            new_size = min(50, current_size + 5)  # Max 50% per database constraint
+            new_size = min(100, current_size + 5)  # Max 100% for full coverage
         else:
-            new_size = max(5, current_size - 5)   # Min 5%
+            new_size = max(5, current_size - 5)    # Min 5%
         
         self.db.update_watermark_settings(task_id, size_percentage=new_size)
         await event.answer(f"✅ تم تعديل الحجم إلى {new_size}%")
