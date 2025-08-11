@@ -2949,16 +2949,26 @@ class SimpleTelegramBot:
 
     async def show_settings(self, event):
         """Show settings menu"""
+        user_id = event.sender_id
+        user_settings = self.db.get_user_settings(user_id)
+        
         buttons = [
+            [Button.inline("🌐 تغيير اللغة", "language_settings")],
+            [Button.inline("🕐 تغيير المنطقة الزمنية", "timezone_settings")],
             [Button.inline("🔍 فحص حالة UserBot", "check_userbot")],
             [Button.inline("🔄 إعادة تسجيل الدخول", b"login")],
             [Button.inline("🗑️ حذف جميع المهام", "delete_all_tasks")],
             [Button.inline("🏠 القائمة الرئيسية", "main_menu")]
         ]
 
+        language_name = self.get_language_name(user_settings['language'])
+        timezone_name = user_settings['timezone']
+
         await event.edit(
-            "⚙️ **الإعدادات**\n\n"
-            "اختر إعداد:",
+            f"⚙️ **إعدادات البوت**\n\n"
+            f"🌐 اللغة الحالية: {language_name}\n"
+            f"🕐 المنطقة الزمنية الحالية: {timezone_name}\n\n"
+            "اختر الإعداد الذي تريد تغييره:",
             buttons=buttons
         )
 
@@ -3057,6 +3067,95 @@ class SimpleTelegramBot:
                 f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول",
                 buttons=[[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
             )
+
+    async def show_language_settings(self, event):
+        """Show language selection menu"""
+        buttons = [
+            [Button.inline("🇸🇦 العربية", "set_language_ar")],
+            [Button.inline("🇺🇸 English", "set_language_en")],
+            [Button.inline("🇫🇷 Français", "set_language_fr")],
+            [Button.inline("🇩🇪 Deutsch", "set_language_de")],
+            [Button.inline("🇪🇸 Español", "set_language_es")],
+            [Button.inline("🇷🇺 Русский", "set_language_ru")],
+            [Button.inline("🔙 العودة للإعدادات", "settings")]
+        ]
+
+        await event.edit(
+            "🌐 **اختر اللغة المفضلة:**",
+            buttons=buttons
+        )
+
+    async def show_timezone_settings(self, event):
+        """Show timezone selection menu"""
+        buttons = [
+            [Button.inline("🇸🇦 الرياض (Asia/Riyadh)", "set_timezone_Asia/Riyadh")],
+            [Button.inline("🇰🇼 الكويت (Asia/Kuwait)", "set_timezone_Asia/Kuwait")],
+            [Button.inline("🇦🇪 الإمارات (Asia/Dubai)", "set_timezone_Asia/Dubai")],
+            [Button.inline("🇶🇦 قطر (Asia/Qatar)", "set_timezone_Asia/Qatar")],
+            [Button.inline("🇧🇭 البحرين (Asia/Bahrain)", "set_timezone_Asia/Bahrain")],
+            [Button.inline("🇴🇲 عمان (Asia/Muscat)", "set_timezone_Asia/Muscat")],
+            [Button.inline("🇯🇴 الأردن (Asia/Amman)", "set_timezone_Asia/Amman")],
+            [Button.inline("🇱🇧 لبنان (Asia/Beirut)", "set_timezone_Asia/Beirut")],
+            [Button.inline("🇸🇾 سوريا (Asia/Damascus)", "set_timezone_Asia/Damascus")],
+            [Button.inline("🇮🇶 العراق (Asia/Baghdad)", "set_timezone_Asia/Baghdad")],
+            [Button.inline("🇪🇬 مصر (Africa/Cairo)", "set_timezone_Africa/Cairo")],
+            [Button.inline("🇲🇦 المغرب (Africa/Casablanca)", "set_timezone_Africa/Casablanca")],
+            [Button.inline("🇩🇿 الجزائر (Africa/Algiers)", "set_timezone_Africa/Algiers")],
+            [Button.inline("🇹🇳 تونس (Africa/Tunis)", "set_timezone_Africa/Tunis")],
+            [Button.inline("🇱🇾 ليبيا (Africa/Tripoli)", "set_timezone_Africa/Tripoli")],
+            [Button.inline("🇺🇸 نيويورك (America/New_York)", "set_timezone_America/New_York")],
+            [Button.inline("🇬🇧 لندن (Europe/London)", "set_timezone_Europe/London")],
+            [Button.inline("🇩🇪 برلين (Europe/Berlin)", "set_timezone_Europe/Berlin")],
+            [Button.inline("🇫🇷 باريس (Europe/Paris)", "set_timezone_Europe/Paris")],
+            [Button.inline("🇷🇺 موسكو (Europe/Moscow)", "set_timezone_Europe/Moscow")],
+            [Button.inline("🇯🇵 طوكيو (Asia/Tokyo)", "set_timezone_Asia/Tokyo")],
+            [Button.inline("🇨🇳 بكين (Asia/Shanghai)", "set_timezone_Asia/Shanghai")],
+            [Button.inline("🇮🇳 دلهي (Asia/Kolkata)", "set_timezone_Asia/Kolkata")],
+            [Button.inline("🇦🇺 سيدني (Australia/Sydney)", "set_timezone_Australia/Sydney")],
+            [Button.inline("🔙 العودة للإعدادات", "settings")]
+        ]
+
+        await event.edit(
+            "🕐 **اختر المنطقة الزمنية:**",
+            buttons=buttons
+        )
+
+    async def set_user_language(self, event, language):
+        """Set user language preference"""
+        user_id = event.sender_id
+        success = self.db.update_user_language(user_id, language)
+        
+        if success:
+            language_name = self.get_language_name(language)
+            await event.answer(f"✅ تم تغيير اللغة إلى {language_name}")
+        else:
+            await event.answer("❌ فشل في تغيير اللغة")
+        
+        await self.show_settings(event)
+
+    async def set_user_timezone(self, event, timezone):
+        """Set user timezone preference"""
+        user_id = event.sender_id
+        success = self.db.update_user_timezone(user_id, timezone)
+        
+        if success:
+            await event.answer(f"✅ تم تغيير المنطقة الزمنية إلى {timezone}")
+        else:
+            await event.answer("❌ فشل في تغيير المنطقة الزمنية")
+        
+        await self.show_settings(event)
+
+    def get_language_name(self, language_code):
+        """Get language name from code"""
+        languages = {
+            'ar': '🇸🇦 العربية',
+            'en': '🇺🇸 English',
+            'fr': '🇫🇷 Français',
+            'de': '🇩🇪 Deutsch',
+            'es': '🇪🇸 Español',
+            'ru': '🇷🇺 Русский'
+        }
+        return languages.get(language_code, f'{language_code}')
 
 
     async def show_media_filters(self, event, task_id):
