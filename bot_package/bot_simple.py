@@ -2584,7 +2584,7 @@ class SimpleTelegramBot:
 
 
     async def show_working_hours_filter(self, event, task_id):
-        """Show working hours filter settings"""
+        """Show working hours filter settings with original interface"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
@@ -2596,33 +2596,190 @@ class SimpleTelegramBot:
         advanced_settings = self.db.get_advanced_filters_settings(task_id)
         is_enabled = advanced_settings.get('working_hours_enabled', False)
         settings = self.db.get_working_hours(task_id)
+        
         if settings:
             mode = settings.get('mode', 'work_hours')
-            start_hour = settings.get('start_hour', 9)
-            end_hour = settings.get('end_hour', 17)
+            schedule = settings.get('schedule', {})
         else:
             mode = 'work_hours'
-            start_hour = 9
-            end_hour = 17
+            schedule = {}
         
         status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
-        mode_text = "حظر خارج الساعات" if mode == 'block' else "السماح في الساعات فقط"
+        
+        # Mode descriptions
+        if mode == 'work_hours':
+            mode_text = "🏢 وضع ساعات العمل"
+            mode_description = "يتم توجيه الرسائل فقط في الساعات المحددة"
+        else:  # sleep_hours
+            mode_text = "😴 وضع ساعات النوم"
+            mode_description = "يتم حظر الرسائل في الساعات المحددة"
+        
+        # Count active hours
+        active_hours = sum(1 for enabled in schedule.values() if enabled)
         
         buttons = [
             [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_working_hours_{task_id}")],
-            [Button.inline(f"⏰ تحديد ساعات العمل ({start_hour}:00 - {end_hour}:00)", f"set_working_hours_{task_id}")],
-            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_working_hours_mode_{task_id}")],
+            [Button.inline(f"⚙️ {mode_text}", f"toggle_working_hours_mode_{task_id}")],
+            [Button.inline(f"🕐 تحديد الساعات ({active_hours}/24)", f"set_working_hours_schedule_{task_id}")],
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
         await event.edit(
-            f"⏰ فلتر ساعات العمل - المهمة #{task_id}\n\n"
-            f"📊 الحالة: {status_text}\n"
-            f"🕒 ساعات العمل: {start_hour}:00 - {end_hour}:00\n"
-            f"⚙️ الوضع: {mode_text}\n\n"
-            f"💡 هذا الفلتر يتحكم في توقيت توجيه الرسائل حسب ساعات العمل",
+            f"⏰ **فلتر ساعات العمل** - المهمة #{task_id}\n\n"
+            f"📊 **الحالة:** {status_text}\n"
+            f"⚙️ **الوضع:** {mode_text}\n"
+            f"🕐 **الساعات النشطة:** {active_hours}/24\n\n"
+            f"💡 **الوصف:** {mode_description}",
             buttons=buttons
         )
+
+    async def show_working_hours_schedule(self, event, task_id):
+        """Show working hours schedule interface"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_working_hours(task_id)
+        if settings:
+            mode = settings.get('mode', 'work_hours')
+            schedule = settings.get('schedule', {})
+        else:
+            mode = 'work_hours'
+            schedule = {}
+            # Initialize default schedule
+            self.db.initialize_working_hours_schedule(task_id)
+        
+        # Create 24-hour grid (4 rows x 6 columns)
+        buttons = []
+        for row in range(4):
+            row_buttons = []
+            for col in range(6):
+                hour = row * 6 + col
+                is_enabled = schedule.get(str(hour), False)
+                status = "🟢" if is_enabled else "🔴"
+                row_buttons.append(
+                    Button.inline(f"{status}{hour:02d}", f"toggle_hour_{task_id}_{hour}")
+                )
+            buttons.append(row_buttons)
+        
+        # Add control buttons
+        buttons.append([
+            Button.inline("✅ تحديد الكل", f"select_all_hours_{task_id}"),
+            Button.inline("❌ إلغاء الكل", f"clear_all_hours_{task_id}")
+        ])
+        buttons.append([
+            Button.inline("🔙 رجوع لفلتر ساعات العمل", f"working_hours_filter_{task_id}")
+        ])
+        
+        # Mode description
+        if mode == 'work_hours':
+            description = "🟢 الساعات الخضراء: سيتم توجيه الرسائل\n🔴 الساعات الحمراء: سيتم حظر الرسائل"
+        else:  # sleep_hours
+            description = "🟢 الساعات الخضراء: سيتم حظر الرسائل (ساعات نوم)\n🔴 الساعات الحمراء: سيتم توجيه الرسائل"
+        
+        await event.edit(
+            f"🕐 **جدولة ساعات العمل** - المهمة #{task_id}\n\n"
+            f"⚙️ **الوضع:** {'🏢 ساعات العمل' if mode == 'work_hours' else '😴 ساعات النوم'}\n\n"
+            f"{description}\n\n"
+            f"اضغط على الساعة لتبديل حالتها:",
+            buttons=buttons
+        )
+
+    async def toggle_working_hour(self, event, task_id, hour):
+        """Toggle a specific working hour"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Toggle the hour
+            current_state = self.db.toggle_working_hour(task_id, hour)
+            status = "مفعلة" if current_state else "معطلة"
+            await event.answer(f"✅ الساعة {hour:02d}:00 أصبحت {status}")
+            
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+            
+            # Refresh the schedule display
+            await self.show_working_hours_schedule(event, task_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في تبديل الساعة {hour} للمهمة {task_id}: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def select_all_hours(self, event, task_id):
+        """Select all working hours"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Enable all hours
+            for hour in range(24):
+                self.db.set_working_hour(task_id, hour, True)
+            
+            await event.answer("✅ تم تحديد جميع الساعات")
+            
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+            
+            # Refresh the schedule display
+            await self.show_working_hours_schedule(event, task_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في تحديد جميع الساعات للمهمة {task_id}: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def clear_all_hours(self, event, task_id):
+        """Clear all working hours"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Disable all hours
+            for hour in range(24):
+                self.db.set_working_hour(task_id, hour, False)
+            
+            await event.answer("✅ تم إلغاء تحديد جميع الساعات")
+            
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+            
+            # Refresh the schedule display
+            await self.show_working_hours_schedule(event, task_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في إلغاء جميع الساعات للمهمة {task_id}: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
 
     async def show_language_filters(self, event, task_id):
         """Show language filter settings"""

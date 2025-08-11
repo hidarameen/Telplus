@@ -2494,6 +2494,62 @@ class Database:
             conn.commit()
             return True
 
+    def update_working_hours(self, task_id: int, start_hour: int = None, start_minute: int = None, 
+                           end_hour: int = None, end_minute: int = None, mode: str = None) -> bool:
+        """Update working hours settings"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current settings
+                current = self.get_working_hours(task_id)
+                if not current:
+                    # Create default if doesn't exist
+                    self.set_working_hours_mode(task_id, mode or 'work_hours')
+                    self.initialize_working_hours_schedule(task_id)
+                    return True
+                
+                # Update mode if provided
+                if mode is not None:
+                    self.set_working_hours_mode(task_id, mode)
+                
+                # Update schedule if hours provided
+                if start_hour is not None and end_hour is not None:
+                    for hour in range(24):
+                        is_in_range = False
+                        if start_hour <= end_hour:
+                            is_in_range = start_hour <= hour <= end_hour
+                        else:  # spans midnight
+                            is_in_range = hour >= start_hour or hour <= end_hour
+                        
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO task_working_hours_schedule 
+                            (task_id, hour, enabled)
+                            VALUES (?, ?, ?)
+                        ''', (task_id, hour, is_in_range))
+                    conn.commit()
+                
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث ساعات العمل: {e}")
+            return False
+
+    def set_working_hour(self, task_id: int, hour: int, enabled: bool) -> bool:
+        """Set a specific working hour"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_working_hours_schedule 
+                    (task_id, hour, enabled)
+                    VALUES (?, ?, ?)
+                ''', (task_id, hour, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديد ساعة العمل {hour} للمهمة {task_id}: {e}")
+            return False
+
     # ===== Language Filters Management =====
 
     def get_language_filters(self, task_id: int) -> Dict:
