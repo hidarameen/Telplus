@@ -8,6 +8,15 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **ADMIN SIGNATURE MATCHING CRITICAL FIX**: Fixed priority issue in signature matching logic that prevented proper blocking of admin "H":
+  - **ROOT CAUSE**: The signature matching algorithm processed admins sequentially and stopped at first match, allowing partial matches from allowed admins to override exact matches from blocked admins
+  - **SOLUTION**: Implemented two-tier matching system with exact matches processed before partial matches
+  - **EXACT MATCH PRIORITY**: Author signature "H" now matches exactly with admin name "H" first, ensuring proper blocking
+  - **IMPROVED ALGORITHM**: Collects all matches first, then processes exact matches with highest priority, followed by partial matches
+  - **VERIFICATION**: Admin "H" (ID: 6602517122, @Akm100ye) now correctly blocked when using Author Signature feature
+  - **TESTING**: Comprehensive test suite confirms both ID-based and signature-based admin filtering work properly
+  - **DATE**: August 11, 2025
+
 - **CRITICAL ADMIN FILTER BUG FIX**: Fixed major issue where blocked admins' messages were still being forwarded despite proper signature detection:
   - **ROOT CAUSE**: The `is_admin_allowed` function was creating a fake message object without the actual `post_author` field
   - **SOLUTION**: Added new `is_admin_allowed_with_message` function that passes the real message object with signature
