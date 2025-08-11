@@ -471,33 +471,7 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل نوع العلامة المائية: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("toggle_watermark_photos_"): # Toggle photos
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.toggle_watermark_media_type(event, task_id, 'photos')
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة للصور: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("toggle_watermark_videos_"): # Toggle videos
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.toggle_watermark_media_type(event, task_id, 'videos')
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة للفيديوهات: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("toggle_watermark_documents_"): # Toggle documents
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.toggle_watermark_media_type(event, task_id, 'documents')
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة للمستندات: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+
             elif data.startswith("toggle_sending_interval_"): # Toggle sending interval
                 parts = data.split("_")
                 if len(parts) >= 4:
