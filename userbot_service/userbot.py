@@ -585,14 +585,20 @@ class UserbotService:
                                     if split_album_enabled:
                                         # Split album: send each media individually
                                         logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                        
+                                        # Apply watermark if enabled
+                                        watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                        logger.info(f"📁 سيتم إرسال الملف باسم: {modified_filename}")
+                                        
                                         forwarded_msg = await client.send_file(
                                             target_entity,
-                                            event.message.media,
+                                            watermarked_media,
                                             caption=caption_text,
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if caption_text else None,
                                             force_document=False,
                                             buttons=original_reply_markup or inline_buttons,
+                                            file_name=modified_filename or "media_file",
                                         )
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
@@ -717,6 +723,7 @@ class UserbotService:
                                             
                                             # Apply watermark if enabled
                                             watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                            logger.info(f"📁 سيتم إرسال الملف باسم: {modified_filename}")
                                             
                                             # In forward mode with requires_copy_mode, we also send as new media
                                             forwarded_msg = await client.send_file(
@@ -790,6 +797,7 @@ class UserbotService:
                                                 
                                                 # Apply watermark if enabled
                                                 watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                                logger.info(f"📁 سيتم إرسال الملف باسم (تفكيك الألبوم): {modified_filename}")
                                                 
                                                 # For photos with watermarks, ensure they're sent as photos
                                                 if is_photo and watermarked_media != event.message.media:
@@ -801,6 +809,7 @@ class UserbotService:
                                                         silent=forwarding_settings['silent_notifications'],
                                                         force_document=False,
                                                         buttons=original_reply_markup or inline_buttons,
+                                                        file_name=modified_filename or "photo.jpg",
                                                     )
                                                 else:
                                                     # Send other media types normally
@@ -827,11 +836,13 @@ class UserbotService:
                                                     # Single media
                                                     # Apply watermark if enabled
                                                     watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                                    logger.info(f"📁 سيتم إرسال الملف باسم (وضع التوجيه): {modified_filename}")
                                                     
                                                     # Determine media type for proper sending
                                                     is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
                                                     
                                                     if is_photo and watermarked_media != event.message.media:
+                                                        logger.info(f"📸 إرسال صورة مُعالجة كصورة: {modified_filename}")
                                                         # Send watermarked photo as photo (not document)
                                                         forwarded_msg = await client.send_file(
                                                             target_entity,
@@ -1515,9 +1526,11 @@ class UserbotService:
             
             if watermarked_media and watermarked_media != media_bytes:
                 logger.info(f"✅ تم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
+                logger.info(f"📁 اسم الملف المُرجع: {full_file_name}")
                 return watermarked_media, full_file_name
             else:
                 logger.debug(f"🔄 لم يتم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
+                logger.info(f"📁 اسم الملف المُرجع (بدون علامة مائية): {full_file_name}")
                 # Even if watermark wasn't applied, return the improved filename
                 return event.message.media, full_file_name
                 
