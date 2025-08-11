@@ -1378,8 +1378,10 @@ class UserbotService:
         try:
             # Get watermark settings
             watermark_settings = self.db.get_watermark_settings(task_id)
+            logger.info(f"🏷️ فحص إعدادات العلامة المائية للمهمة {task_id}: {watermark_settings}")
             
             if not watermark_settings.get('enabled', False):
+                logger.info(f"🏷️ العلامة المائية معطلة للمهمة {task_id}")
                 return event.message.media, None
             
             # Check if message has media
@@ -1390,6 +1392,8 @@ class UserbotService:
             is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
             is_video = hasattr(event.message.media, 'document') and event.message.media.document and event.message.media.document.mime_type and event.message.media.document.mime_type.startswith('video/')
             is_document = hasattr(event.message.media, 'document') and event.message.media.document and not is_video
+            
+            logger.info(f"🏷️ نوع الوسائط للمهمة {task_id}: صورة={is_photo}, فيديو={is_video}, مستند={is_document}")
             
             # Check if watermark should be applied to this media type
             if is_photo and not watermark_settings.get('apply_to_photos', True):
