@@ -2344,6 +2344,14 @@ class UserbotService:
             task_id = task['id']
             task_name = task.get('task_name', f"مهمة {task_id}")
             
+            # Check if approval already sent for this message (prevent duplicates)
+            existing_approval = self.db.get_pending_message_by_source(
+                task_id, str(message.chat_id), message.id
+            )
+            if existing_approval:
+                logger.info(f"⏭️ تم تجاهل رسالة مكررة - موافقة موجودة مسبقاً (ID: {existing_approval['id']})")
+                return
+            
             # Prepare message data for storage
             message_data = {
                 'text': message.text,
@@ -2403,24 +2411,70 @@ class UserbotService:
                 ]
             ]
             
-            # Store approval request for now - will be sent by bot later
+            # Send approval request via Bot Token using python-telegram-bot
             try:
-                # For now, we just mark it as pending and log it
-                # The bot will handle sending approval requests via telegram bot API
-                logger.info(f"📋 تم حفظ طلب موافقة للرسالة ID: {pending_id}")
-                logger.info(f"💬 نص الطلب: {approval_text[:100]}...")
+                import requests
+                from bot_package.config import BOT_TOKEN
                 
-                # Mock approval message for now
-                approval_msg = type('MockMessage', (), {'id': pending_id})()  # Simple mock
+                # Prepare message text without markdown for safety
+                safe_text = approval_text.replace('*', '').replace('_', '').replace('`', '')
                 
-                # Update pending message with approval message ID
-                self.db.update_pending_message_status(
-                    pending_id, 
-                    'pending', 
-                    approval_msg.message_id
-                )
+                # Create inline keyboard JSON
+                keyboard_json = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ موافق", "callback_data": f"approve_{pending_id}"},
+                            {"text": "❌ رفض", "callback_data": f"reject_{pending_id}"}
+                        ],
+                        [
+                            {"text": "📋 تفاصيل أكثر", "callback_data": f"details_{pending_id}"}
+                        ]
+                    ]
+                }
                 
-                logger.info(f"📬 تم إرسال طلب موافقة للمستخدم {user_id} للمهمة {task_name} (ID: {pending_id})")
+                # Send message via Telegram Bot API
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                data = {
+                    'chat_id': int(user_id),
+                    'text': safe_text,
+                    'reply_markup': keyboard_json
+                }
+                
+                logger.info(f"🔄 إرسال طلب موافقة إلى {user_id} عبر Bot API...")
+                response = requests.post(url, json=data, timeout=10)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('ok'):
+                        approval_msg_id = result['result']['message_id']
+                        logger.info(f"✅ تم إرسال طلب الموافقة للمستخدم {user_id} عبر Bot API - رسالة ID: {approval_msg_id}")
+                        
+                        # Create a simple object to hold message_id
+                        approval_msg = type('Message', (), {'message_id': approval_msg_id})()
+                    else:
+                        logger.error(f"❌ خطأ من Telegram API: {result}")
+                        approval_msg = None
+                else:
+                    logger.error(f"❌ فشل في إرسال الطلب - كود الحالة: {response.status_code}")
+                    logger.error(f"❌ محتوى الرد: {response.text}")
+                    approval_msg = None
+                
+            except Exception as send_error:
+                logger.error(f"❌ فشل في إرسال طلب الموافقة عبر Bot API: {send_error}")
+                approval_msg = None
+                
+                if approval_msg:
+                    # Update pending message with approval message ID
+                    self.db.update_pending_message_status(
+                        pending_id, 
+                        'pending', 
+                        approval_msg.message_id if hasattr(approval_msg, 'message_id') else None
+                    )
+                    logger.info(f"📬 تم إرسال طلب موافقة للمستخدم {user_id} للمهمة {task_name} (ID: {pending_id})")
+                else:
+                    # Mark as failed if we couldn't send the approval request
+                    self.db.update_pending_message_status(pending_id, 'rejected')
+                    logger.error(f"❌ لم يتم إرسال طلب الموافقة للمستخدم {user_id}")
                 
             except Exception as bot_error:
                 logger.error(f"❌ فشل في إرسال طلب الموافقة: {bot_error}")

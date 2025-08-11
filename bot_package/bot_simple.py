@@ -6977,7 +6977,9 @@ class SimpleTelegramBot:
                 self.db.update_pending_message_status(pending_id, 'approved')
                 
                 # Process the message through userbot
-                await self._process_approved_message(pending_message, task)
+                success = await self._process_approved_message(pending_message, task)
+                if not success:
+                    await event.answer("⚠️ تمت الموافقة ولكن فشل في إرسال الرسالة")
                 
                 # Update the message to show approval
                 try:
@@ -7002,6 +7004,64 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"خطأ في معالجة الموافقة: {e}")
             await event.answer("❌ حدث خطأ في معالجة الطلب")
+
+    async def _process_approved_message(self, pending_message, task):
+        """Process approved message by sending it through userbot"""
+        try:
+            from userbot_service.userbot import userbot_instance
+            import json
+            
+            user_id = pending_message['user_id']
+            message_data = json.loads(pending_message['message_data'])
+            
+            # Get userbot client
+            if user_id not in userbot_instance.clients:
+                logger.error(f"❌ UserBot غير متصل للمستخدم {user_id}")
+                return False
+                
+            client = userbot_instance.clients[user_id]
+            
+            # Get the original message from source
+            source_chat_id = int(pending_message['source_chat_id'])
+            source_message_id = pending_message['source_message_id']
+            
+            try:
+                message = await client.get_messages(source_chat_id, ids=source_message_id)
+                if not message:
+                    logger.error(f"❌ لم يتم العثور على الرسالة الأصلية: {source_chat_id}:{source_message_id}")
+                    return False
+                    
+                # Get all targets for this task
+                targets = userbot_instance.db.get_task_targets(pending_message['task_id'])
+                
+                success_count = 0
+                for target in targets:
+                    try:
+                        # Forward the message to each target
+                        await userbot_instance._forward_or_copy_message(
+                            message, task, user_id, client, target['chat_id']
+                        )
+                        success_count += 1
+                        logger.info(f"✅ تم إرسال رسالة موافق عليها إلى {target['chat_id']}")
+                        
+                        # Add delay between targets
+                        import asyncio
+                        await asyncio.sleep(1)
+                        
+                    except Exception as target_error:
+                        logger.error(f"❌ فشل في إرسال الرسالة إلى {target['chat_id']}: {target_error}")
+                        continue
+                
+                logger.info(f"📊 تم إرسال الرسالة الموافق عليها إلى {success_count}/{len(targets)} هدف")
+                return success_count > 0
+                
+            except Exception as msg_error:
+                logger.error(f"❌ خطأ في الحصول على الرسالة الأصلية: {msg_error}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في معالجة الرسالة الموافق عليها: {e}")
+            return False
 
     async def show_pending_message_details(self, event, pending_id: int):
         """Show detailed information about pending message"""
@@ -7386,8 +7446,8 @@ async def run_simple_bot():
     # Start the bot
     await bot.start()
     
-    # Keep the bot running
-    await bot.bot.run_until_disconnected()
+    # Return bot instance for global access
+    return bot
 
     # ===== Advanced Features Menu =====
     

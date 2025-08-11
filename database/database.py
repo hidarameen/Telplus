@@ -4050,6 +4050,24 @@ class Database:
                 
         except Exception as e:
             logger.error(f"خطأ في إنشاء جدول message_duplicates: {e}")
+        
+    def get_pending_message_by_source(self, task_id: int, source_chat_id: str, source_message_id: int) -> Optional[Dict]:
+        """Get pending message by source chat and message ID to prevent duplicates"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT * FROM pending_messages 
+                    WHERE task_id = ? AND source_chat_id = ? AND source_message_id = ?
+                    AND status = 'pending'
+                ''', (task_id, source_chat_id, source_message_id))
+                
+                row = cursor.fetchone()
+                return dict(row) if row else None
+                
+        except Exception as e:
+            logger.error(f"خطأ في البحث عن رسالة معلقة: {e}")
+            return None
 
     def add_duplicate_filter_columns(self):
         """Add missing duplicate filter columns to task_advanced_filters table"""

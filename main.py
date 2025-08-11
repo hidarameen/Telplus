@@ -22,6 +22,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global bot instance for userbot to access
+bot_instance = None
+
 class TelegramBotSystem:
     def __init__(self):
         self.bot_thread = None
@@ -30,9 +33,12 @@ class TelegramBotSystem:
 
     async def start_telegram_bot(self):
         """Start Telegram bot"""
+        global bot_instance
         logger.info("🤖 بدء تشغيل بوت تليجرام...")
         try:
-            await run_simple_bot()
+            bot_instance = await run_simple_bot()
+            # Keep the bot running
+            await bot_instance.bot.run_until_disconnected()
         except Exception as e:
             logger.error(f"خطأ في بوت تليجرام: {e}")
 
