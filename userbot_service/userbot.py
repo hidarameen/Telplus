@@ -597,15 +597,20 @@ class UserbotService:
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
                                         logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
+                                        
+                                        # Apply watermark if enabled
+                                        watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                        
                                         # In copy mode, we always send as new media, not forward
                                         forwarded_msg = await client.send_file(
                                             target_entity,
-                                            event.message.media,
+                                            watermarked_media,
                                             caption=caption_text,
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if caption_text else None,
                                             force_document=False,
                                             buttons=original_reply_markup or inline_buttons,
+                                            file_name=modified_filename,
                                         )
                             elif event.message.text or final_text:
                                 # Pure text message
