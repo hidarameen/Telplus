@@ -6281,14 +6281,14 @@ class SimpleTelegramBot:
 
         # Get current position
         watermark_settings = self.db.get_watermark_settings(task_id)
-        current_position = watermark_settings.get('position', 'bottom-right')
+        current_position = watermark_settings.get('position', 'bottom_right')
 
         positions = [
-            ('top-left', 'أعلى يسار', '↖️'),
-            ('top-right', 'أعلى يمين', '↗️'),
+            ('top_left', 'أعلى يسار', '↖️'),
+            ('top_right', 'أعلى يمين', '↗️'),
             ('center', 'الوسط', '🎯'),
-            ('bottom-left', 'أسفل يسار', '↙️'),
-            ('bottom-right', 'أسفل يمين', '↘️')
+            ('bottom_left', 'أسفل يسار', '↙️'),
+            ('bottom_right', 'أسفل يمين', '↘️')
         ]
 
         buttons = []
@@ -6433,8 +6433,6 @@ class SimpleTelegramBot:
                         
                         # Force refresh UserBot tasks
                         await self._refresh_userbot_tasks(user_id)
-                        
-                        await self.show_watermark_config(event, task_id)
                     else:
                         await event.respond("❌ فشل في حفظ مسار الصورة")
                 else:
