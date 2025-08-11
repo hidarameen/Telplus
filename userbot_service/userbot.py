@@ -553,8 +553,7 @@ class UserbotService:
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
                                             formatting_entities=spoiler_entities,
-                                            buttons=inline_buttons,
-                                            reply_markup=original_reply_markup
+                                            buttons=original_reply_markup or inline_buttons,
                                         )
                                     else:
                                         # Send normally with buttons
@@ -564,8 +563,7 @@ class UserbotService:
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML',
-                                            buttons=inline_buttons,
-                                            reply_markup=original_reply_markup
+                                            buttons=original_reply_markup or inline_buttons,
                                         )
                                 else:
                                     # Regular media message with caption handling
@@ -590,8 +588,7 @@ class UserbotService:
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if caption_text else None,
                                             force_document=False,
-                                            buttons=inline_buttons,
-                                            reply_markup=original_reply_markup
+                                            buttons=original_reply_markup or inline_buttons,
                                         )
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
@@ -604,8 +601,7 @@ class UserbotService:
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if caption_text else None,
                                             force_document=False,
-                                            buttons=inline_buttons,
-                                            reply_markup=original_reply_markup
+                                            buttons=original_reply_markup or inline_buttons,
                                         )
                             elif event.message.text or final_text:
                                 # Pure text message
@@ -621,19 +617,20 @@ class UserbotService:
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
                                         formatting_entities=spoiler_entities,
-                                        buttons=inline_buttons,
-                                        reply_markup=original_reply_markup
+                                        buttons=original_reply_markup or inline_buttons,
                                     )
                                 else:
                                     # Send normally with buttons
+                                    # Combine original and custom buttons for Telethon
+                                    combined_buttons = original_reply_markup or inline_buttons
+                                    
                                     forwarded_msg = await client.send_message(
                                         target_entity,
                                         processed_text,
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
                                         parse_mode='HTML',
-                                        buttons=inline_buttons,
-                                        reply_markup=original_reply_markup
+                                        buttons=combined_buttons
                                     )
                             else:
                                 # Fallback to forward for other types
@@ -663,8 +660,7 @@ class UserbotService:
                                                 link_preview=forwarding_settings['link_preview_enabled'],
                                                 silent=forwarding_settings['silent_notifications'],
                                                 formatting_entities=spoiler_entities,
-                                                buttons=inline_buttons,
-                                                reply_markup=original_reply_markup
+                                                buttons=original_reply_markup or inline_buttons,
                                             )
                                         else:
                                             # Send normally with buttons
@@ -674,8 +670,7 @@ class UserbotService:
                                                 link_preview=forwarding_settings['link_preview_enabled'],
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML',
-                                                buttons=inline_buttons,
-                                                reply_markup=original_reply_markup
+                                                buttons=original_reply_markup or inline_buttons,
                                             )
                                     else:
                                         # Regular media message with caption handling
@@ -700,8 +695,7 @@ class UserbotService:
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
                                                 force_document=False,
-                                                buttons=inline_buttons,
-                                                reply_markup=original_reply_markup
+                                                buttons=original_reply_markup or inline_buttons,
                                             )
                                         else:
                                             # Keep album grouped: send as new media (copy mode)
@@ -714,8 +708,7 @@ class UserbotService:
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
                                                 force_document=False,
-                                                buttons=inline_buttons,
-                                                reply_markup=original_reply_markup
+                                                buttons=original_reply_markup or inline_buttons,
                                             )
                                 else:
                                     # Process spoiler entities if present
@@ -730,8 +723,7 @@ class UserbotService:
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
                                             formatting_entities=spoiler_entities,
-                                            buttons=inline_buttons,
-                                            reply_markup=original_reply_markup
+                                            buttons=original_reply_markup or inline_buttons,
                                         )
                                     else:
                                         # Send normally with buttons
@@ -741,8 +733,7 @@ class UserbotService:
                                             link_preview=forwarding_settings['link_preview_enabled'],
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML',
-                                            buttons=inline_buttons,
-                                            reply_markup=original_reply_markup
+                                            buttons=original_reply_markup or inline_buttons,
                                         )
                             else:
                                 # Check if we need copy mode for caption removal or album splitting on media
@@ -764,8 +755,7 @@ class UserbotService:
                                                 event.message.text or "رسالة",
                                                 link_preview=forwarding_settings['link_preview_enabled'],
                                                 silent=forwarding_settings['silent_notifications'],
-                                                buttons=inline_buttons,
-                                                reply_markup=original_reply_markup
+                                                buttons=original_reply_markup or inline_buttons,
                                             )
                                         else:
                                             # Regular media message with caption handling
@@ -784,8 +774,7 @@ class UserbotService:
                                                     caption=caption_text,
                                                     silent=forwarding_settings['silent_notifications'],
                                                     force_document=False,
-                                                    buttons=inline_buttons,
-                                                    reply_markup=original_reply_markup
+                                                    buttons=original_reply_markup or inline_buttons,
                                                 )
                                             else:
                                                 # Keep album grouped
@@ -805,8 +794,7 @@ class UserbotService:
                                                         caption=caption_text,
                                                         silent=forwarding_settings['silent_notifications'],
                                                         force_document=False,
-                                                        buttons=inline_buttons,
-                                                        reply_markup=original_reply_markup
+                                                        buttons=original_reply_markup or inline_buttons,
                                                     )
                                     else:
                                         # Regular text forward

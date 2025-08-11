@@ -4,6 +4,36 @@ This project is a Telegram message forwarding automation system designed to stre
 # User Preferences
 Preferred communication style: Simple, everyday language.
 
+# Recent Changes - August 11, 2025
+
+- **COMPLETE INLINE BUTTON PRESERVATION FIX**: Resolved critical root cause where original inline buttons were being stripped from forwarded messages in copy mode:
+  - **ROOT CAUSE IDENTIFIED**: While filter logic was working correctly, the forwarding mechanism in copy mode was recreating messages without preserving original `reply_markup` from source messages
+  - **COMPREHENSIVE SOLUTION**: Implemented preservation of original `reply_markup` when inline button filter is disabled:
+    - Added `original_reply_markup` variable to capture original message buttons
+    - Updated all 14 `client.send_message` and `client.send_file` calls to pass buttons correctly
+    - Enhanced logging to show when original buttons are preserved vs. removed
+  - **EMERGENCY PARAMETER FIX**: Discovered and fixed critical Telethon API compatibility issue:
+    - **ERROR**: `MessageMethods.send_message() got an unexpected keyword argument 'reply_markup'`
+    - **SOLUTION**: Converted all `reply_markup` parameters to `buttons` parameters for Telethon compatibility
+    - **METHOD**: Combined original and custom buttons into single `buttons=original_reply_markup or inline_buttons` parameter
+    - **CLEANUP**: Removed 14 duplicate button parameter lines from code
+  - **DUAL BUTTON SUPPORT**: System now supports both custom inline buttons (from database) and original buttons (from source message) simultaneously
+  - **COMPLETE COVERAGE**: All forwarding scenarios now preserve buttons: text messages, media messages, web pages, albums (split/grouped), spoiler messages
+  - **SMART LOGIC**: Original buttons preserved only when filter is disabled, removed when filter is enabled
+  - **VERIFICATION**: Bot now running successfully in console with successful message forwarding
+  - **IMPACT**: Users can now forward messages with inline buttons in copy mode while filter is disabled
+  - **CONSOLE CONFIRMATION**: Logs show "🔘 الحفاظ على الأزرار الأصلية - فلتر الأزرار الشفافة معطل" and successful forwarding
+  - **DATE**: August 11, 2025
+
+- **INLINE BUTTON FILTER LOGIC FIX**: Fixed critical issue where inline buttons were being removed despite filter being disabled:
+  - **ROOT CAUSE**: Logic incorrectly processed messages when `inline_button_filter_enabled=0` but `block_messages_with_buttons=1`
+  - **SOLUTION**: Implemented proper filter enablement check that respects the filter being disabled
+  - **NEW BEHAVIOR**: When filter is disabled, messages with inline buttons pass through unchanged regardless of block setting
+  - **COMPATIBILITY**: Added legacy compatibility handling for existing configurations with conflicting settings
+  - **VERIFICATION**: Comprehensive test suite confirms buttons are preserved when filter is disabled
+  - **LOGGING**: Enhanced debug logging to track filter decisions and settings conflicts
+  - **DATE**: August 11, 2025
+
 # System Architecture
 ## UI/UX Decisions
 The system features a Flask-based web application with Jinja2 templating and Bootstrap 5, providing full RTL support for its Arabic interface. Client-side interactions utilize vanilla JavaScript for form validation and real-time updates. Custom CSS ensures proper Arabic typography and responsive design. The Telegram bot interface is entirely in Arabic, facilitating intuitive management of forwarding tasks.
