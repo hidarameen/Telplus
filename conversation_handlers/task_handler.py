@@ -184,6 +184,24 @@ class TaskHandler:
         elif data.startswith("toggle_watermark_documents_"):
             task_id = int(data.split("_")[3])
             await self._toggle_watermark_media_type(update, context, task_id, 'documents')
+        elif data.startswith("watermark_appearance_"):
+            task_id = int(data.split("_")[2])
+            await self._show_watermark_appearance_settings(update, context, task_id)
+        elif data.startswith("watermark_size_"):
+            parts = data.split("_")
+            task_id = int(parts[2])
+            action = parts[3]  # 'increase' or 'decrease'
+            await self._adjust_watermark_size(update, context, task_id, action)
+        elif data.startswith("watermark_opacity_"):
+            parts = data.split("_")
+            task_id = int(parts[2])
+            action = parts[3]  # 'increase' or 'decrease'
+            await self._adjust_watermark_opacity(update, context, task_id, action)
+        elif data.startswith("watermark_font_"):
+            parts = data.split("_")
+            task_id = int(parts[2])
+            action = parts[3]  # 'increase' or 'decrease'
+            await self._adjust_watermark_font_size(update, context, task_id, action)
         elif data.startswith("add_replacement_"):
             task_id = int(data.split("_")[2])
             await self._start_add_replacement(update, context, task_id)
@@ -1117,3 +1135,138 @@ class TaskHandler:
         
         await update.callback_query.answer(f"✅ تم حذف جميع الاستبدالات النصية")
         await self._show_text_replacements(update, context, task_id)
+
+    async def _show_watermark_appearance_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int):
+        """Show watermark appearance settings (size, opacity, font size)"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Get watermark settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        
+        size_percentage = watermark_settings.get('size_percentage', 20)
+        opacity = watermark_settings.get('opacity', 70)
+        font_size = watermark_settings.get('font_size', 24)
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("🔻 حجم", callback_data=f"watermark_size_{task_id}_decrease"),
+                InlineKeyboardButton(f"{size_percentage}%", callback_data="dummy"),
+                InlineKeyboardButton("🔺 حجم", callback_data=f"watermark_size_{task_id}_increase")
+            ],
+            [
+                InlineKeyboardButton("🔻 شفافية", callback_data=f"watermark_opacity_{task_id}_decrease"),
+                InlineKeyboardButton(f"{opacity}%", callback_data="dummy"),
+                InlineKeyboardButton("🔺 شفافية", callback_data=f"watermark_opacity_{task_id}_increase")
+            ],
+            [
+                InlineKeyboardButton("🔻 خط", callback_data=f"watermark_font_{task_id}_decrease"),
+                InlineKeyboardButton(f"{font_size}px", callback_data="dummy"),
+                InlineKeyboardButton("🔺 خط", callback_data=f"watermark_font_{task_id}_increase")
+            ],
+            [InlineKeyboardButton("🔙 عودة للتكوين", callback_data=f"watermark_config_{task_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.callback_query.edit_message_text(
+            f"🎨 إعدادات مظهر العلامة المائية - المهمة #{task_id}\n\n"
+            f"📏 **الحجم**: {size_percentage}% (5-80%)\n"
+            f"💧 **الشفافية**: {opacity}% (10-100%)\n"
+            f"📝 **حجم الخط**: {font_size}px (12-72px)\n\n"
+            f"🔧 استخدم الأزرار لتعديل القيم:",
+            reply_markup=reply_markup
+        )
+
+    async def _adjust_watermark_size(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int, action: str):
+        """Adjust watermark size"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Get current settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        current_size = watermark_settings.get('size_percentage', 20)
+        
+        # Adjust size
+        if action == 'increase':
+            new_size = min(80, current_size + 5)
+        else:  # decrease
+            new_size = max(5, current_size - 5)
+        
+        # Update database
+        self.db.update_watermark_settings(task_id, size_percentage=new_size)
+        
+        if new_size != current_size:
+            await update.callback_query.answer(f"✅ تم تعديل الحجم إلى {new_size}%")
+        else:
+            await update.callback_query.answer(f"⚠️ الحد الأقصى/الأدنى للحجم: {new_size}%")
+        
+        # Refresh the appearance settings
+        await self._show_watermark_appearance_settings(update, context, task_id)
+
+    async def _adjust_watermark_opacity(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int, action: str):
+        """Adjust watermark opacity"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Get current settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        current_opacity = watermark_settings.get('opacity', 70)
+        
+        # Adjust opacity
+        if action == 'increase':
+            new_opacity = min(100, current_opacity + 10)
+        else:  # decrease
+            new_opacity = max(10, current_opacity - 10)
+        
+        # Update database
+        self.db.update_watermark_settings(task_id, opacity=new_opacity)
+        
+        if new_opacity != current_opacity:
+            await update.callback_query.answer(f"✅ تم تعديل الشفافية إلى {new_opacity}%")
+        else:
+            await update.callback_query.answer(f"⚠️ الحد الأقصى/الأدنى للشفافية: {new_opacity}%")
+        
+        # Refresh the appearance settings
+        await self._show_watermark_appearance_settings(update, context, task_id)
+
+    async def _adjust_watermark_font_size(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: int, action: str):
+        """Adjust watermark font size"""
+        user_id = update.effective_user.id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await update.callback_query.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Get current settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        current_font = watermark_settings.get('font_size', 24)
+        
+        # Adjust font size
+        if action == 'increase':
+            new_font = min(72, current_font + 4)
+        else:  # decrease
+            new_font = max(12, current_font - 4)
+        
+        # Update database
+        self.db.update_watermark_settings(task_id, font_size=new_font)
+        
+        if new_font != current_font:
+            await update.callback_query.answer(f"✅ تم تعديل حجم الخط إلى {new_font}px")
+        else:
+            await update.callback_query.answer(f"⚠️ الحد الأقصى/الأدنى للخط: {new_font}px")
+        
+        # Refresh the appearance settings
+        await self._show_watermark_appearance_settings(update, context, task_id)

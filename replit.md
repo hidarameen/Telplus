@@ -6,6 +6,21 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **WATERMARK DISPLAY AND FUNCTIONALITY FIXES**: Successfully resolved critical watermark issues reported by user:
+  - **FIXED WATERMARK SIZE**: Increased default watermark size from 10% to 20% and expanded maximum size from 50% to 80%
+  - **FIXED TEXT WATERMARK SIZE**: Enhanced font size calculation from img_width//50 to img_width//25 for better visibility
+  - **FIXED FILE FORMAT PRESERVATION**: Corrected file handling to preserve original extensions (.png, .jpg, etc.) and maintain proper file names instead of sending as "unnamed" files
+  - **ENHANCED FILE NAMING**: Improved MIME type to extension mapping and filename extraction from Telegram document attributes
+  - **FIXED IMAGE FORMAT HANDLING**: Modified watermark processor to preserve original image format (PNG, JPEG) instead of forcing JPEG conversion
+  - **ADDED APPEARANCE CONTROLS**: Implemented missing watermark appearance settings interface with working resize buttons:
+    - Size adjustment (5-80% in 5% increments)
+    - Opacity adjustment (10-100% in 10% increments) 
+    - Font size adjustment (12-72px in 4px increments)
+  - **RESOLVED CV2 COMPATIBILITY**: Fixed cv2.VideoWriter_fourcc import issue for video watermark processing
+  - **DATABASE SCHEMA UPDATE**: Modified size_percentage constraint to allow larger watermarks (5-80% range)
+  - **USER INTERFACE**: All resize and appearance control buttons now functional in bot interface
+  - **DATE**: August 11, 2025
+
 - **WATERMARK FEATURE COMPLETE FIX**: Successfully resolved all remaining watermark functionality issues:
   - **FIXED SUB-BUTTON HANDLERS**: Corrected all appearance sub-button event handlers for size, opacity, font size, and color settings
   - **FIXED POSITION BUTTON**: Resolved position change button not working due to incorrect parameter parsing

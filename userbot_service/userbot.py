@@ -1417,36 +1417,66 @@ class UserbotService:
                 logger.warning(f"فشل في تحميل الوسائط للمهمة {task_id}")
                 return event.message.media, None
             
-            # Get file name
+            # Get file name with proper extension
             file_name = "media_file"
+            file_extension = ""
+            
             if is_photo:
-                file_name = "photo.jpg"
+                file_name = "photo"
+                file_extension = ".jpg"  # Default for photos
             elif hasattr(event.message.media, 'document') and event.message.media.document:
                 doc = event.message.media.document
+                
+                # Try to get original filename first
                 if hasattr(doc, 'attributes'):
                     for attr in doc.attributes:
                         if hasattr(attr, 'file_name') and attr.file_name:
                             file_name = attr.file_name
+                            # Extract extension
+                            if '.' in file_name:
+                                file_extension = '.' + file_name.split('.')[-1].lower()
+                                file_name = file_name.rsplit('.', 1)[0]
                             break
-                # Fallback to mime type extension
+                
+                # If no filename found, use mime type
                 if file_name == "media_file" and doc.mime_type:
+                    mime_to_ext = {
+                        'image/jpeg': '.jpg',
+                        'image/jpg': '.jpg', 
+                        'image/png': '.png',
+                        'image/gif': '.gif',
+                        'image/webp': '.webp',
+                        'video/mp4': '.mp4',
+                        'video/avi': '.avi',
+                        'video/mov': '.mov',
+                        'video/mkv': '.mkv',
+                        'video/webm': '.webm'
+                    }
+                    
+                    file_extension = mime_to_ext.get(doc.mime_type, '.bin')
+                    
                     if doc.mime_type.startswith('video/'):
-                        file_name = "video.mp4"
+                        file_name = "video"
                     elif doc.mime_type.startswith('image/'):
-                        file_name = "image.jpg"
+                        file_name = "image"
+                    else:
+                        file_name = "document"
             
-            logger.info(f"🏷️ تطبيق العلامة المائية على {file_name} للمهمة {task_id}")
+            # Combine name and extension
+            full_file_name = file_name + file_extension
+            
+            logger.info(f"🏷️ تطبيق العلامة المائية على {full_file_name} للمهمة {task_id}")
             
             # Apply watermark
             watermarked_media = self.watermark_processor.process_media_with_watermark(
                 media_bytes, 
-                file_name, 
+                full_file_name, 
                 watermark_settings
             )
             
             if watermarked_media and watermarked_media != media_bytes:
                 logger.info(f"✅ تم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
-                return watermarked_media, file_name
+                return watermarked_media, full_file_name
             else:
                 logger.debug(f"🔄 لم يتم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
                 return event.message.media, None

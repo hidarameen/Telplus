@@ -47,7 +47,7 @@ class WatermarkProcessor:
             img_width, img_height = image_size
             
             # حساب حجم الخط بناءً على حجم الصورة
-            calculated_font_size = max(font_size, img_width // 50)
+            calculated_font_size = max(font_size, img_width // 25)  # زيادة حجم الخط
             
             # محاولة استخدام خط عربي إذا أمكن
             font = None
@@ -78,7 +78,7 @@ class WatermarkProcessor:
             text_height = text_bbox[3] - text_bbox[1]
             
             # إنشاء صورة للنص مع خلفية شفافة
-            text_img = Image.new('RGBA', (text_width + 20, text_height + 10), (0, 0, 0, 0))
+            text_img = Image.new('RGBA', (int(text_width + 20), int(text_height + 10)), (0, 0, 0, 0))
             text_draw = ImageDraw.Draw(text_img)
             
             # تحويل اللون إلى RGBA مع الشفافية
@@ -194,9 +194,31 @@ class WatermarkProcessor:
                 # تحويل مرة أخرى إلى RGB
                 image = image.convert('RGB')
             
-            # حفظ الصورة
+            # حفظ الصورة بتنسيقها الأصلي أو PNG للحفاظ على الجودة
             output = io.BytesIO()
-            image.save(output, format='JPEG', quality=95)
+            
+            # تحديد تنسيق الحفظ بناءً على الصورة الأصلية
+            try:
+                original_image = Image.open(io.BytesIO(image_bytes))
+                original_format = original_image.format or 'PNG'
+                
+                # استخدام PNG للصور التي تحتوي على شفافية
+                if image.mode == 'RGBA' or original_format == 'PNG':
+                    image.save(output, format='PNG', optimize=True)
+                elif original_format in ['JPEG', 'JPG']:
+                    # تحويل RGBA إلى RGB للـ JPEG
+                    if image.mode == 'RGBA':
+                        background = Image.new('RGB', image.size, (255, 255, 255))
+                        background.paste(image, mask=image.split()[-1])
+                        image = background
+                    image.save(output, format='JPEG', quality=95, optimize=True)
+                else:
+                    # استخدام PNG كتنسيق افتراضي
+                    image.save(output, format='PNG', optimize=True)
+            except Exception:
+                # في حالة فشل تحديد التنسيق، استخدم PNG
+                image.save(output, format='PNG', optimize=True)
+                
             return output.getvalue()
             
         except Exception as e:
@@ -223,7 +245,7 @@ class WatermarkProcessor:
             output_path = os.path.join(temp_dir, f"watermarked_{os.path.basename(video_path)}")
             
             # إعداد كاتب الفيديو
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            fourcc = cv2.VideoWriter.fourcc(*'mp4v')
             out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
             
             # تحضير العلامة المائية

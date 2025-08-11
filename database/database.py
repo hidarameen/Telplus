@@ -506,7 +506,7 @@ class Database:
                     watermark_text TEXT,
                     watermark_image_path TEXT,
                     position TEXT DEFAULT 'bottom_right' CHECK (position IN ('top_left', 'top_right', 'bottom_left', 'bottom_right', 'center')),
-                    size_percentage INTEGER DEFAULT 10 CHECK (size_percentage >= 5 AND size_percentage <= 50),
+                    size_percentage INTEGER DEFAULT 20 CHECK (size_percentage >= 5 AND size_percentage <= 80),
                     opacity INTEGER DEFAULT 70 CHECK (opacity >= 10 AND opacity <= 100),
                     text_color TEXT DEFAULT '#FFFFFF',
                     use_original_color BOOLEAN DEFAULT FALSE,
