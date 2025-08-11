@@ -1423,6 +1423,50 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التوجيه: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("approve_"):
+                # Handle message approval
+                try:
+                    pending_id = int(data.split("_")[1])
+                    await self.handle_message_approval(event, pending_id, True)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف الرسالة المعلقة للموافقة: {e}")
+                    await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("reject_"):
+                # Handle message rejection
+                try:
+                    pending_id = int(data.split("_")[1])
+                    await self.handle_message_approval(event, pending_id, False)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف الرسالة المعلقة للرفض: {e}")
+                    await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("details_"):
+                # Handle showing message details
+                try:
+                    pending_id = int(data.split("_")[1])
+                    await self.show_pending_message_details(event, pending_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف الرسالة المعلقة للتفاصيل: {e}")
+                    await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("publishing_mode_"):
+                # Handle publishing mode settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_publishing_mode_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وضع النشر: {e}")
+                        await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("toggle_publishing_mode_"):
+                # Handle publishing mode toggle
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_publishing_mode(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع النشر: {e}")
+                        await event.answer("❌ خطأ في معالجة الطلب")
             elif data.startswith("toggle_split_album_"): # Handler for toggling split album
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -6905,6 +6949,242 @@ class SimpleTelegramBot:
             f"💡 يمكنك تخصيص كل فلتر حسب احتياجاتك",
             buttons=buttons
         )
+
+    async def handle_message_approval(self, event, pending_id: int, approved: bool):
+        """Handle message approval/rejection"""
+        user_id = event.sender_id
+        
+        try:
+            # Get pending message details
+            pending_message = self.db.get_pending_message(pending_id)
+            if not pending_message or pending_message['user_id'] != user_id:
+                await event.answer("❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
+                return
+            
+            if pending_message['status'] != 'pending':
+                await event.answer("❌ هذه الرسالة تم التعامل معها بالفعل")
+                return
+            
+            task_id = pending_message['task_id']
+            task = self.db.get_task(task_id, user_id)
+            
+            if not task:
+                await event.answer("❌ المهمة غير موجودة")
+                return
+            
+            if approved:
+                # Mark as approved and proceed with forwarding
+                self.db.update_pending_message_status(pending_id, 'approved')
+                
+                # Process the message through userbot
+                await self._process_approved_message(pending_message, task)
+                
+                # Update the message to show approval
+                try:
+                    new_text = "✅ **تمت الموافقة**\n\n" + "هذه الرسالة تمت الموافقة عليها وتم إرسالها إلى الأهداف."
+                    await event.edit(new_text, buttons=None)
+                except:
+                    await event.answer("✅ تمت الموافقة على الرسالة وتم إرسالها")
+                
+            else:
+                # Mark as rejected
+                self.db.update_pending_message_status(pending_id, 'rejected')
+                
+                # Update the message to show rejection
+                try:
+                    new_text = "❌ **تم رفض الرسالة**\n\n" + "هذه الرسالة تم رفضها ولن يتم إرسالها."
+                    await event.edit(new_text, buttons=None)
+                except:
+                    await event.answer("❌ تم رفض الرسالة")
+                    
+            logger.info(f"📋 تم {'قبول' if approved else 'رفض'} الرسالة المعلقة {pending_id} للمستخدم {user_id}")
+            
+        except Exception as e:
+            logger.error(f"خطأ في معالجة الموافقة: {e}")
+            await event.answer("❌ حدث خطأ في معالجة الطلب")
+
+    async def show_pending_message_details(self, event, pending_id: int):
+        """Show detailed information about pending message"""
+        user_id = event.sender_id
+        
+        try:
+            pending_message = self.db.get_pending_message(pending_id)
+            if not pending_message or pending_message['user_id'] != user_id:
+                await event.answer("❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
+                return
+            
+            import json
+            message_data = json.loads(pending_message['message_data'])
+            task = self.db.get_task(pending_message['task_id'], user_id)
+            
+            if not task:
+                await event.answer("❌ المهمة غير موجودة")
+                return
+                
+            task_name = task.get('task_name', f"مهمة {pending_message['task_id']}")
+            
+            details_text = f"""
+📋 **تفاصيل الرسالة المعلقة**
+
+📝 **المهمة:** {task_name}
+📊 **النوع:** {message_data.get('media_type', 'نص')}
+📱 **المصدر:** {pending_message['source_chat_id']}
+🆔 **معرف الرسالة:** {pending_message['source_message_id']}
+📅 **التاريخ:** {message_data.get('date', 'غير محدد')}
+
+💬 **المحتوى:**
+{message_data.get('text', 'لا يوجد نص')}
+
+⚡ اختر إجراء:
+"""
+            
+            keyboard = [
+                [
+                    Button.inline("✅ موافق", f"approve_{pending_id}"),
+                    Button.inline("❌ رفض", f"reject_{pending_id}")
+                ]
+            ]
+            
+            await event.edit(details_text, buttons=keyboard)
+            
+        except Exception as e:
+            logger.error(f"خطأ في عرض تفاصيل الرسالة المعلقة: {e}")
+            await event.answer("❌ حدث خطأ في عرض التفاصيل")
+
+    async def _process_approved_message(self, pending_message, task):
+        """Process approved message through userbot"""
+        try:
+            from userbot_service.userbot import userbot_instance
+            
+            user_id = pending_message['user_id']
+            source_chat_id = int(pending_message['source_chat_id'])
+            source_message_id = pending_message['source_message_id']
+            
+            # Get the original message from source chat
+            if user_id in userbot_instance.clients:
+                client = userbot_instance.clients[user_id]
+                
+                # Get the original message
+                original_message = await client.get_messages(source_chat_id, ids=source_message_id)
+                
+                if original_message:
+                    # Process the message through normal forwarding logic
+                    await userbot_instance._forward_to_targets(original_message, task, user_id, client)
+                    logger.info(f"✅ تم إرسال الرسالة المقبولة {pending_message['id']} للأهداف")
+                else:
+                    logger.warning(f"⚠️ لم يتم العثور على الرسالة الأصلية {source_message_id}")
+                    
+        except Exception as e:
+            logger.error(f"خطأ في معالجة الرسالة المقبولة: {e}")
+
+    async def show_advanced_features(self, event, task_id):
+        """Show advanced features menu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        buttons = [
+            # Row 1 - Basic Features
+            [Button.inline("🔄 إعدادات التوجيه", f"forwarding_settings_{task_id}"),
+             Button.inline("🧼 تنظيف النصوص", f"text_cleaning_{task_id}")],
+            
+            # Row 2 - Text & Media
+            [Button.inline("✨ تنسيق النصوص", f"text_formatting_{task_id}"),
+             Button.inline("🔢 حد الأحرف", f"character_limit_{task_id}")],
+            
+            # Row 3 - Rate & Timing  
+            [Button.inline("⏱️ تحكم المعدل", f"rate_limit_{task_id}"),
+             Button.inline("⏳ تأخير التوجيه", f"forwarding_delay_{task_id}")],
+            
+            # Row 4 - Intervals & Publishing
+            [Button.inline("📊 فترات الإرسال", f"sending_interval_{task_id}"),
+             Button.inline("📋 وضع النشر", f"publishing_mode_{task_id}")],
+            
+            # Row 5 - Translation & Replacements
+            [Button.inline("🌍 إعدادات الترجمة", f"translation_settings_{task_id}"),
+             Button.inline("🔄 استبدال النصوص", f"text_replacements_{task_id}")],
+            
+            # Row 6 - Back
+            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"⚙️ المميزات المتقدمة: {task_name}\n\n"
+            f"🔧 اختر الميزة التي تريد تكوينها:",
+            buttons=buttons
+        )
+
+    async def show_publishing_mode_settings(self, event, task_id):
+        """Show publishing mode settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        current_mode = task.get('publishing_mode', 'auto')
+        
+        status_text = {
+            'auto': '🟢 تلقائي - يتم إرسال الرسائل فوراً',
+            'manual': '🟡 يدوي - يتطلب موافقة قبل الإرسال'
+        }
+        
+        buttons = [
+            [Button.inline("🔄 تبديل الوضع", f"toggle_publishing_mode_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ]
+        
+        # If manual mode, show pending messages count
+        additional_info = ""
+        if current_mode == 'manual':
+            pending_count = len(self.db.get_pending_messages(user_id, task_id))
+            if pending_count > 0:
+                additional_info = f"\n\n📋 الرسائل المعلقة: {pending_count} رسالة في انتظار الموافقة"
+        
+        await event.edit(
+            f"📋 وضع النشر للمهمة: {task_name}\n\n"
+            f"📊 الوضع الحالي: {status_text.get(current_mode, 'غير معروف')}\n\n"
+            f"📝 شرح الأوضاع:\n"
+            f"🟢 تلقائي: الرسائل تُرسل فوراً دون تدخل\n"
+            f"🟡 يدوي: الرسائل تُرسل لك للمراجعة والموافقة{additional_info}",
+            buttons=buttons
+        )
+
+    async def toggle_publishing_mode(self, event, task_id):
+        """Toggle publishing mode between auto and manual"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        current_mode = task.get('publishing_mode', 'auto')
+        new_mode = 'manual' if current_mode == 'auto' else 'auto'
+        
+        success = self.db.update_task_publishing_mode(task_id, new_mode)
+        
+        if success:
+            mode_names = {
+                'auto': 'تلقائي',
+                'manual': 'يدوي'
+            }
+            
+            await event.answer(f"✅ تم تغيير وضع النشر إلى: {mode_names[new_mode]}")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            await self.show_publishing_mode_settings(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير وضع النشر")
 
 async def run_simple_bot():
     """Run the simple telegram bot"""

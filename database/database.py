@@ -237,6 +237,7 @@ class Database:
                     sync_edit_enabled BOOLEAN DEFAULT FALSE,
                     sync_delete_enabled BOOLEAN DEFAULT FALSE,
                     split_album_enabled BOOLEAN DEFAULT FALSE,
+                    publishing_mode TEXT DEFAULT 'auto' CHECK (publishing_mode IN ('auto', 'manual')),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
@@ -255,6 +256,24 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
                     UNIQUE(task_id, source_chat_id, source_message_id, target_chat_id)
+                )
+            ''')
+
+            # Pending messages table - for manual approval workflow
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS pending_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    source_chat_id TEXT NOT NULL,
+                    source_message_id INTEGER NOT NULL,
+                    message_data TEXT NOT NULL,
+                    message_type TEXT NOT NULL,
+                    approval_message_id INTEGER,
+                    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP DEFAULT (datetime('now', '+24 hours')),
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
 
@@ -499,6 +518,13 @@ class Database:
             try:
                 cursor.execute("ALTER TABLE task_watermark_settings ADD COLUMN offset_y INTEGER DEFAULT 0 CHECK (offset_y >= -200 AND offset_y <= 200)")
                 logger.info("✅ تم إضافة عمود offset_y للعلامة المائية")
+            except Exception:
+                pass  # Column already exists
+
+            # إضافة عمود وضع النشر لجدول إعدادات التوجيه
+            try:
+                cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN publishing_mode TEXT DEFAULT 'auto' CHECK (publishing_mode IN ('auto', 'manual'))")
+                logger.info("✅ تم إضافة عمود publishing_mode")
             except Exception:
                 pass  # Column already exists
 
@@ -1822,7 +1848,7 @@ class Database:
             cursor.execute('''
                 SELECT link_preview_enabled, pin_message_enabled, silent_notifications, 
                        auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled,
-                       split_album_enabled
+                       split_album_enabled, publishing_mode
                 FROM task_forwarding_settings 
                 WHERE task_id = ?
             ''', (task_id,))
@@ -1837,7 +1863,8 @@ class Database:
                     'auto_delete_time': result['auto_delete_time'],
                     'sync_edit_enabled': result['sync_edit_enabled'],
                     'sync_delete_enabled': result['sync_delete_enabled'],
-                    'split_album_enabled': result['split_album_enabled'] if 'split_album_enabled' in result.keys() else False
+                    'split_album_enabled': result['split_album_enabled'] if 'split_album_enabled' in result.keys() else False,
+                    'publishing_mode': result['publishing_mode'] if 'publishing_mode' in result.keys() else 'auto'
                 }
             else:
                 # Return default settings
@@ -1849,7 +1876,8 @@ class Database:
                     'auto_delete_time': 3600,
                     'sync_edit_enabled': False,
                     'sync_delete_enabled': False,
-                    'split_album_enabled': False
+                    'split_album_enabled': False,
+                    'publishing_mode': 'auto'
                 }
 
     def update_forwarding_settings(self, task_id: int, **kwargs):
@@ -1867,13 +1895,13 @@ class Database:
                 INSERT OR REPLACE INTO task_forwarding_settings 
                 (task_id, link_preview_enabled, pin_message_enabled, silent_notifications, 
                  auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled, 
-                 split_album_enabled, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 split_album_enabled, publishing_mode, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (task_id, current_settings['link_preview_enabled'], 
                   current_settings['pin_message_enabled'], current_settings['silent_notifications'],
                   current_settings['auto_delete_enabled'], current_settings['auto_delete_time'],
                   current_settings['sync_edit_enabled'], current_settings['sync_delete_enabled'],
-                  current_settings['split_album_enabled']))
+                  current_settings['split_album_enabled'], current_settings.get('publishing_mode', 'auto')))
 
             conn.commit()
 
@@ -1925,6 +1953,175 @@ class Database:
         new_state = not current_settings['split_album_enabled']
         self.update_forwarding_settings(task_id, split_album_enabled=new_state)
         return new_state
+
+    def toggle_publishing_mode(self, task_id: int) -> str:
+        """Toggle publishing mode between auto and manual"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_mode = 'manual' if current_settings['publishing_mode'] == 'auto' else 'auto'
+        self.update_forwarding_settings(task_id, publishing_mode=new_mode)
+        return new_mode
+
+    def set_publishing_mode(self, task_id: int, mode: str) -> bool:
+        """Set publishing mode for a task"""
+        if mode not in ['auto', 'manual']:
+            return False
+        self.update_forwarding_settings(task_id, publishing_mode=mode)
+        return True
+
+    # Pending Messages Management
+    def add_pending_message(self, task_id: int, user_id: int, source_chat_id: str, 
+                           source_message_id: int, message_data: str, message_type: str) -> int:
+        """Add a message to pending approval queue"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO pending_messages 
+                (task_id, user_id, source_chat_id, source_message_id, message_data, message_type)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (task_id, user_id, source_chat_id, source_message_id, message_data, message_type))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_pending_messages(self, user_id: int, status: str = 'pending') -> List[Dict]:
+        """Get pending messages for a user"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT pm.*, t.task_name 
+                FROM pending_messages pm 
+                JOIN tasks t ON pm.task_id = t.id
+                WHERE pm.user_id = ? AND pm.status = ? AND pm.expires_at > datetime('now')
+                ORDER BY pm.created_at DESC
+            ''', (user_id, status))
+            
+            results = cursor.fetchall()
+            return [{
+                'id': row['id'],
+                'task_id': row['task_id'],
+                'task_name': row['task_name'],
+                'source_chat_id': row['source_chat_id'],
+                'source_message_id': row['source_message_id'],
+                'message_data': row['message_data'],
+                'message_type': row['message_type'],
+                'approval_message_id': row['approval_message_id'],
+                'status': row['status'],
+                'created_at': row['created_at'],
+                'expires_at': row['expires_at']
+            } for row in results]
+
+    def get_pending_message(self, message_id: int):
+        """Get pending message by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, task_id, user_id, source_chat_id, source_message_id,
+                       message_data, message_type, approval_message_id, status,
+                       created_at, expires_at
+                FROM pending_messages 
+                WHERE id = ?
+            ''', (message_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'id': result['id'],
+                    'task_id': result['task_id'],
+                    'user_id': result['user_id'],
+                    'source_chat_id': result['source_chat_id'],
+                    'source_message_id': result['source_message_id'],
+                    'message_data': result['message_data'],
+                    'message_type': result['message_type'],
+                    'approval_message_id': result['approval_message_id'],
+                    'status': result['status'],
+                    'created_at': result['created_at'],
+                    'expires_at': result['expires_at']
+                }
+            return None
+
+    def update_pending_message_status(self, message_id: int, status: str, approval_message_id: int = None) -> bool:
+        """Update status of pending message"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if approval_message_id:
+                cursor.execute('''
+                    UPDATE pending_messages 
+                    SET status = ?, approval_message_id = ?
+                    WHERE id = ?
+                ''', (status, approval_message_id, message_id))
+            else:
+                cursor.execute('''
+                    UPDATE pending_messages 
+                    SET status = ?
+                    WHERE id = ?
+                ''', (status, message_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_task_publishing_mode(self, task_id: int, publishing_mode: str) -> bool:
+        """Update publishing mode for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE task_routing_settings 
+                SET publishing_mode = ?
+                WHERE task_id = ?
+            ''', (publishing_mode, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_pending_message_by_id(self, message_id: int) -> Optional[Dict]:
+        """Get pending message by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT pm.*, t.task_name, t.user_id as task_user_id
+                FROM pending_messages pm 
+                JOIN tasks t ON pm.task_id = t.id
+                WHERE pm.id = ?
+            ''', (message_id,))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'id': result['id'],
+                    'task_id': result['task_id'],
+                    'task_name': result['task_name'],
+                    'user_id': result['user_id'],
+                    'task_user_id': result['task_user_id'],
+                    'source_chat_id': result['source_chat_id'],
+                    'source_message_id': result['source_message_id'],
+                    'message_data': result['message_data'],
+                    'message_type': result['message_type'],
+                    'approval_message_id': result['approval_message_id'],
+                    'status': result['status'],
+                    'created_at': result['created_at'],
+                    'expires_at': result['expires_at']
+                }
+            return None
+
+    def cleanup_expired_pending_messages(self) -> int:
+        """Clean up expired pending messages"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE pending_messages 
+                SET status = 'expired'
+                WHERE status = 'pending' AND expires_at <= datetime('now')
+            ''')
+            conn.commit()
+            return cursor.rowcount
+
+    def get_pending_messages_count(self, user_id: int) -> int:
+        """Get count of pending messages for a user"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM pending_messages 
+                WHERE user_id = ? AND status = 'pending' AND expires_at > datetime('now')
+            ''', (user_id,))
+            result = cursor.fetchone()
+            return result['count'] if result else 0
 
     def set_auto_delete_time(self, task_id: int, seconds: int):
         """Set auto delete time in seconds"""

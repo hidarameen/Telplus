@@ -528,12 +528,20 @@ class UserbotService:
                         # Get forwarding settings
                         forwarding_settings = self.get_forwarding_settings(task['id'])
 
+                        # Check publishing mode
+                        publishing_mode = forwarding_settings.get('publishing_mode', 'auto')
+                        
+                        if publishing_mode == 'manual':
+                            logger.info(f"⏸️ وضع النشر اليدوي - إرسال الرسالة للمراجعة (المهمة: {task_name})")
+                            await self._handle_manual_approval(event.message, task, user_id, client)
+                            continue  # Skip automatic forwarding
+                        
                         # Apply sending interval before each target (except first)
                         if i > 0:
                             await self._apply_sending_interval(task['id'])
 
                         # Send message based on forward mode
-                        logger.info(f"📨 جاري إرسال الرسالة...")
+                        logger.info(f"📨 جاري إرسال الرسالة (وضع تلقائي)...")
 
                         if forward_mode == 'copy' or requires_copy_mode:
                             # Copy mode: send as new message with all formatting applied
@@ -2328,6 +2336,100 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في كشف اللغة: {e}")
             return 'unknown'
+
+    async def _handle_manual_approval(self, message, task, user_id: int, client):
+        """Handle manual approval workflow by sending message to task creator"""
+        import json
+        try:
+            task_id = task['id']
+            task_name = task.get('task_name', f"مهمة {task_id}")
+            
+            # Prepare message data for storage
+            message_data = {
+                'text': message.text,
+                'media_type': self.get_message_media_type(message),
+                'has_media': bool(message.media),
+                'chat_id': str(message.chat_id),
+                'message_id': message.id,
+                'date': message.date.isoformat() if message.date else None
+            }
+            
+            # Store pending message in database
+            pending_id = self.db.add_pending_message(
+                task_id=task_id,
+                user_id=user_id,
+                source_chat_id=str(message.chat_id),
+                source_message_id=message.id,
+                message_data=json.dumps(message_data),
+                message_type=message_data['media_type']
+            )
+            
+            # Get source chat info
+            try:
+                source_chat = await client.get_entity(message.chat_id)
+                source_name = getattr(source_chat, 'title', getattr(source_chat, 'first_name', 'غير معروف'))
+            except:
+                source_name = str(message.chat_id)
+            
+            # Prepare approval message
+            approval_text = f"""
+🔔 **طلب موافقة نشر**
+
+📋 **المهمة:** {task_name}
+📱 **المصدر:** {source_name}
+🕐 **التوقيت:** {message.date.strftime('%Y-%m-%d %H:%M:%S') if message.date else 'غير محدد'}
+📊 **النوع:** {message_data['media_type']}
+
+"""
+            
+            if message.text:
+                # Limit preview text to 200 characters
+                preview_text = message.text[:200] + "..." if len(message.text) > 200 else message.text
+                approval_text += f"💬 **المحتوى:**\n{preview_text}\n\n"
+            
+            approval_text += "⚡ اختر إجراء:"
+            
+            # Create inline buttons for approval/rejection
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ موافق", callback_data=f"approve_{pending_id}"),
+                    InlineKeyboardButton("❌ رفض", callback_data=f"reject_{pending_id}")
+                ],
+                [
+                    InlineKeyboardButton("📋 تفاصيل أكثر", callback_data=f"details_{pending_id}")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Send approval request to user via the bot
+            from main import bot
+            
+            try:
+                approval_msg = await bot.send_message(
+                    chat_id=user_id,
+                    text=approval_text,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+                
+                # Update pending message with approval message ID
+                self.db.update_pending_message_status(
+                    pending_id, 
+                    'pending', 
+                    approval_msg.message_id
+                )
+                
+                logger.info(f"📬 تم إرسال طلب موافقة للمستخدم {user_id} للمهمة {task_name} (ID: {pending_id})")
+                
+            except Exception as bot_error:
+                logger.error(f"❌ فشل في إرسال طلب الموافقة: {bot_error}")
+                # Mark as failed if we can't send the approval request
+                self.db.update_pending_message_status(pending_id, 'rejected')
+                
+        except Exception as e:
+            logger.error(f"خطأ في معالجة الموافقة اليدوية: {e}")
 
     async def stop_user(self, user_id: int):
         """Stop userbot for specific user"""
