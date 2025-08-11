@@ -28,11 +28,11 @@ class TelegramBotSystem:
         self.userbot_thread = None
         self.running = True
 
-    def start_telegram_bot(self):
+    async def start_telegram_bot(self):
         """Start Telegram bot"""
         logger.info("🤖 بدء تشغيل بوت تليجرام...")
         try:
-            run_simple_bot()
+            await run_simple_bot()
         except Exception as e:
             logger.error(f"خطأ في بوت تليجرام: {e}")
 
@@ -88,8 +88,13 @@ class TelegramBotSystem:
         """Start all services"""
         logger.info("🚀 بدء تشغيل نظام بوت تليجرام...")
 
-        # Start Telegram bot in separate thread
-        self.bot_thread = threading.Thread(target=self.start_telegram_bot, daemon=True)
+        # Start Telegram bot in separate thread  
+        def run_bot():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.start_telegram_bot())
+            
+        self.bot_thread = threading.Thread(target=run_bot, daemon=True)
         self.bot_thread.start()
 
         # Start userbot service monitoring
