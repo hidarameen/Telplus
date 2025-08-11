@@ -610,7 +610,7 @@ class UserbotService:
                                             parse_mode='HTML' if caption_text else None,
                                             force_document=False,
                                             buttons=original_reply_markup or inline_buttons,
-                                            file_name=modified_filename,
+                                            file_name=modified_filename or "media_file",
                                         )
                             elif event.message.text or final_text:
                                 # Pure text message
@@ -709,7 +709,7 @@ class UserbotService:
                                                 parse_mode='HTML' if caption_text else None,
                                                 force_document=False,
                                                 buttons=original_reply_markup or inline_buttons,
-                                                file_name=modified_filename,
+                                                file_name=modified_filename or "media_file",
                                             )
                                         else:
                                             # Keep album grouped: send as new media (copy mode)
@@ -727,7 +727,7 @@ class UserbotService:
                                                 parse_mode='HTML' if caption_text else None,
                                                 force_document=False,
                                                 buttons=original_reply_markup or inline_buttons,
-                                                file_name=modified_filename,
+                                                file_name=modified_filename or "media_file",
                                             )
                                 else:
                                     # Process spoiler entities if present
@@ -798,7 +798,7 @@ class UserbotService:
                                                     silent=forwarding_settings['silent_notifications'],
                                                     force_document=False,
                                                     buttons=original_reply_markup or inline_buttons,
-                                                    file_name=modified_filename,
+                                                    file_name=modified_filename or "media_file",
                                                 )
                                             else:
                                                 # Keep album grouped
@@ -822,7 +822,7 @@ class UserbotService:
                                                         silent=forwarding_settings['silent_notifications'],
                                                         force_document=False,
                                                         buttons=original_reply_markup or inline_buttons,
-                                                        file_name=modified_filename,
+                                                        file_name=modified_filename or "media_file",
                                                     )
                                     else:
                                         # Regular text forward
@@ -1489,7 +1489,8 @@ class UserbotService:
                 return watermarked_media, full_file_name
             else:
                 logger.debug(f"🔄 لم يتم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
-                return event.message.media, None
+                # Even if watermark wasn't applied, return the improved filename
+                return event.message.media, full_file_name
                 
         except Exception as e:
             logger.error(f"خطأ في تطبيق العلامة المائية: {e}")

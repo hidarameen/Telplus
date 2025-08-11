@@ -2969,7 +2969,7 @@ class SimpleTelegramBot:
         
         # Toggle state
         new_enabled = not current_enabled
-        self.db.update_watermark_settings(task_id, {'enabled': new_enabled})
+        self.db.update_watermark_settings(task_id, enabled=new_enabled)
         
         status = "🟢 مفعل" if new_enabled else "🔴 معطل"
         await event.answer(f"✅ تم تعديل حالة العلامة المائية: {status}")
@@ -3068,18 +3068,18 @@ class SimpleTelegramBot:
     async def change_watermark_position(self, event, task_id):
         """Change watermark position"""
         watermark_settings = self.db.get_watermark_settings(task_id)
-        current_position = watermark_settings.get('position', 'bottom-right')
+        current_position = watermark_settings.get('position', 'bottom_right')
         
-        # Cycle through positions
-        positions = ['top-left', 'top-right', 'center', 'bottom-left', 'bottom-right']
+        # Cycle through positions (using underscore format to match database constraint)
+        positions = ['top_left', 'top_right', 'center', 'bottom_left', 'bottom_right']
         current_index = positions.index(current_position) if current_position in positions else 0
         new_position = positions[(current_index + 1) % len(positions)]
         
         position_map = {
-            'top-left': 'أعلى يسار',
-            'top-right': 'أعلى يمين', 
-            'bottom-left': 'أسفل يسار',
-            'bottom-right': 'أسفل يمين',
+            'top_left': 'أعلى يسار',
+            'top_right': 'أعلى يمين', 
+            'bottom_left': 'أسفل يسار',
+            'bottom_right': 'أسفل يمين',
             'center': 'الوسط'
         }
         
@@ -3136,7 +3136,7 @@ class SimpleTelegramBot:
 
     async def set_watermark_type(self, event, task_id, watermark_type):
         """Set watermark type (text or image)"""
-        self.db.update_watermark_settings(task_id, {'watermark_type': watermark_type})
+        self.db.update_watermark_settings(task_id, watermark_type=watermark_type)
         
         type_display = "📝 نص" if watermark_type == 'text' else "🖼️ صورة"
         await event.answer(f"✅ تم تعديل نوع العلامة المائية إلى: {type_display}")
@@ -3162,7 +3162,9 @@ class SimpleTelegramBot:
         current_value = watermark_settings.get(field, False)
         new_value = not current_value
         
-        self.db.update_watermark_settings(task_id, {field: new_value})
+        # Use dynamic kwargs assignment
+        kwargs = {field: new_value}
+        self.db.update_watermark_settings(task_id, **kwargs)
         
         media_names = {
             'photos': 'الصور',
