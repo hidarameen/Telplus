@@ -8,6 +8,7 @@ Preferred communication style: Simple, everyday language.
 - Fixed watermark filename issue: Images with watermarks were being sent as "unnamed" files without extensions. Added missing `file_name` parameter in the photo watermark sending logic to preserve original filenames and extensions like .jpg, .png, etc. (2025-08-11)
 - Implemented intelligent watermark sizing system: Added smart watermark size calculation that adapts to image dimensions and position. For 100% size, watermarks now fit within image boundaries with proper margins. Added default_size database column for user preferences. Enhanced watermark processing with position-aware scaling algorithms. (2025-08-11)
 - Added manual watermark positioning system: Implemented precise offset control with dedicated buttons for moving watermarks horizontally (left/right) and vertically (up/down). Added offset_x and offset_y database columns with ±200px range. Enhanced watermark processor to apply manual offsets while maintaining image boundaries. Added reset functionality to return watermarks to default position. (2025-08-11)
+- Fixed watermark sizing algorithm: Corrected smart sizing calculations to properly apply size percentages. 100% size now covers 96% of image width as intended. Improved sizing formula for all percentage ranges (25%-100%) with proportional scaling based on image dimensions and watermark position. Enhanced visual consistency across different image sizes. (2025-08-11)
 
 # System Architecture
 ## UI/UX Decisions

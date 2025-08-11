@@ -121,54 +121,35 @@ class WatermarkProcessor:
         
         # حساب المساحة المتاحة للعلامة المائية مع التحسين الذكي
         if size_percentage == 100:
-            # للحجم 100%، استخدم كامل عرض الصورة مع هامش ذكي
-            margin_horizontal = base_width * 0.02  # هامش أفقي 2% (أقل للحجم 100%)
-            margin_vertical = base_height * 0.02   # هامش عمودي 2% (أقل للحجم 100%)
+            # للحجم 100%، استخدم كامل عرض الصورة مع هامش صغير
+            margin_horizontal = base_width * 0.02  # هامش أفقي 2%
+            margin_vertical = base_height * 0.02   # هامش عمودي 2%
             
             max_width = base_width - (2 * margin_horizontal)
             max_height = base_height - (2 * margin_vertical)
             
-            # اختر الحجم المناسب حسب الموضع
-            if position in ['top', 'bottom', 'center']:
-                # للمواضع الأفقية، استخدم كامل العرض المتاح
-                new_width = int(max_width)
-                new_height = int(new_width / aspect_ratio)
-                
-                # تأكد من عدم تجاوز الارتفاع المسموح
-                if new_height > max_height * 0.3:  # لا تتجاوز 30% من ارتفاع الصورة
-                    new_height = int(max_height * 0.3)
-                    new_width = int(new_height * aspect_ratio)
-            elif position in ['top_left', 'top_right', 'bottom_left', 'bottom_right']:
-                # للمواضع الركنية، استخدم حجم متوازن
-                if aspect_ratio > 2:  # العلامة المائية عريضة جداً
-                    new_width = int(max_width * 0.8)
-                    new_height = int(new_width / aspect_ratio)
-                elif aspect_ratio < 0.5:  # العلامة المائية طولية جداً
-                    new_height = int(max_height * 0.8)
-                    new_width = int(new_height * aspect_ratio)
-                else:  # نسبة متوازنة
-                    diagonal = min(max_width, max_height) * 0.8
-                    new_width = int(diagonal)
-                    new_height = int(diagonal / aspect_ratio)
-            else:
-                # للمواضع الأخرى
-                new_width = int(max_width * 0.6)
-                new_height = int(new_width / aspect_ratio)
-        else:
-            # للنسب المئوية الأخرى، احسب حسب النسبة المطلوبة
-            # استخدم متوسط الأبعاد بدلاً من الأصغر فقط
-            avg_dimension = (base_width + base_height) / 2
-            base_size = avg_dimension * size_percentage / 100
+            # للحجم 100%، استخدم كامل العرض المتاح دائماً
+            new_width = int(max_width * 0.96)  # 96% من العرض المتاح
+            new_height = int(new_width / aspect_ratio)
             
-            if aspect_ratio > 1.5:  # العلامة المائية عريضة
-                new_width = int(base_size * 1.2)
-                new_height = int(new_width / aspect_ratio)
-            elif aspect_ratio < 0.7:  # العلامة المائية طولية
-                new_height = int(base_size * 1.2)
+            # إذا كان الارتفاع كبير جداً، قلل الحجم قليلاً
+            max_reasonable_height = base_height * 0.25  # لا تتجاوز 25% من الارتفاع
+            if new_height > max_reasonable_height:
+                new_height = int(max_reasonable_height)
                 new_width = int(new_height * aspect_ratio)
-            else:  # نسبة متوازنة
-                new_width = int(base_size)
-                new_height = int(base_size / aspect_ratio)
+        else:
+            # للنسب المئوية الأخرى، احسب حسب النسبة المطلوبة بطريقة محسنة
+            scale_factor = size_percentage / 100.0
+            
+            # حساب الحجم بناءً على عرض الصورة بشكل أساسي
+            if position in ['top', 'bottom', 'center']:
+                # للمواضع الأفقية، اعتمد على العرض
+                new_width = int(base_width * scale_factor * 0.8)  # 80% كحد أقصى
+            else:
+                # للمواضع الركنية، استخدم نسبة أصغر
+                new_width = int(base_width * scale_factor * 0.5)  # 50% كحد أقصى
+            
+            new_height = int(new_width / aspect_ratio)
         
         # تأكد من عدم تجاوز حدود الصورة الأساسية
         max_allowed_width = base_width * 0.95  # الحد الأقصى 95% من عرض الصورة
@@ -362,9 +343,11 @@ class WatermarkProcessor:
                 out.release()
                 return video_path
             
-            # حساب موقع العلامة المائية
+            # حساب موقع العلامة المائية مع الإزاحة اليدوية
             watermark_height, watermark_width = watermark_img.shape[:2]
-            position = self.calculate_position((width, height), (watermark_width, watermark_height), watermark_settings['position'])
+            offset_x = watermark_settings.get('offset_x', 0)
+            offset_y = watermark_settings.get('offset_y', 0)
+            position = self.calculate_position((width, height), (watermark_width, watermark_height), watermark_settings['position'], offset_x, offset_y)
             x, y = position
             
             # معالجة كل إطار
