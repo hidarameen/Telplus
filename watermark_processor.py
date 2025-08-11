@@ -56,14 +56,24 @@ class WatermarkProcessor:
                             image_size: Tuple[int, int]) -> Image.Image:
         """إنشاء علامة مائية نصية"""
         try:
+            logger.info(f"📝 بدء إنشاء علامة مائية نصية: '{text}'")
+            
+            # التحقق من صحة المدخلات
+            if not text or not text.strip():
+                logger.error("❌ النص فارغ - لا يمكن إنشاء العلامة المائية")
+                return None
+                
             # إنشاء صورة شفافة للنص
             img_width, img_height = image_size
+            logger.info(f"📏 أبعاد الصورة الأساسية: {img_width}x{img_height}")
             
             # حساب حجم الخط بناءً على حجم الصورة
             calculated_font_size = max(font_size, img_width // 25)  # زيادة حجم الخط
+            logger.info(f"🔤 حجم الخط: {font_size} → {calculated_font_size}")
             
             # محاولة استخدام خط عربي إذا أمكن
             font = None
+            font_used = "default"
             try:
                 # البحث عن خط عربي في النظام
                 font_paths = [
@@ -76,12 +86,15 @@ class WatermarkProcessor:
                 for font_path in font_paths:
                     if os.path.exists(font_path):
                         font = ImageFont.truetype(font_path, calculated_font_size)
+                        font_used = font_path
+                        logger.info(f"✅ تم تحميل الخط: {font_path}")
                         break
-            except Exception:
-                pass
+            except Exception as font_error:
+                logger.warning(f"⚠️ خطأ في تحميل الخط: {font_error}")
             
             if font is None:
                 font = ImageFont.load_default()
+                logger.info("📝 تم استخدام الخط الافتراضي")
             
             # حساب حجم النص
             dummy_img = Image.new('RGBA', (1, 1))
@@ -90,27 +103,48 @@ class WatermarkProcessor:
             text_width = text_bbox[2] - text_bbox[0]
             text_height = text_bbox[3] - text_bbox[1]
             
+            logger.info(f"📐 أبعاد النص: {text_width}x{text_height}")
+            
+            if text_width <= 0 or text_height <= 0:
+                logger.error("❌ أبعاد النص غير صحيحة")
+                return None
+            
             # إنشاء صورة للنص مع خلفية شفافة
-            text_img = Image.new('RGBA', (int(text_width + 20), int(text_height + 10)), (0, 0, 0, 0))
+            padding = 20
+            canvas_width = int(text_width + padding)
+            canvas_height = int(text_height + padding//2)
+            text_img = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
             text_draw = ImageDraw.Draw(text_img)
+            
+            logger.info(f"🖼️ أبعاد لوحة العلامة المائية: {canvas_width}x{canvas_height}")
             
             # تحويل اللون إلى RGBA مع الشفافية
             try:
                 if color.startswith('#'):
                     rgb_color = ImageColor.getcolor(color, "RGB")
                     rgba_color = rgb_color + (int(255 * opacity / 100),)
+                    logger.info(f"🎨 اللون: {color} → {rgba_color}")
                 else:
                     rgba_color = (255, 255, 255, int(255 * opacity / 100))
-            except Exception:
+                    logger.info(f"🎨 اللون الافتراضي: {rgba_color}")
+            except Exception as color_error:
+                logger.warning(f"⚠️ خطأ في تحويل اللون: {color_error}")
                 rgba_color = (255, 255, 255, int(255 * opacity / 100))
             
             # رسم النص
-            text_draw.text((10, 5), text, font=font, fill=rgba_color)
+            text_x = padding // 2
+            text_y = padding // 4
+            text_draw.text((text_x, text_y), text, font=font, fill=rgba_color)
+            
+            logger.info(f"✅ تم إنشاء العلامة المائية النصية بنجاح")
+            logger.info(f"📏 الأبعاد النهائية: {text_img.size}")
             
             return text_img
             
         except Exception as e:
-            logger.error(f"خطأ في إنشاء العلامة المائية النصية: {e}")
+            logger.error(f"❌ خطأ في إنشاء العلامة المائية النصية: {e}")
+            import traceback
+            logger.error(f"🔍 تفاصيل الخطأ: {traceback.format_exc()}")
             return None
     
     def calculate_smart_watermark_size(self, base_image_size: Tuple[int, int], watermark_size: Tuple[int, int], 
@@ -219,53 +253,70 @@ class WatermarkProcessor:
     def apply_watermark_to_image(self, image_bytes: bytes, watermark_settings: dict) -> Optional[bytes]:
         """تطبيق العلامة المائية على صورة"""
         try:
+            logger.info(f"🖼️ بدء تطبيق العلامة المائية على صورة")
+            logger.info(f"🔧 إعدادات العلامة المائية: {watermark_settings}")
+            
             # تحميل الصورة
             image = Image.open(io.BytesIO(image_bytes))
+            logger.info(f"📏 أبعاد الصورة: {image.size}, نمط: {image.mode}")
             
             # تحويل إلى RGB إذا لزم الأمر
             if image.mode not in ['RGB', 'RGBA']:
                 image = image.convert('RGB')
+                logger.info(f"🔄 تم تحويل الصورة إلى RGB")
             
             # إنشاء العلامة المائية
             watermark = None
             
-            if watermark_settings['watermark_type'] == 'text' and watermark_settings['watermark_text']:
-                color = watermark_settings['text_color'] if not watermark_settings['use_original_color'] else '#FFFFFF'
+            if watermark_settings.get('watermark_type') == 'text' and watermark_settings.get('watermark_text'):
+                logger.info(f"📝 إنشاء علامة مائية نصية: '{watermark_settings['watermark_text']}'")
+                color = watermark_settings.get('text_color', '#FFFFFF')
+                if watermark_settings.get('use_original_color', False):
+                    color = '#FFFFFF'
+                
                 watermark = self.create_text_watermark(
                     watermark_settings['watermark_text'],
-                    watermark_settings['font_size'],
+                    watermark_settings.get('font_size', 32),
                     color,
-                    watermark_settings['opacity'],
+                    watermark_settings.get('opacity', 70),
                     image.size
                 )
+                if watermark:
+                    logger.info(f"✅ تم إنشاء العلامة المائية النصية بحجم: {watermark.size}")
             
-            elif watermark_settings['watermark_type'] == 'image' and watermark_settings['watermark_image_path']:
+            elif watermark_settings.get('watermark_type') == 'image' and watermark_settings.get('watermark_image_path'):
+                logger.info(f"🖼️ إنشاء علامة مائية من صورة: {watermark_settings['watermark_image_path']}")
                 watermark = self.load_image_watermark(
                     watermark_settings['watermark_image_path'],
-                    watermark_settings['size_percentage'],
-                    watermark_settings['opacity'],
+                    watermark_settings.get('size_percentage', 20),
+                    watermark_settings.get('opacity', 70),
                     image.size,
                     watermark_settings.get('position', 'bottom_right')
                 )
+                if watermark:
+                    logger.info(f"✅ تم تحميل العلامة المائية من الصورة بحجم: {watermark.size}")
             
             if watermark is None:
-                logger.warning("فشل في إنشاء العلامة المائية")
+                logger.error("❌ فشل في إنشاء العلامة المائية")
                 return image_bytes
             
             # حساب موقع العلامة المائية مع الإزاحة اليدوية
             offset_x = watermark_settings.get('offset_x', 0)
             offset_y = watermark_settings.get('offset_y', 0)
-            position = self.calculate_position(image.size, watermark.size, watermark_settings['position'], offset_x, offset_y)
+            position = self.calculate_position(image.size, watermark.size, watermark_settings.get('position', 'bottom_right'), offset_x, offset_y)
+            logger.info(f"📍 موقع العلامة المائية: {position}")
             
             # تطبيق العلامة المائية
             if image.mode == 'RGBA':
                 image.paste(watermark, position, watermark)
+                logger.info("✅ تم تطبيق العلامة المائية على صورة RGBA")
             else:
                 # تحويل إلى RGBA لتطبيق العلامة المائية
                 image = image.convert('RGBA')
                 image.paste(watermark, position, watermark)
                 # تحويل مرة أخرى إلى RGB
                 image = image.convert('RGB')
+                logger.info("✅ تم تطبيق العلامة المائية مع تحويل RGB")
             
             # حفظ الصورة بتنسيقها الأصلي أو PNG للحفاظ على الجودة
             output = io.BytesIO()
@@ -274,10 +325,12 @@ class WatermarkProcessor:
             try:
                 original_image = Image.open(io.BytesIO(image_bytes))
                 original_format = original_image.format or 'PNG'
+                logger.info(f"💾 التنسيق الأصلي: {original_format}")
                 
                 # استخدام PNG للصور التي تحتوي على شفافية
                 if image.mode == 'RGBA' or original_format == 'PNG':
                     image.save(output, format='PNG', optimize=True)
+                    logger.info("💾 تم حفظ الصورة بتنسيق PNG")
                 elif original_format in ['JPEG', 'JPG']:
                     # تحويل RGBA إلى RGB للـ JPEG
                     if image.mode == 'RGBA':
@@ -285,17 +338,25 @@ class WatermarkProcessor:
                         background.paste(image, mask=image.split()[-1])
                         image = background
                     image.save(output, format='JPEG', quality=95, optimize=True)
+                    logger.info("💾 تم حفظ الصورة بتنسيق JPEG")
                 else:
                     # استخدام PNG كتنسيق افتراضي
                     image.save(output, format='PNG', optimize=True)
-            except Exception:
+                    logger.info("💾 تم حفظ الصورة بتنسيق PNG (افتراضي)")
+            except Exception as save_error:
+                logger.error(f"⚠️ خطأ في تحديد التنسيق: {save_error}")
                 # في حالة فشل تحديد التنسيق، استخدم PNG
                 image.save(output, format='PNG', optimize=True)
+                logger.info("💾 تم حفظ الصورة بتنسيق PNG (بعد خطأ)")
                 
-            return output.getvalue()
+            result_bytes = output.getvalue()
+            logger.info(f"✅ تم تطبيق العلامة المائية بنجاح - الحجم الأصلي: {len(image_bytes)}, الحجم الجديد: {len(result_bytes)}")
+            return result_bytes
             
         except Exception as e:
-            logger.error(f"خطأ في تطبيق العلامة المائية على الصورة: {e}")
+            logger.error(f"❌ خطأ في تطبيق العلامة المائية على الصورة: {e}")
+            import traceback
+            logger.error(f"🔍 تفاصيل الخطأ: {traceback.format_exc()}")
             return image_bytes
 
     def apply_watermark_to_video_ffmpeg(self, video_path: str, watermark_settings: dict) -> Optional[str]:
@@ -660,13 +721,25 @@ class WatermarkProcessor:
                 return media_bytes
             
             if media_type == 'photo':
-                logger.info(f"🖼️ تطبيق العلامة المائية على الصورة: {file_name}")
+                logger.info(f"🖼️ بدء تطبيق العلامة المائية على الصورة: {file_name}")
+                logger.info(f"🔧 تفاصيل إعدادات العلامة المائية:")
+                logger.info(f"   📝 النوع: {watermark_settings.get('watermark_type', 'غير محدد')}")
+                logger.info(f"   🔤 النص: {watermark_settings.get('watermark_text', 'غير محدد')}")
+                logger.info(f"   📍 الموقع: {watermark_settings.get('position', 'غير محدد')}")
+                logger.info(f"   📏 الحجم: {watermark_settings.get('size_percentage', 'غير محدد')}%")
+                logger.info(f"   🌫️ الشفافية: {watermark_settings.get('opacity', 'غير محدد')}%")
+                
                 result = self.apply_watermark_to_image(media_bytes, watermark_settings)
-                if result != media_bytes:
-                    logger.info(f"✅ تم تطبيق العلامة المائية على الصورة بنجاح")
+                
+                if result and len(result) != len(media_bytes):
+                    logger.info(f"✅ تم تطبيق العلامة المائية على الصورة بنجاح - تغير الحجم من {len(media_bytes)} إلى {len(result)} بايت")
+                    return result
+                elif result and result != media_bytes:
+                    logger.info(f"✅ تم تطبيق العلامة المائية على الصورة بنجاح - تم تعديل البيانات")
+                    return result
                 else:
-                    logger.warning(f"⚠️ لم يتم تعديل الصورة")
-                return result
+                    logger.warning(f"⚠️ لم يتم تعديل الصورة - إرجاع البيانات الأصلية")
+                    return media_bytes
             
             elif media_type == 'video':
                 logger.info(f"🎬 بدء معالجة الفيديو: {file_name}")
