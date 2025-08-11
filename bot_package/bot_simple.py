@@ -63,8 +63,6 @@ class SimpleTelegramBot:
             buttons = [
                 [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
                 [Button.inline("⚙️ الإعدادات", b"settings")],
-                [Button.inline("🌍 المنطقة الزمنية", b"timezone_settings")],
-                [Button.inline("🌐 تغيير اللغة", b"language_settings")],
                 [Button.inline("ℹ️ حول البوت", b"about")]
             ]
 
