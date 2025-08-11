@@ -541,11 +541,11 @@ class UserbotService:
                         media_to_send = event.message.media
                         reply_markup = original_reply_markup or inline_buttons
 
-                        # Get watermark settings first
+                        # Get watermark settings first and check if we have media
                         watermark_settings = self.db.get_watermark_settings(task['id'])
                         
-                        # Apply watermark if enabled
-                        if watermark_settings.get('enabled', False):
+                        # Apply watermark only if enabled and we have media
+                        if watermark_settings.get('enabled', False) and media_to_send is not None:
                             logger.info(f"🏷️ بدء تطبيق العلامة المائية على الوسائط...")
                             try:
                                 watermark_processor = WatermarkProcessor()
@@ -688,7 +688,19 @@ class UserbotService:
                             if requires_copy_mode:
                                 logger.info(f"🔄 استخدام وضع النسخ بسبب التنسيق المطبق")
 
-                            if isinstance(media_to_send, list) and len(media_to_send) > 1:
+                            # Check if we have media to send
+                            if media_to_send is None:
+                                # Text-only message
+                                logger.info(f"📝 إرسال رسالة نصية")
+                                forwarded_msg = await client.send_message(
+                                    target_entity,
+                                    final_text or "رسالة فارغة",
+                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                    silent=forwarding_settings['silent_notifications'],
+                                    parse_mode='HTML',
+                                    buttons=reply_markup
+                                )
+                            elif isinstance(media_to_send, list) and len(media_to_send) > 1:
                                 # إرسال ألبوم
                                 logger.info(f"📤 إرسال ألبوم يحتوي على {len(media_to_send)} عنصر")
                                 target_items = []
