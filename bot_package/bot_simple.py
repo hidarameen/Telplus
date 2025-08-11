@@ -2170,10 +2170,17 @@ class SimpleTelegramBot:
             [Button.inline("ℹ️ حول البوت", b"about")]
         ]
 
-        await event.edit(
-            "🏠 القائمة الرئيسية\n\nاختر ما تريد فعله:",
-            buttons=buttons
-        )
+        try:
+            await event.edit(
+                "🏠 القائمة الرئيسية\n\nاختر ما تريد فعله:",
+                buttons=buttons
+            )
+        except Exception as e:
+            # If edit fails, send new message
+            await event.respond(
+                "🏠 القائمة الرئيسية\n\nاختر ما تريد فعله:",
+                buttons=buttons
+            )
 
     async def show_tasks_menu(self, event):
         """Show tasks management menu"""
