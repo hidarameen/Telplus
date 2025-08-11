@@ -1115,7 +1115,7 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد ساعات العمل: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("toggle_working_hours_"): # Handler for toggling working hours filter
+            elif data.startswith("toggle_working_hours_") and not data.startswith("toggle_working_hours_mode_"): # Handler for toggling working hours filter
                 parts = data.split("_")
                 if len(parts) >= 4:
                     try:
@@ -6388,35 +6388,46 @@ class SimpleTelegramBot:
         success = self.db.update_advanced_filter_setting(task_id, filter_type, new_status)
         
         if success:
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
             status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
             filter_names = {
+                'day': 'فلتر الأيام',
                 'day_filter': 'فلتر الأيام',
                 'working_hours': 'فلتر ساعات العمل',
+                'language': 'فلتر اللغة',
                 'language_filter': 'فلتر اللغة',
+                'admin': 'فلتر المشرفين',
                 'admin_filter': 'فلتر المشرفين',
+                'duplicate': 'فلتر التكرار',
                 'duplicate_filter': 'فلتر التكرار',
-                'inline_button_filter': 'فلتر الأزرار الشفافة',
-                'forwarded_message_filter': 'فلتر الرسائل المعاد توجيهها'
+                'inline_button': 'فلتر الأزرار',
+                'inline_button_filter': 'فلتر الأزرار',
+                'forwarded_message': 'فلتر المعاد توجيهه',
+                'forwarded_message_filter': 'فلتر المعاد توجيهه'
             }
             filter_name = filter_names.get(filter_type, f'الفلتر {filter_type}')
             
             await event.answer(f"✅ {status_text} {filter_name}")
             
-            # Return to appropriate menu
-            if filter_type == 'day_filter':
+            # Return to appropriate menu with correct interface refresh
+            if filter_type in ['day', 'day_filter']:
                 await self.show_day_filters(event, task_id)
             elif filter_type == 'working_hours':
                 await self.show_working_hours_filter(event, task_id)
-            elif filter_type == 'language_filter':
+            elif filter_type in ['language', 'language_filter']:
                 await self.show_language_filters(event, task_id)
             elif filter_type in ['admin_filter', 'admin']:
-                await self.show_admin_filters(event, task_id)
-            elif filter_type == 'duplicate_filter':
+                await self.show_admin_filter(event, task_id)
+            elif filter_type in ['duplicate', 'duplicate_filter']:
                 await self.show_duplicate_filter(event, task_id)
-            elif filter_type == 'inline_button_filter':
+            elif filter_type in ['inline_button', 'inline_button_filter']:
                 await self.show_inline_button_filter(event, task_id)
-            elif filter_type == 'forwarded_message_filter':
+            elif filter_type in ['forwarded_message', 'forwarded_message_filter']:
                 await self.show_forwarded_message_filter(event, task_id)
+            else:
+                await self.show_advanced_filters_menu(event, task_id)
         else:
             await event.answer("❌ فشل في تحديث الفلتر")
     
@@ -6756,6 +6767,7 @@ class SimpleTelegramBot:
             enabled = status.get('working_hours_enabled', False)
             status_text = "تم تفعيل" if enabled else "تم إيقاف"
             await event.answer(f"✅ {status_text} فلتر ساعات العمل")
+            # Refresh the working hours interface to show updated status
             await self.show_working_hours_filter(event, task_id)
         else:
             await event.answer("❌ فشل في تغيير حالة الفلتر")
