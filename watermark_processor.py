@@ -119,55 +119,60 @@ class WatermarkProcessor:
         # الحفاظ على النسبة الأصلية للعلامة المائية
         aspect_ratio = watermark_width / watermark_height
         
-        # حساب المساحة المتاحة للعلامة المائية مع التحسين الذكي
+        # حساب الحجم بناءً على النسبة المئوية المطلوبة
+        scale_factor = size_percentage / 100.0
+        
         if size_percentage == 100:
-            # للحجم 100%، أعطِ الأولوية للعرض الكامل
-            new_width = int(base_width * 0.95)  # 95% من عرض الصورة الأساسية
-            new_height = int(new_width / aspect_ratio)
+            # للحجم 100%، استخدم كامل أبعاد الصورة الأساسية مع هامش صغير فقط
+            new_width = int(base_width * 0.98)  # 98% لترك هامش صغير جداً
+            new_height = int(base_height * 0.98)  # 98% لترك هامش صغير جداً
             
-            # تحقق من الارتفاع - إذا كان كبيراً جداً، استخدم استراتيجية مختلفة
-            max_height_limit = base_height * 0.6  # حد أكثر مرونة - 60% من الارتفاع
-            if new_height > max_height_limit:
-                # بدلاً من تصغير العلامة، نبقي العرض ونقلل الارتفاع قليلاً
-                new_height = int(max_height_limit)
-                # لكن نحتفظ بعرض كبير حتى لو كسرنا النسبة قليلاً
-                new_width = int(base_width * 0.90)  # عرض 90% في كل الأحوال
+            # الحفاظ على النسبة إذا أمكن، وإلا استخدم الحجم الكامل
+            calculated_height_from_width = int(new_width / aspect_ratio)
+            calculated_width_from_height = int(new_height * aspect_ratio)
+            
+            # اختر الحجم الذي يحقق أقصى استفادة من المساحة
+            if calculated_height_from_width <= new_height:
+                # يمكن استخدام العرض الكامل
+                new_height = calculated_height_from_width
+            else:
+                # استخدم الارتفاع الكامل وحساب العرض
+                new_width = calculated_width_from_height
+                
+            logger.info(f"🎯 حجم 100%: أبعاد الصورة {base_image_size} → أبعاد العلامة {(new_width, new_height)}")
         else:
-            # للنسب المئوية الأخرى، احسب حسب النسبة المطلوبة مباشرة
-            scale_factor = size_percentage / 100.0
-            
-            # حساب الحجم بناءً على عرض الصورة مباشرة
+            # للنسب المئوية الأخرى، حساب عادي
             if position in ['top', 'bottom', 'center']:
                 # للمواضع الأفقية، استخدم النسبة المئوية كاملة من العرض
                 new_width = int(base_width * scale_factor)
             else:
-                # للمواضع الركنية، استخدم نسبة أقل قليلاً
+                # للمواضع الركنية، استخدم نسبة معدلة
                 new_width = int(base_width * scale_factor * 0.8)
             
             new_height = int(new_width / aspect_ratio)
-        
-        # تأكد من عدم تجاوز حدود الصورة الأساسية - للحجم 100% نتساهل أكثر
-        if size_percentage == 100:
-            # للحجم 100%، لا نطبق قيود صارمة على الارتفاع
-            max_allowed_width = base_width * 0.99  # الحد الأقصى 99% من عرض الصورة
-            max_allowed_height = base_height * 0.8   # الحد الأقصى 80% من ارتفاع الصورة للحجم 100%
-        else:
-            # للأحجام الأخرى، حدود معقولة
-            max_allowed_width = base_width * 0.95  
-            max_allowed_height = base_height * 0.6
-        
-        if new_width > max_allowed_width:
-            new_width = int(max_allowed_width)
-            new_height = int(new_width / aspect_ratio)
             
-        if new_height > max_allowed_height:
-            new_height = int(max_allowed_height)
-            new_width = int(new_height * aspect_ratio)
+            # تطبيق حدود معقولة للأحجام الأخرى
+            max_allowed_width = base_width * 0.9  
+            max_allowed_height = base_height * 0.7
+            
+            if new_width > max_allowed_width:
+                new_width = int(max_allowed_width)
+                new_height = int(new_width / aspect_ratio)
+                
+            if new_height > max_allowed_height:
+                new_height = int(max_allowed_height)
+                new_width = int(new_height * aspect_ratio)
         
         # تأكد من الحد الأدنى للحجم
         min_size = 20
         new_width = max(min_size, new_width)
         new_height = max(min_size, new_height)
+        
+        # تأكد من عدم تجاوز أبعاد الصورة الأساسية
+        new_width = min(new_width, base_width - 10)  # هامش 10 بكسل
+        new_height = min(new_height, base_height - 10)  # هامش 10 بكسل
+        
+        logger.info(f"📏 حساب حجم العلامة المائية: {size_percentage}% → {(new_width, new_height)} من أصل {base_image_size}")
         
         return (new_width, new_height)
 
