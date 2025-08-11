@@ -1741,6 +1741,251 @@ class SimpleTelegramBot:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
 
+    async def toggle_advanced_filter(self, event, task_id, filter_type):
+        """Toggle advanced filter setting"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current settings
+            settings = self.db.get_advanced_filters_settings(task_id)
+            current_value = settings.get(filter_type, False)
+            new_value = not current_value
+            
+            # Update the setting
+            success = self.db.update_advanced_filter_setting(task_id, filter_type, new_value)
+            
+            if success:
+                status = "تم التفعيل" if new_value else "تم التعطيل"
+                await event.answer(f"✅ {status}")
+                
+                # Force refresh UserBot tasks
+                try:
+                    from userbot_service.userbot import userbot_instance
+                    if user_id in userbot_instance.clients:
+                        await userbot_instance.refresh_user_tasks(user_id)
+                        logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير الفلتر المتقدم")
+                except Exception as e:
+                    logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+                
+                # Return to advanced filters menu
+                await self.show_advanced_filters(event, task_id)
+            else:
+                await event.answer("❌ فشل في تحديث الإعداد")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل الفلتر المتقدم: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def show_day_filters(self, event, task_id):
+        """Show day filters settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = settings.get('day_filter_enabled', False)
+        day_filters = self.db.get_task_day_filters(task_id)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        
+        # Create day selection buttons
+        days = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+        day_buttons = []
+        
+        for i, day in enumerate(days, 1):
+            is_selected = any(df['day_number'] == i for df in day_filters)
+            icon = "✅" if is_selected else "❌"
+            day_buttons.append(Button.inline(f"{icon} {day}", f"toggle_day_{task_id}_{i}"))
+        
+        # Arrange buttons in rows of 2
+        arranged_buttons = []
+        for i in range(0, len(day_buttons), 2):
+            if i + 1 < len(day_buttons):
+                arranged_buttons.append([day_buttons[i], day_buttons[i + 1]])
+            else:
+                arranged_buttons.append([day_buttons[i]])
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_day_filter_enabled_{task_id}")],
+        ] + arranged_buttons + [
+            [Button.inline("✅ تحديد الكل", f"select_all_days_{task_id}"),
+             Button.inline("❌ إلغاء الكل", f"deselect_all_days_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"📅 فلتر الأيام - المهمة #{task_id}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"📋 الأيام المحددة: {len(day_filters)}/7\n\n"
+            f"اختر الأيام المسموح بالتوجيه فيها:",
+            buttons=buttons
+        )
+
+    async def toggle_day_filter(self, event, task_id, day_number):
+        """Toggle specific day filter"""
+        user_id = event.sender_id
+        
+        try:
+            # Get current day filters
+            day_filters = self.db.get_task_day_filters(task_id)
+            is_selected = any(df['day_number'] == day_number for df in day_filters)
+            
+            if is_selected:
+                # Remove the day
+                success = self.db.remove_day_filter(task_id, day_number)
+                action = "تم إلغاء تحديد"
+            else:
+                # Add the day
+                success = self.db.add_day_filter(task_id, day_number)
+                action = "تم تحديد"
+            
+            if success:
+                days = ["", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+                await event.answer(f"✅ {action} {days[day_number]}")
+                
+                # Force refresh UserBot tasks
+                try:
+                    from userbot_service.userbot import userbot_instance
+                    if user_id in userbot_instance.clients:
+                        await userbot_instance.refresh_user_tasks(user_id)
+                except Exception as e:
+                    logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+                
+                # Refresh the menu
+                await self.show_day_filters(event, task_id)
+            else:
+                await event.answer("❌ فشل في التحديث")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل فلتر اليوم: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def select_all_days(self, event, task_id, select_all=True):
+        """Select or deselect all days"""
+        user_id = event.sender_id
+        
+        try:
+            if select_all:
+                # Add all days
+                for day_num in range(1, 8):
+                    self.db.add_day_filter(task_id, day_num)
+                await event.answer("✅ تم تحديد جميع الأيام")
+            else:
+                # Remove all days
+                for day_num in range(1, 8):
+                    self.db.remove_day_filter(task_id, day_num)
+                await event.answer("✅ تم إلغاء تحديد جميع الأيام")
+            
+            # Force refresh UserBot tasks
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    await userbot_instance.refresh_user_tasks(user_id)
+            except Exception as e:
+                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+            
+            # Refresh the menu
+            await self.show_day_filters(event, task_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في تحديد/إلغاء جميع الأيام: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def show_advanced_filters(self, task_id):
+        """Show advanced filters menu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get all advanced filter settings
+        settings = self.db.get_advanced_filters_settings(task_id)
+        
+        # Status indicators
+        day_status = "🟢" if settings.get('day_filter_enabled', False) else "🔴"
+        hours_status = "🟢" if settings.get('working_hours_enabled', False) else "🔴"
+        lang_status = "🟢" if settings.get('language_filter_enabled', False) else "🔴"
+        admin_status = "🟢" if settings.get('admin_filter_enabled', False) else "🔴"
+        duplicate_status = "🟢" if settings.get('duplicate_filter_enabled', False) else "🔴"
+        inline_status = "🟢" if settings.get('inline_button_filter_enabled', False) else "🔴"
+        forwarded_status = "🟢" if settings.get('forwarded_message_filter_enabled', False) else "🔴"
+        
+        buttons = [
+            [Button.inline(f"{day_status} فلتر الأيام", f"day_filters_{task_id}"),
+             Button.inline(f"{hours_status} ساعات العمل", f"working_hours_filter_{task_id}")],
+            [Button.inline(f"{lang_status} فلتر اللغات", f"language_filters_{task_id}"),
+             Button.inline(f"{admin_status} فلتر المشرفين", f"admin_filters_{task_id}")],
+            [Button.inline(f"{duplicate_status} فلتر التكرار", f"duplicate_filter_{task_id}"),
+             Button.inline(f"{inline_status} الأزرار الإنلاين", f"inline_button_filter_{task_id}")],
+            [Button.inline(f"{forwarded_status} الرسائل المُوجهة", f"forwarded_msg_filter_{task_id}")],
+            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"🔍 الفلاتر المتقدمة - المهمة #{task_id}\n\n"
+            f"📊 حالة الفلاتر:\n"
+            f"• {day_status} فلتر الأيام\n"
+            f"• {hours_status} ساعات العمل\n"
+            f"• {lang_status} فلتر اللغات\n"
+            f"• {admin_status} فلتر المشرفين\n"
+            f"• {duplicate_status} فلتر التكرار\n"
+            f"• {inline_status} الأزرار الإنلاين\n"
+            f"• {forwarded_status} الرسائل المُوجهة\n\n"
+            f"اختر الفلتر الذي تريد إدارته:",
+            buttons=buttons
+        )
+
+    async def show_advanced_features(self, event, task_id):
+        """Show advanced features menu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get settings for status display
+        char_settings = self.db.get_character_limit_settings(task_id)
+        rate_settings = self.db.get_rate_limit_settings(task_id)
+        delay_settings = self.db.get_forwarding_delay_settings(task_id)
+        interval_settings = self.db.get_sending_interval_settings(task_id)
+        
+        char_status = "🟢" if char_settings.get('enabled', False) else "🔴"
+        rate_status = "🟢" if rate_settings.get('enabled', False) else "🔴"
+        delay_status = "🟢" if delay_settings.get('enabled', False) else "🔴"
+        interval_status = "🟢" if interval_settings.get('enabled', False) else "🔴"
+        
+        buttons = [
+            [Button.inline(f"{char_status} حدود الأحرف", f"character_limit_{task_id}"),
+             Button.inline(f"{rate_status} حد المعدل", f"rate_limit_{task_id}")],
+            [Button.inline(f"{delay_status} تأخير التوجيه", f"forwarding_delay_{task_id}"),
+             Button.inline(f"{interval_status} فاصل الإرسال", f"sending_interval_{task_id}")],
+            [Button.inline("📊 وضع النشر", f"publishing_mode_{task_id}")],
+            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"⚡ الميزات المتقدمة - المهمة #{task_id}\n\n"
+            f"📊 حالة الميزات:\n"
+            f"• {char_status} حدود الأحرف\n"
+            f"• {rate_status} حد المعدل\n"
+            f"• {delay_status} تأخير التوجيه\n"
+            f"• {interval_status} فاصل الإرسال\n\n"
+            f"اختر الميزة التي تريد إدارتها:",
+            buttons=buttons
+        )
+
 
         except Exception as e:
             import traceback
@@ -2326,6 +2571,204 @@ class SimpleTelegramBot:
         else:
             await event.answer("❌ فشل في حذف الهدف")
 
+
+    async def show_working_hours_filter(self, event, task_id):
+        """Show working hours filter settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_working_hours_settings(task_id)
+        is_enabled = settings.get('enabled', False)
+        mode = settings.get('mode', 'block')
+        start_hour = settings.get('start_hour', 9)
+        end_hour = settings.get('end_hour', 17)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        mode_text = "حظر خارج الساعات" if mode == 'block' else "السماح في الساعات فقط"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_working_hours_{task_id}")],
+            [Button.inline(f"⏰ تحديد ساعات العمل ({start_hour}:00 - {end_hour}:00)", f"set_working_hours_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_working_hours_mode_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"⏰ فلتر ساعات العمل - المهمة #{task_id}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"🕒 ساعات العمل: {start_hour}:00 - {end_hour}:00\n"
+            f"⚙️ الوضع: {mode_text}\n\n"
+            f"💡 هذا الفلتر يتحكم في توقيت توجيه الرسائل حسب ساعات العمل",
+            buttons=buttons
+        )
+
+    async def show_language_filters(self, event, task_id):
+        """Show language filter settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_language_filter_settings(task_id)
+        is_enabled = settings.get('enabled', False)
+        mode = settings.get('mode', 'block')
+        languages = self.db.get_task_languages(task_id)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        mode_text = "حظر اللغات المحددة" if mode == 'block' else "السماح للغات المحددة فقط"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_language_filter_enabled_{task_id}")],
+            [Button.inline(f"🌍 إدارة اللغات ({len(languages)})", f"manage_languages_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_language_mode_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"🌍 فلتر اللغات - المهمة #{task_id}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"🗣️ عدد اللغات: {len(languages)}\n"
+            f"⚙️ الوضع: {mode_text}\n\n"
+            f"💡 هذا الفلتر يتحكم في الرسائل حسب لغة النص",
+            buttons=buttons
+        )
+
+    async def show_admin_filters(self, event, task_id):
+        """Show admin filter settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = settings.get('admin_filter_enabled', False)
+        admins = self.db.get_task_admin_filters(task_id)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_admin_filter_enabled_{task_id}")],
+            [Button.inline(f"👥 قائمة المشرفين ({len(admins)})", f"admin_list_{task_id}")],
+            [Button.inline("🔄 تحديث قائمة المشرفين", f"refresh_admins_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"👥 فلتر المشرفين - المهمة #{task_id}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"👤 عدد المشرفين: {len(admins)}\n\n"
+            f"💡 هذا الفلتر يتحكم في الرسائل حسب صلاحيات المرسل",
+            buttons=buttons
+        )
+
+    async def show_duplicate_filter(self, event, task_id):
+        """Show duplicate filter settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_duplicate_filter_settings(task_id)
+        is_enabled = settings.get('enabled', False)
+        threshold = settings.get('similarity_threshold', 80)
+        time_window = settings.get('time_window_hours', 24)
+        check_text = settings.get('check_text', True)
+        check_media = settings.get('check_media', True)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_duplicate_filter_enabled_{task_id}")],
+            [Button.inline("⚙️ إعدادات التكرار", f"duplicate_settings_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"🔄 فلتر التكرار - المهمة #{task_id}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"📏 نسبة التشابه: {threshold}%\n"
+            f"⏱️ النافذة الزمنية: {time_window} ساعة\n"
+            f"📝 فحص النص: {'✅' if check_text else '❌'}\n"
+            f"🎬 فحص الوسائط: {'✅' if check_media else '❌'}\n\n"
+            f"💡 هذا الفلتر يمنع توجيه الرسائل المتكررة",
+            buttons=buttons
+        )
+
+    async def show_inline_button_filter(self, event, task_id):
+        """Show inline button filter settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = settings.get('inline_button_filter_enabled', False)
+        button_setting = self.db.get_inline_button_filter_setting(task_id)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        mode_text = "حظر الرسائل" if button_setting else "حذف الأزرار"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_inline_button_filter_enabled_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_inline_block_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"🔘 فلتر الأزرار الإنلاين - المهمة #{task_id}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"⚙️ الوضع: {mode_text}\n\n"
+            f"💡 هذا الفلتر يتحكم في الرسائل التي تحتوي على أزرار إنلاين",
+            buttons=buttons
+        )
+
+    async def show_forwarded_message_filter(self, event, task_id):
+        """Show forwarded message filter settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = settings.get('forwarded_message_filter_enabled', False)
+        block_setting = self.db.get_forwarded_message_filter_setting(task_id)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        mode_text = "حظر الرسائل المُوجهة" if block_setting else "إزالة علامة التوجيه"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_forwarded_message_filter_enabled_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_forwarded_block_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        await event.edit(
+            f"↗️ فلتر الرسائل المُوجهة - المهمة #{task_id}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"⚙️ الوضع: {mode_text}\n\n"
+            f"💡 هذا الفلتر يتحكم في الرسائل المُوجهة من مصادر أخرى",
+            buttons=buttons
+        )
 
     async def show_main_menu(self, event):
         """Show main menu"""
