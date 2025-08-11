@@ -102,9 +102,88 @@ class WatermarkProcessor:
             logger.error(f"خطأ في إنشاء العلامة المائية النصية: {e}")
             return None
     
+    def calculate_smart_watermark_size(self, base_image_size: Tuple[int, int], watermark_size: Tuple[int, int], 
+                                     size_percentage: int, position: str = 'bottom_right') -> Tuple[int, int]:
+        """حساب حجم العلامة المائية الذكي حسب أبعاد الصورة والموضع"""
+        base_width, base_height = base_image_size
+        watermark_width, watermark_height = watermark_size
+        
+        # الحفاظ على النسبة الأصلية للعلامة المائية
+        aspect_ratio = watermark_width / watermark_height
+        
+        # حساب المساحة المتاحة للعلامة المائية مع التحسين الذكي
+        if size_percentage == 100:
+            # للحجم 100%، استخدم كامل عرض الصورة مع هامش ذكي
+            margin_horizontal = base_width * 0.02  # هامش أفقي 2% (أقل للحجم 100%)
+            margin_vertical = base_height * 0.02   # هامش عمودي 2% (أقل للحجم 100%)
+            
+            max_width = base_width - (2 * margin_horizontal)
+            max_height = base_height - (2 * margin_vertical)
+            
+            # اختر الحجم المناسب حسب الموضع
+            if position in ['top', 'bottom', 'center']:
+                # للمواضع الأفقية، استخدم كامل العرض المتاح
+                new_width = int(max_width)
+                new_height = int(new_width / aspect_ratio)
+                
+                # تأكد من عدم تجاوز الارتفاع المسموح
+                if new_height > max_height * 0.3:  # لا تتجاوز 30% من ارتفاع الصورة
+                    new_height = int(max_height * 0.3)
+                    new_width = int(new_height * aspect_ratio)
+            elif position in ['top_left', 'top_right', 'bottom_left', 'bottom_right']:
+                # للمواضع الركنية، استخدم حجم متوازن
+                if aspect_ratio > 2:  # العلامة المائية عريضة جداً
+                    new_width = int(max_width * 0.8)
+                    new_height = int(new_width / aspect_ratio)
+                elif aspect_ratio < 0.5:  # العلامة المائية طولية جداً
+                    new_height = int(max_height * 0.8)
+                    new_width = int(new_height * aspect_ratio)
+                else:  # نسبة متوازنة
+                    diagonal = min(max_width, max_height) * 0.8
+                    new_width = int(diagonal)
+                    new_height = int(diagonal / aspect_ratio)
+            else:
+                # للمواضع الأخرى
+                new_width = int(max_width * 0.6)
+                new_height = int(new_width / aspect_ratio)
+        else:
+            # للنسب المئوية الأخرى، احسب حسب النسبة المطلوبة
+            # استخدم متوسط الأبعاد بدلاً من الأصغر فقط
+            avg_dimension = (base_width + base_height) / 2
+            base_size = avg_dimension * size_percentage / 100
+            
+            if aspect_ratio > 1.5:  # العلامة المائية عريضة
+                new_width = int(base_size * 1.2)
+                new_height = int(new_width / aspect_ratio)
+            elif aspect_ratio < 0.7:  # العلامة المائية طولية
+                new_height = int(base_size * 1.2)
+                new_width = int(new_height * aspect_ratio)
+            else:  # نسبة متوازنة
+                new_width = int(base_size)
+                new_height = int(base_size / aspect_ratio)
+        
+        # تأكد من عدم تجاوز حدود الصورة الأساسية
+        max_allowed_width = base_width * 0.95  # الحد الأقصى 95% من عرض الصورة
+        max_allowed_height = base_height * 0.95  # الحد الأقصى 95% من ارتفاع الصورة
+        
+        if new_width > max_allowed_width:
+            new_width = int(max_allowed_width)
+            new_height = int(new_width / aspect_ratio)
+            
+        if new_height > max_allowed_height:
+            new_height = int(max_allowed_height)
+            new_width = int(new_height * aspect_ratio)
+        
+        # تأكد من الحد الأدنى للحجم
+        min_size = 20
+        new_width = max(min_size, new_width)
+        new_height = max(min_size, new_height)
+        
+        return (new_width, new_height)
+
     def load_image_watermark(self, image_path: str, size_percentage: int, opacity: int,
-                           base_image_size: Tuple[int, int]) -> Optional[Image.Image]:
-        """تحميل وتحضير علامة مائية من صورة"""
+                           base_image_size: Tuple[int, int], position: str = 'bottom_right') -> Optional[Image.Image]:
+        """تحميل وتحضير علامة مائية من صورة بحجم ذكي"""
         try:
             if not os.path.exists(image_path):
                 logger.error(f"ملف الصورة غير موجود: {image_path}")
@@ -117,24 +196,15 @@ class WatermarkProcessor:
             if watermark_img.mode != 'RGBA':
                 watermark_img = watermark_img.convert('RGBA')
             
-            # حساب الحجم الجديد بناءً على النسبة المئوية
-            base_width, base_height = base_image_size
-            max_dimension = min(base_width, base_height)
-            target_size = int(max_dimension * size_percentage / 100)
+            # حساب الحجم الذكي
+            original_size = watermark_img.size
+            smart_size = self.calculate_smart_watermark_size(base_image_size, original_size, size_percentage, position)
             
-            # الحفاظ على النسبة الأصلية للصورة
-            watermark_width, watermark_height = watermark_img.size
-            aspect_ratio = watermark_width / watermark_height
-            
-            if watermark_width > watermark_height:
-                new_width = target_size
-                new_height = int(target_size / aspect_ratio)
-            else:
-                new_height = target_size
-                new_width = int(target_size * aspect_ratio)
+            logger.info(f"📏 تحجيم العلامة المائية الذكي: {original_size} → {smart_size}")
+            logger.info(f"🎯 إعدادات: نسبة {size_percentage}%, موضع {position}, أبعاد الصورة {base_image_size}")
             
             # تغيير حجم الصورة
-            watermark_img = watermark_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            watermark_img = watermark_img.resize(smart_size, Image.Resampling.LANCZOS)
             
             # تطبيق الشفافية
             if opacity < 100:
@@ -176,7 +246,8 @@ class WatermarkProcessor:
                     watermark_settings['watermark_image_path'],
                     watermark_settings['size_percentage'],
                     watermark_settings['opacity'],
-                    image.size
+                    image.size,
+                    watermark_settings.get('position', 'bottom_right')
                 )
             
             if watermark is None:
@@ -270,7 +341,8 @@ class WatermarkProcessor:
                     watermark_settings['watermark_image_path'],
                     watermark_settings['size_percentage'],
                     watermark_settings['opacity'],
-                    (width, height)
+                    (width, height),
+                    watermark_settings.get('position', 'bottom_right')
                 )
                 if watermark_pil:
                     watermark_img = cv2.cvtColor(np.array(watermark_pil), cv2.COLOR_RGBA2BGRA)

@@ -482,6 +482,13 @@ class Database:
             except Exception:
                 pass  # Column already exists
 
+            # إضافة عمود الحجم الافتراضي لجدول العلامة المائية
+            try:
+                cursor.execute("ALTER TABLE task_watermark_settings ADD COLUMN default_size INTEGER DEFAULT 50 CHECK (default_size >= 5 AND default_size <= 100)")
+                logger.info("✅ تم إضافة عمود default_size للعلامة المائية")
+            except Exception:
+                pass  # Column already exists
+
             # Task translation settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_translation_settings (
@@ -3979,7 +3986,7 @@ class Database:
                 cursor.execute('''
                     SELECT enabled, watermark_type, watermark_text, watermark_image_path,
                            position, size_percentage, opacity, text_color, use_original_color,
-                           apply_to_photos, apply_to_videos, apply_to_documents, font_size
+                           apply_to_photos, apply_to_videos, apply_to_documents, font_size, default_size
                     FROM task_watermark_settings WHERE task_id = ?
                 ''', (task_id,))
                 
@@ -3998,7 +4005,8 @@ class Database:
                         'apply_to_photos': bool(result[9]),
                         'apply_to_videos': bool(result[10]),
                         'apply_to_documents': bool(result[11]),
-                        'font_size': result[12]
+                        'font_size': result[12],
+                        'default_size': result[13] if len(result) > 13 and result[13] is not None else 50
                     }
                 else:
                     return {
@@ -4014,7 +4022,8 @@ class Database:
                         'apply_to_photos': True,
                         'apply_to_videos': True,
                         'apply_to_documents': False,
-                        'font_size': 24
+                        'font_size': 24,
+                        'default_size': 50
                     }
         except Exception as e:
             logger.error(f"خطأ في الحصول على إعدادات العلامة المائية: {e}")
@@ -4037,9 +4046,9 @@ class Database:
                     INSERT OR REPLACE INTO task_watermark_settings (
                         task_id, enabled, watermark_type, watermark_text, watermark_image_path,
                         position, size_percentage, opacity, text_color, use_original_color,
-                        apply_to_photos, apply_to_videos, apply_to_documents, font_size,
+                        apply_to_photos, apply_to_videos, apply_to_documents, font_size, default_size,
                         updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ''', (
                     task_id,
                     current_settings.get('enabled', False),
@@ -4054,7 +4063,8 @@ class Database:
                     current_settings.get('apply_to_photos', True),
                     current_settings.get('apply_to_videos', True),
                     current_settings.get('apply_to_documents', False),
-                    current_settings.get('font_size', 24)
+                    current_settings.get('font_size', 24),
+                    current_settings.get('default_size', 50)
                 ))
                 conn.commit()
                 return True

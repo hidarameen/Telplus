@@ -6,6 +6,7 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 - Fixed watermark filename issue: Images with watermarks were being sent as "unnamed" files without extensions. Added missing `file_name` parameter in the photo watermark sending logic to preserve original filenames and extensions like .jpg, .png, etc. (2025-08-11)
+- Implemented intelligent watermark sizing system: Added smart watermark size calculation that adapts to image dimensions and position. For 100% size, watermarks now fit within image boundaries with proper margins. Added default_size database column for user preferences. Enhanced watermark processing with position-aware scaling algorithms. (2025-08-11)
 
 # System Architecture
 ## UI/UX Decisions
