@@ -6585,7 +6585,7 @@ class SimpleTelegramBot:
             elif filter_type in ['language', 'language_filter']:
                 await self.show_language_filters(event, task_id)
             elif filter_type in ['admin_filter', 'admin']:
-                await self.show_admin_filter(event, task_id)
+                await self.show_admin_filters(event, task_id)
             elif filter_type in ['duplicate', 'duplicate_filter']:
                 await self.show_duplicate_filter(event, task_id)
             elif filter_type in ['inline_button', 'inline_button_filter']:

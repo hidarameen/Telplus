@@ -1347,6 +1347,26 @@ class Database:
             logger.info(f"✅ تم إضافة {added_count} كلمة إلى فلتر {filter_type} للمهمة {task_id}")
             return added_count
 
+    # ===== Admin Filter Management =====
+    
+    def get_admin_filter_setting(self, task_id: int, admin_user_id: int) -> Optional[Dict]:
+        """Get admin filter setting for specific admin in a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT admin_user_id, is_allowed 
+                FROM task_admin_filters 
+                WHERE task_id = ? AND admin_user_id = ?
+            ''', (task_id, admin_user_id))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'admin_user_id': result['admin_user_id'],
+                    'is_allowed': bool(result['is_allowed'])
+                }
+            return None
+
     # Text Replacement Management
     def get_text_replacement_id(self, task_id: int):
         """Get or create text replacement configuration for task"""

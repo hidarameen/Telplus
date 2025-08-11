@@ -1580,6 +1580,13 @@ class UserbotService:
                     logger.info(f"📅 رسالة محظورة بواسطة فلتر الأيام")
                     should_block = True
             
+            # Check admin filter
+            if not should_block and advanced_settings.get('admin_filter_enabled', False):
+                admin_blocked = await self._check_admin_filter(task_id, message)
+                if admin_blocked:
+                    logger.info(f"👮‍♂️ رسالة محظورة بواسطة فلتر المشرفين")
+                    should_block = True
+            
             # Check working hours filter
             if not should_block and advanced_settings.get('working_hours_enabled', False):
                 working_hours_blocked = self._check_working_hours_filter(task_id)
@@ -1626,6 +1633,47 @@ class UserbotService:
                 
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر الأيام: {e}")
+            return False
+
+    async def _check_admin_filter(self, task_id: int, message) -> bool:
+        """Check if message sender is blocked by admin filter"""
+        try:
+            # Get the sender ID from the message
+            sender_id = None
+            
+            # For regular messages
+            if hasattr(message, 'sender_id') and message.sender_id:
+                sender_id = message.sender_id
+            elif hasattr(message, 'from_id') and message.from_id:
+                # Handle different message types
+                if hasattr(message.from_id, 'user_id'):
+                    sender_id = message.from_id.user_id
+                else:
+                    sender_id = message.from_id
+            
+            if not sender_id:
+                logger.debug(f"👮‍♂️ لا يمكن تحديد معرف المرسل للرسالة - سيتم السماح")
+                return False
+            
+            # Check if this sender is in the admin filter list
+            admin_setting = self.db.get_admin_filter_setting(task_id, sender_id)
+            if admin_setting is None:
+                # Admin not in filter list, allow message
+                logger.debug(f"👮‍♂️ المرسل {sender_id} غير موجود في قائمة فلتر المشرفين - سيتم السماح")
+                return False
+            
+            # If admin is in list and not allowed, block the message
+            is_allowed = admin_setting.get('is_allowed', True)
+            
+            if not is_allowed:
+                logger.info(f"👮‍♂️ فلتر المشرفين: المرسل {sender_id} محظور - سيتم حظر الرسالة")
+                return True
+            else:
+                logger.info(f"👮‍♂️ فلتر المشرفين: المرسل {sender_id} مسموح - سيتم توجيه الرسالة")
+                return False
+                
+        except Exception as e:
+            logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
             return False
 
     def _check_working_hours_filter(self, task_id: int) -> bool:
