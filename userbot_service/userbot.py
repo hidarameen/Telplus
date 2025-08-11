@@ -1636,7 +1636,7 @@ class UserbotService:
             return False
 
     async def _check_admin_filter(self, task_id: int, message) -> bool:
-        """Check if message sender is blocked by admin filter based on signature or sender ID"""
+        """Check if message sender is blocked by admin filter based on Author Signature or sender ID"""
         try:
             # Method 1: Try to get sender ID directly (for groups)
             sender_id = None
@@ -1651,23 +1651,18 @@ class UserbotService:
                 else:
                     sender_id = message.from_id
             
-            # Method 2: Extract sender from message signature (for channels)
-            signature_name = None
-            message_text = ""
+            # Method 2: Check for Telegram Author Signature (for channels)
+            author_signature = None
             
-            if hasattr(message, 'text') and message.text:
-                message_text = message.text
-            elif hasattr(message, 'message') and message.message:
-                message_text = message.message
+            # Check for post_author (Telegram's Author Signature feature)
+            if hasattr(message, 'post_author') and message.post_author:
+                author_signature = message.post_author.strip()
+                logger.debug(f"👮‍♂️ توقيع المؤلف (Author Signature): {author_signature}")
             
-            # Extract signature from message (usually at the end)
-            if message_text:
-                signature_name = self._extract_signature_from_message(message_text)
-            
-            # If we have a channel message but found a signature, use signature matching
-            if str(sender_id).startswith('-100') and signature_name:
-                logger.debug(f"👮‍♂️ رسالة قناة مع توقيع: {signature_name}")
-                return await self._check_admin_by_signature(task_id, signature_name)
+            # If we have a channel message with author signature, use signature matching
+            if str(sender_id).startswith('-100') and author_signature:
+                logger.debug(f"👮‍♂️ رسالة قناة مع توقيع المؤلف: {author_signature}")
+                return await self._check_admin_by_signature(task_id, author_signature)
             
             # If we have sender ID and it's not a channel, use ID matching
             elif sender_id and not str(sender_id).startswith('-100'):
@@ -1684,48 +1679,10 @@ class UserbotService:
             logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
             return False
 
-    def _extract_signature_from_message(self, message_text: str) -> str:
-        """Extract sender signature from message text"""
-        try:
-            # Common signature patterns
-            import re
-            
-            # Pattern 1: Lines starting with ~ or - (common signature format)
-            signature_patterns = [
-                r'[\n\r]~\s*(.+?)[\n\r]',  # ~Name
-                r'[\n\r]-\s*(.+?)[\n\r]',  # -Name
-                r'[\n\r]—\s*(.+?)[\n\r]',  # —Name
-                r'[\n\r]🔸\s*(.+?)[\n\r]', # 🔸Name
-                r'[\n\r]📝\s*(.+?)[\n\r]', # 📝Name
-                r'[\n\r]✍️\s*(.+?)[\n\r]', # ✍️Name
-            ]
-            
-            for pattern in signature_patterns:
-                matches = re.findall(pattern, message_text)
-                if matches:
-                    signature = matches[-1].strip()  # Get last match (usually at end)
-                    if len(signature) > 2 and len(signature) < 50:  # Reasonable name length
-                        logger.debug(f"👮‍♂️ تم استخراج التوقيع: '{signature}'")
-                        return signature
-            
-            # Pattern 2: Last line starting with specific characters
-            lines = message_text.strip().split('\n')
-            if lines:
-                last_line = lines[-1].strip()
-                if last_line.startswith(('~', '-', '—', '🔸', '📝', '✍️')):
-                    signature = last_line[1:].strip()
-                    if len(signature) > 2 and len(signature) < 50:
-                        logger.debug(f"👮‍♂️ تم استخراج التوقيع من السطر الأخير: '{signature}'")
-                        return signature
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"خطأ في استخراج التوقيع: {e}")
-            return None
 
-    async def _check_admin_by_signature(self, task_id: int, signature_name: str) -> bool:
-        """Check admin filter by signature name"""
+
+    async def _check_admin_by_signature(self, task_id: int, author_signature: str) -> bool:
+        """Check admin filter by Telegram Author Signature"""
         try:
             # Get all admin filters for this task
             admin_filters = self.db.get_admin_filters(task_id)
@@ -1733,29 +1690,38 @@ class UserbotService:
                 logger.debug(f"👮‍♂️ لا توجد فلاتر مشرفين للمهمة {task_id}")
                 return False
             
-            # Check if signature matches any admin name
+            # Check if author signature matches any admin name
             for admin in admin_filters:
                 admin_name = admin.get('admin_first_name', '').strip()
                 admin_username = admin.get('admin_username', '').strip()
                 is_allowed = admin.get('is_allowed', True)
                 
-                # Match by name or username
-                if (admin_name and signature_name.lower() in admin_name.lower()) or \
-                   (admin_username and signature_name.lower() in admin_username.lower()):
-                    
+                # Match by name or username (exact or partial match)
+                name_match = admin_name and (
+                    author_signature.lower() == admin_name.lower() or
+                    author_signature.lower() in admin_name.lower() or
+                    admin_name.lower() in author_signature.lower()
+                )
+                
+                username_match = admin_username and (
+                    author_signature.lower() == admin_username.lower() or
+                    author_signature.lower() in admin_username.lower()
+                )
+                
+                if name_match or username_match:
                     if not is_allowed:
-                        logger.info(f"👮‍♂️ فلتر المشرفين (بالتوقيع): '{signature_name}' محظور - سيتم حظر الرسالة")
+                        logger.info(f"👮‍♂️ فلتر المشرفين (بتوقيع المؤلف): '{author_signature}' محظور - سيتم حظر الرسالة")
                         return True
                     else:
-                        logger.info(f"👮‍♂️ فلتر المشرفين (بالتوقيع): '{signature_name}' مسموح - سيتم توجيه الرسالة")
+                        logger.info(f"👮‍♂️ فلتر المشرفين (بتوقيع المؤلف): '{author_signature}' مسموح - سيتم توجيه الرسالة")
                         return False
             
             # If signature not found in admin list, allow by default
-            logger.debug(f"👮‍♂️ التوقيع '{signature_name}' غير موجود في قائمة المشرفين - سيتم السماح")
+            logger.debug(f"👮‍♂️ توقيع المؤلف '{author_signature}' غير موجود في قائمة المشرفين - سيتم السماح")
             return False
             
         except Exception as e:
-            logger.error(f"خطأ في فحص فلتر المشرفين بالتوقيع: {e}")
+            logger.error(f"خطأ في فحص فلتر المشرفين بتوقيع المؤلف: {e}")
             return False
 
     async def _check_admin_by_id(self, task_id: int, sender_id: int) -> bool:

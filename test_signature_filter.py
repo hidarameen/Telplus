@@ -1,11 +1,70 @@
 #!/usr/bin/env python3
 """
-اختبار فلتر المشرفين بالتوقيع
+اختبار فلتر المشرفين بتوقيع المؤلف (Author Signature)
 """
 
-import re
-
-def extract_signature_from_message(message_text: str) -> str:
+def test_author_signature_matching():
+    """Test author signature matching with admin filters"""
+    print("🧪 اختبار مطابقة توقيع المؤلف (Author Signature)\n")
+    
+    # Simulated admin list from database
+    admin_filters = [
+        {'admin_first_name': 'أحمد محمد', 'admin_username': 'ahmed123', 'is_allowed': False},
+        {'admin_first_name': 'سارة أحمد', 'admin_username': 'sara_a', 'is_allowed': True}, 
+        {'admin_first_name': 'محمد علي', 'admin_username': '', 'is_allowed': False},
+        {'admin_first_name': 'فاطمة حسن', 'admin_username': 'fatima_h', 'is_allowed': True},
+    ]
+    
+    # Test author signatures from Telegram messages
+    test_signatures = [
+        'أحمد محمد',     # Exact match - blocked admin
+        'أحمد',          # Partial match - blocked admin  
+        'سارة أحمد',     # Exact match - allowed admin
+        'سارة',          # Partial match - allowed admin
+        'علي محمد',      # Should not match exactly
+        'محمد',          # Partial match - blocked admin
+        'ahmed123',      # Username match - blocked admin
+        'fatima_h',      # Username match - allowed admin
+        'خالد أحمد',     # No match - should allow
+        '',              # Empty signature
+    ]
+    
+    for signature in test_signatures:
+        print(f"🔍 اختبار توقيع المؤلف: '{signature}'")
+        
+        if not signature:
+            print("❌ توقيع فارغ - سيتم السماح")
+            print("-" * 40)
+            continue
+            
+        matched = False
+        for admin in admin_filters:
+            admin_name = admin.get('admin_first_name', '').strip()
+            admin_username = admin.get('admin_username', '').strip()
+            is_allowed = admin.get('is_allowed', True)
+            
+            # Match by name or username (exact or partial match)
+            name_match = admin_name and (
+                signature.lower() == admin_name.lower() or
+                signature.lower() in admin_name.lower() or
+                admin_name.lower() in signature.lower()
+            )
+            
+            username_match = admin_username and (
+                signature.lower() == admin_username.lower() or
+                signature.lower() in admin_username.lower()
+            )
+            
+            if name_match or username_match:
+                status = "مسموح" if is_allowed else "محظور"
+                match_type = "اسم" if name_match else "اسم مستخدم"
+                print(f"✅ تطابق {match_type} مع المشرف '{admin_name}' ({admin_username}) - {status}")
+                matched = True
+                break
+        
+        if not matched:
+            print("❌ لا يوجد تطابق - سيتم السماح")
+        print("-" * 40)
     """Extract sender signature from message text"""
     try:
         # Common signature patterns
@@ -42,67 +101,33 @@ def extract_signature_from_message(message_text: str) -> str:
         print(f"❌ خطأ في استخراج التوقيع: {e}")
         return None
 
-def test_signature_extraction():
-    """Test signature extraction with different message formats"""
-    print("🧪 اختبار استخراج التوقيع من الرسائل\n")
+def explain_author_signature_feature():
+    """Explain Telegram Author Signature feature"""
+    print("📋 شرح ميزة توقيع المؤلف (Author Signature) في تليجرام:\n")
     
-    test_messages = [
-        "هذا نص الرسالة العادي\n~أحمد محمد\n",
-        "رسالة مهمة للجميع\n-سارة أحمد",
-        "إعلان مهم\n🔸محمد علي\n",
-        "خبر جديد\n📝فاطمة حسن",
-        "تحديث عاجل\n✍️علي محمود\nنهاية الرسالة",
-        "رسالة بدون توقيع",
-        "رسالة مع توقيع قصير\n~س",  # Should be rejected (too short)
-        "رسالة مع توقيع طويل جداً\n~" + "أ" * 60,  # Should be rejected (too long)
-    ]
+    print("🔧 كيفية تفعيل الميزة:")
+    print("1. في إعدادات القناة، اذهب إلى 'Edit Channel'")
+    print("2. فعّل خيار 'Sign Messages'")
+    print("3. الآن ستظهر أسماء المشرفين بجانب رسائلهم")
+    print("")
     
-    for i, message in enumerate(test_messages, 1):
-        print(f"📝 اختبار {i}:")
-        print(f"النص: {repr(message)}")
-        signature = extract_signature_from_message(message)
-        if signature:
-            print(f"✅ التوقيع المستخرج: '{signature}'")
-        else:
-            print("❌ لم يتم العثور على توقيع")
-        print("-" * 50)
+    print("💡 كيف يعمل الفلتر:")
+    print("- عندما ينشر مشرف في القناة مع تفعيل التوقيع")
+    print("- يظهر اسم المشرف في الرسالة كـ 'post_author'")
+    print("- البوت يقارن هذا الاسم مع قائمة المشرفين المحظورين")
+    print("- إذا وجد تطابق → يحظر الرسالة")
+    print("- إذا لم يجد تطابق → يسمح بالرسالة")
+    print("")
+    
+    print("⚠️ متطلبات مهمة:")
+    print("- يجب تفعيل 'Sign Messages' في القناة المصدر")
+    print("- يعمل فقط مع القنوات، ليس المجموعات")
+    print("- للمجموعات يستخدم معرف المرسل كما هو معتاد")
 
-def test_admin_matching():
-    """Test admin name matching logic"""
-    print("\n🧪 اختبار مطابقة أسماء المشرفين\n")
-    
-    # Simulated admin list
-    admin_filters = [
-        {'admin_first_name': 'أحمد محمد', 'admin_username': 'ahmed123', 'is_allowed': False},
-        {'admin_first_name': 'سارة أحمد', 'admin_username': 'sara_a', 'is_allowed': True},
-        {'admin_first_name': 'محمد علي', 'admin_username': '', 'is_allowed': False},
-    ]
-    
-    test_signatures = ['أحمد محمد', 'أحمد', 'محمد', 'سارة', 'علي محمود', 'ahmed123']
-    
-    for signature in test_signatures:
-        print(f"🔍 اختبار التوقيع: '{signature}'")
-        
-        matched = False
-        for admin in admin_filters:
-            admin_name = admin.get('admin_first_name', '').strip()
-            admin_username = admin.get('admin_username', '').strip()
-            is_allowed = admin.get('is_allowed', True)
-            
-            # Match by name or username
-            if (admin_name and signature.lower() in admin_name.lower()) or \
-               (admin_username and signature.lower() in admin_username.lower()):
-                
-                status = "مسموح" if is_allowed else "محظور"
-                print(f"✅ تطابق مع المشرف '{admin_name}' ({admin_username}) - {status}")
-                matched = True
-                break
-        
-        if not matched:
-            print("❌ لا يوجد تطابق - سيتم السماح")
-        print("-" * 40)
+
 
 if __name__ == "__main__":
-    test_signature_extraction()
-    test_admin_matching()
+    explain_author_signature_feature()
+    print("\n" + "="*60 + "\n")
+    test_author_signature_matching()
     print("\n🎉 اكتمال الاختبارات!")
