@@ -418,6 +418,69 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لقائمة المشرفين: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_settings_"): # Handler for watermark settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_watermark_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_watermark_") and not data.startswith("toggle_watermark_photos_") and not data.startswith("toggle_watermark_videos_") and not data.startswith("toggle_watermark_documents_"): # Handler for toggle watermark
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.toggle_watermark(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_config_"): # Handler for watermark config
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_watermark_config(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتكوين العلامة المائية: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_media_"): # Handler for watermark media settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_watermark_media_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وسائط العلامة المائية: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_watermark_photos_"): # Handler for toggle watermark photos
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_watermark_media_type(event, task_id, 'photos')
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للصور: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_watermark_videos_"): # Handler for toggle watermark videos
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_watermark_media_type(event, task_id, 'videos')
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للفيديوهات: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_watermark_documents_"): # Handler for toggle watermark documents
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_watermark_media_type(event, task_id, 'documents')
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للمستندات: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("source_admins_"): # Handler for source admins
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -487,6 +550,69 @@ class SimpleTelegramBot:
                         await self.show_forwarded_message_filter(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلتر الرسائل المعاد توجيهها: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_settings_"): # Handler for watermark settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_watermark_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_watermark_"): # Handler for toggle watermark
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.toggle_watermark(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_config_"): # Handler for watermark configuration
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_watermark_config(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("watermark_media_"): # Handler for watermark media settings
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_watermark_media_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وسائط العلامة المائية: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_watermark_photos_"): # Handler for toggle watermark photos
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_watermark_media_type(event, task_id, 'photos')
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للصور: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_watermark_videos_"): # Handler for toggle watermark videos
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_watermark_media_type(event, task_id, 'videos')
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للفيديو: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_watermark_documents_"): # Handler for toggle watermark documents
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_watermark_media_type(event, task_id, 'documents')
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للمستندات: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_inline_block_"): # Handler for toggle inline button block
                 parts = data.split("_")
@@ -1490,6 +1616,10 @@ class SimpleTelegramBot:
         # Get translation settings for status display
         translation_settings = self.db.get_translation_settings(task_id)
         translation_status = "🟢" if translation_settings['enabled'] else "🔴"
+        
+        # Get watermark settings for status display
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        watermark_status = "🟢" if watermark_settings['enabled'] else "🔴"
 
         buttons = [
             # الصف الأول - وضع التوجيه
@@ -1519,7 +1649,10 @@ class SimpleTelegramBot:
             [Button.inline(f"📄 رأس الرسالة {header_status}", f"header_settings_{task_id}"),
              Button.inline(f"📝 ذيل الرسالة {footer_status}", f"footer_settings_{task_id}")],
             
-            # الصف الثامن - الفلاتر والميزات المتقدمة
+            # الصف الثامن - العلامة المائية
+            [Button.inline(f"🏷️ العلامة المائية {watermark_status}", f"watermark_settings_{task_id}")],
+            
+            # الصف التاسع - الفلاتر والميزات المتقدمة
             [Button.inline("🔍 الفلاتر المتقدمة", f"advanced_filters_{task_id}"),
              Button.inline("⚡ الميزات المتقدمة", f"advanced_features_{task_id}")],
             
@@ -5807,16 +5940,200 @@ class SimpleTelegramBot:
         await event.edit(
             f"🅰️ الفلاتر المتقدمة: {task_name}\n\n"
             f"📋 حالة الفلاتر:\n"
-            f"• {day_status} فلتر الأيام - تحديد أيام التوجيه المسموحة\n"
-            f"• {hours_status} ساعات العمل - تحديد ساعات التوجيه\n" 
-            f"• {lang_status} فلتر اللغة - السماح/حظر لغات محددة\n"
-            f"• {admin_status} فلتر المشرفين - السماح/حظر مشرفين محددين\n"
-            f"• {duplicate_status} فلتر التكرار - منع توجيه الرسائل المكررة\n"
-            f"• {inline_btn_status} فلتر الأزرار - حظر الرسائل التي تحتوي على أزرار\n"
-            f"• {forwarded_status} فلتر المعاد توجيهه - حظر الرسائل المعاد توجيهها\n\n"
-            f"اختر الفلتر الذي تريد إدارته:",
+            f"• فلتر الأيام: {day_status}\n"
+            f"• ساعات العمل: {hours_status}\n"
+            f"• فلتر اللغة: {lang_status}\n"
+            f"• فلتر المشرفين: {admin_status}\n"
+            f"• فلتر التكرار: {duplicate_status}\n"
+            f"• فلتر الأزرار: {inline_btn_status}\n"
+            f"• فلتر المعاد توجيهه: {forwarded_status}\n\n"
+            f"💡 يمكنك تخصيص كل فلتر حسب احتياجاتك",
             buttons=buttons
         )
+
+    # ===== Watermark Settings =====
+    
+    async def show_watermark_settings(self, event, task_id):
+        """Show watermark settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get watermark settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        
+        enabled = watermark_settings.get('enabled', False)
+        status = "🟢 مفعل" if enabled else "🔴 معطل"
+        toggle_text = "❌ إلغاء تفعيل" if enabled else "✅ تفعيل"
+        
+        # Get watermark type
+        watermark_type = watermark_settings.get('watermark_type', 'text')
+        type_display = "📝 نص" if watermark_type == 'text' else "🖼️ صورة"
+        
+        # Get position
+        position = watermark_settings.get('position', 'bottom-right')
+        position_map = {
+            'top-left': 'أعلى يسار',
+            'top-right': 'أعلى يمين', 
+            'bottom-left': 'أسفل يسار',
+            'bottom-right': 'أسفل يمين',
+            'center': 'الوسط'
+        }
+        position_display = position_map.get(position, position)
+
+        buttons = [
+            [Button.inline(toggle_text, f"toggle_watermark_{task_id}")],
+            [Button.inline("⚙️ إعدادات العلامة", f"watermark_config_{task_id}")],
+            [Button.inline("📱 اختيار الوسائط", f"watermark_media_{task_id}")],
+            [Button.inline("🔙 عودة للمهمة", f"task_settings_{task_id}")]
+        ]
+
+        # Build media settings display
+        media_settings = []
+        if watermark_settings.get('apply_to_photos', True):
+            media_settings.append("📷 الصور")
+        if watermark_settings.get('apply_to_videos', True):
+            media_settings.append("🎥 الفيديوهات")
+        if watermark_settings.get('apply_to_documents', False):
+            media_settings.append("📄 المستندات")
+        
+        media_display = " • ".join(media_settings) if media_settings else "لا يوجد"
+
+        await event.edit(
+            f"🏷️ إعدادات العلامة المائية - المهمة #{task_id}\n\n"
+            f"📊 **الحالة**: {status}\n"
+            f"🎭 **النوع**: {type_display}\n"
+            f"📍 **الموقع**: {position_display}\n"
+            f"🎯 **الوسائط المطبقة**: {media_display}\n\n"
+            f"🔧 **الإعدادات الحالية:**\n"
+            f"• الحجم: {watermark_settings.get('size_percentage', 10)}%\n"
+            f"• الشفافية: {watermark_settings.get('opacity', 70)}%\n"
+            f"• حجم الخط: {watermark_settings.get('font_size', 24)}px\n\n"
+            f"🏷️ **الوظيفة**: إضافة علامة مائية نصية أو صورة على الوسائط المرسلة لحماية الحقوق\n\n"
+            f"📝 **نص العلامة**: {watermark_settings.get('watermark_text', 'غير محدد')[:30]}{'...' if len(watermark_settings.get('watermark_text', '')) > 30 else ''}\n"
+            f"🖼️ **صورة العلامة**: {'محددة' if watermark_settings.get('watermark_image_path') else 'غير محددة'}",
+            buttons=buttons
+        )
+
+    async def toggle_watermark(self, event, task_id):
+        """Toggle watermark status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle watermark
+        new_status = self.db.toggle_watermark(task_id)
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        
+        await event.answer(f"✅ {status_text} العلامة المائية")
+        await self.show_watermark_settings(event, task_id)
+
+    async def show_watermark_config(self, event, task_id):
+        """Show watermark configuration options"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        buttons = [
+            [Button.inline("📝 تعديل النص", f"watermark_text_{task_id}")],
+            [Button.inline("🖼️ رفع صورة", f"watermark_image_{task_id}")],
+            [Button.inline("📍 تغيير الموقع", f"watermark_position_{task_id}")],
+            [Button.inline("🎨 إعدادات المظهر", f"watermark_appearance_{task_id}")],
+            [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
+        ]
+
+        await event.edit(
+            f"⚙️ تكوين العلامة المائية - المهمة #{task_id}\n\n"
+            f"🔧 **خيارات التكوين المتاحة:**\n\n"
+            f"📝 **تعديل النص**: تحديد النص المراد إظهاره كعلامة مائية\n"
+            f"🖼️ **رفع صورة**: استخدام صورة كعلامة مائية (PNG مفضل)\n"
+            f"📍 **تغيير الموقع**: اختيار مكان العلامة على الوسائط\n"
+            f"🎨 **إعدادات المظهر**: تخصيص الحجم والشفافية واللون\n\n"
+            f"💡 **نصيحة**: يُفضل استخدام صور PNG شفافة للحصول على أفضل نتيجة",
+            buttons=buttons
+        )
+
+    async def show_watermark_media_settings(self, event, task_id):
+        """Show watermark media type settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Get current settings
+        watermark_settings = self.db.get_watermark_settings(task_id)
+        
+        photos_enabled = watermark_settings.get('apply_to_photos', True)
+        videos_enabled = watermark_settings.get('apply_to_videos', True)
+        documents_enabled = watermark_settings.get('apply_to_documents', False)
+        
+        photos_text = "✅ الصور" if photos_enabled else "❌ الصور"
+        videos_text = "✅ الفيديوهات" if videos_enabled else "❌ الفيديوهات"
+        documents_text = "✅ المستندات" if documents_enabled else "❌ المستندات"
+
+        buttons = [
+            [Button.inline(photos_text, f"toggle_watermark_photos_{task_id}")],
+            [Button.inline(videos_text, f"toggle_watermark_videos_{task_id}")],
+            [Button.inline(documents_text, f"toggle_watermark_documents_{task_id}")],
+            [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
+        ]
+
+        await event.edit(
+            f"📱 اختيار الوسائط للعلامة المائية - المهمة #{task_id}\n\n"
+            f"📋 **حدد أنواع الوسائط التي تريد تطبيق العلامة المائية عليها:**\n\n"
+            f"📷 **الصور**: JPG, PNG, WebP وغيرها\n"
+            f"🎥 **الفيديوهات**: MP4, AVI, MOV وغيرها\n"
+            f"📄 **المستندات**: ملفات الصور في شكل مستندات\n\n"
+            f"⚠️ **ملاحظة**: معالجة الفيديوهات قد تستغرق وقتاً أطول\n\n"
+            f"✅ = مفعل  ❌ = معطل",
+            buttons=buttons
+        )
+
+    async def toggle_watermark_media_type(self, event, task_id, media_type):
+        """Toggle watermark application for specific media type"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Toggle media type setting
+        field_map = {
+            'photos': 'apply_to_photos',
+            'videos': 'apply_to_videos', 
+            'documents': 'apply_to_documents'
+        }
+        
+        field_name = field_map.get(media_type)
+        if not field_name:
+            await event.answer("❌ نوع وسائط غير صالح")
+            return
+
+        new_status = self.db.toggle_watermark_media_type(task_id, field_name)
+        
+        media_names = {
+            'photos': 'الصور',
+            'videos': 'الفيديوهات',
+            'documents': 'المستندات'
+        }
+        
+        status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
+        media_name = media_names.get(media_type, media_type)
+        
+        await event.answer(f"✅ {status_text} العلامة المائية لـ{media_name}")
+        await self.show_watermark_media_settings(event, task_id)
     
     async def show_day_filters(self, event, task_id):
         """Show day filters management"""
