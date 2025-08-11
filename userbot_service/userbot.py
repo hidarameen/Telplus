@@ -1573,6 +1573,13 @@ class UserbotService:
                     logger.info(f"🌍 رسالة محظورة بواسطة فلتر اللغة")
                     should_block = True
             
+            # Check day filter
+            if not should_block and advanced_settings.get('day_filter_enabled', False):
+                day_blocked = self._check_day_filter(task_id)
+                if day_blocked:
+                    logger.info(f"📅 رسالة محظورة بواسطة فلتر الأيام")
+                    should_block = True
+            
             # Check working hours filter
             if not should_block and advanced_settings.get('working_hours_enabled', False):
                 working_hours_blocked = self._check_working_hours_filter(task_id)
@@ -1585,6 +1592,41 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في فحص الفلاتر المتقدمة: {e}")
             return False, False, False
+
+    def _check_day_filter(self, task_id: int) -> bool:
+        """Check if current day is allowed by day filter"""
+        try:
+            import datetime
+            
+            # Get current day (0=Monday, 1=Tuesday, ..., 6=Sunday)
+            today = datetime.datetime.now().weekday()
+            
+            # Get day filter settings
+            day_filters = self.db.get_day_filters(task_id)
+            if not day_filters:
+                logger.debug(f"📅 لا توجد إعدادات فلتر الأيام للمهمة {task_id}")
+                return False
+            
+            # Find today's setting
+            today_allowed = True  # Default is allowed
+            for day in day_filters:
+                if day['day_number'] == today:
+                    today_allowed = day['is_allowed']
+                    break
+            
+            day_names = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
+            today_name = day_names[today] if today < len(day_names) else f"يوم {today}"
+            
+            if not today_allowed:
+                logger.info(f"📅 فلتر الأيام: اليوم {today_name} محظور - سيتم حظر الرسالة")
+                return True
+            else:
+                logger.info(f"📅 فلتر الأيام: اليوم {today_name} مسموح - سيتم توجيه الرسالة")
+                return False
+                
+        except Exception as e:
+            logger.error(f"خطأ في فحص فلتر الأيام: {e}")
+            return False
 
     def _check_working_hours_filter(self, task_id: int) -> bool:
         """Check if current time is within working hours configuration"""
@@ -1599,18 +1641,20 @@ class UserbotService:
             
             mode = working_hours.get('mode', 'work_hours')  # 'work_hours' or 'sleep_hours'
             enabled_hours = working_hours.get('enabled_hours', [])
-            timezone_offset = working_hours.get('timezone_offset', 0)
+            
+            # For now, use UTC+3 (Riyadh timezone) as default
+            timezone_offset = 3
             
             # If no hours are configured, don't block
             if not enabled_hours:
                 logger.debug(f"⏰ لا توجد ساعات محددة في فلتر ساعات العمل للمهمة {task_id}")
                 return False
             
-            # Get current time with timezone offset
+            # Get current time with timezone offset (Riyadh = UTC+3)
             now = datetime.datetime.now() + datetime.timedelta(hours=timezone_offset)
             current_hour = now.hour
             
-            logger.info(f"⏰ فحص ساعات العمل للمهمة {task_id}: الساعة الحالية={current_hour:02d}, الوضع={mode}")
+            logger.info(f"⏰ فحص ساعات العمل للمهمة {task_id}: الساعة الحالية={current_hour:02d} (الرياض), الوضع={mode}")
             logger.info(f"⏰ الساعات المُحددة: {sorted(enabled_hours)}")
             
             # Check if current hour is in enabled hours
