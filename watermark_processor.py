@@ -1,3 +1,4 @@
+
 """
 وحدة معالجة العلامة المائية للصور والفيديوهات
 تدعم إضافة علامة مائية نصية أو صورة مع إعدادات مخصصة
@@ -10,6 +11,8 @@ import cv2
 import numpy as np
 from typing import Optional, Tuple, Union
 import tempfile
+import subprocess
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +22,7 @@ class WatermarkProcessor:
     def __init__(self):
         """تهيئة معالج العلامة المائية"""
         self.supported_image_formats = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp']
-        self.supported_video_formats = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv']
+        self.supported_video_formats = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
         
     def calculate_position(self, base_size: Tuple[int, int], watermark_size: Tuple[int, int], position: str, offset_x: int = 0, offset_y: int = 0) -> Tuple[int, int]:
         """حساب موقع العلامة المائية على الصورة/الفيديو مع الإزاحة اليدوية"""
@@ -294,10 +297,150 @@ class WatermarkProcessor:
         except Exception as e:
             logger.error(f"خطأ في تطبيق العلامة المائية على الصورة: {e}")
             return image_bytes
-    
-    def apply_watermark_to_video(self, video_path: str, watermark_settings: dict) -> Optional[str]:
-        """تطبيق العلامة المائية على فيديو"""
+
+    def apply_watermark_to_video_ffmpeg(self, video_path: str, watermark_settings: dict) -> Optional[str]:
+        """تطبيق العلامة المائية على فيديو باستخدام FFmpeg - الطريقة الأسرع والأكثر فعالية"""
         try:
+            logger.info(f"🎬 بدء معالجة الفيديو بـ FFmpeg: {video_path}")
+            
+            # إنشاء ملف مؤقت للفيديو الجديد
+            temp_dir = tempfile.gettempdir()
+            output_path = os.path.join(temp_dir, f"watermarked_ffmpeg_{int(time.time())}_{os.path.basename(video_path)}")
+            
+            # تحضير العلامة المائية
+            watermark_file = None
+            
+            if watermark_settings['watermark_type'] == 'text' and watermark_settings['watermark_text']:
+                # إنشاء علامة مائية نصية مؤقتة
+                watermark_file = self._create_text_watermark_for_ffmpeg(watermark_settings, video_path)
+            elif watermark_settings['watermark_type'] == 'image' and watermark_settings['watermark_image_path']:
+                # استخدام صورة العلامة المائية مباشرة
+                if os.path.exists(watermark_settings['watermark_image_path']):
+                    watermark_file = watermark_settings['watermark_image_path']
+            
+            if not watermark_file or not os.path.exists(watermark_file):
+                logger.warning("فشل في تحضير ملف العلامة المائية لـ FFmpeg")
+                return None
+            
+            # حساب موقع العلامة المائية
+            position_map = {
+                'top_left': '10:10',
+                'top_right': 'W-w-10:10',
+                'top': '(W-w)/2:10',
+                'bottom_left': '10:H-h-10',
+                'bottom_right': 'W-w-10:H-h-10',
+                'bottom': '(W-w)/2:H-h-10',
+                'center': '(W-w)/2:(H-h)/2'
+            }
+            
+            position = watermark_settings.get('position', 'bottom_right')
+            overlay_position = position_map.get(position, 'W-w-10:H-h-10')
+            
+            # إضافة الإزاحة اليدوية
+            offset_x = watermark_settings.get('offset_x', 0)
+            offset_y = watermark_settings.get('offset_y', 0)
+            
+            if offset_x != 0 or offset_y != 0:
+                # تعديل موقع العلامة المائية حسب الإزاحة
+                if position == 'bottom_right':
+                    overlay_position = f'W-w-10+{offset_x}:H-h-10+{offset_y}'
+                elif position == 'bottom_left':
+                    overlay_position = f'10+{offset_x}:H-h-10+{offset_y}'
+                elif position == 'top_right':
+                    overlay_position = f'W-w-10+{offset_x}:10+{offset_y}'
+                elif position == 'top_left':
+                    overlay_position = f'10+{offset_x}:10+{offset_y}'
+                else:
+                    overlay_position = f'(W-w)/2+{offset_x}:(H-h)/2+{offset_y}'
+            
+            # بناء أمر FFmpeg
+            ffmpeg_cmd = [
+                'ffmpeg', '-y',  # overwrite output files
+                '-i', video_path,  # input video
+                '-i', watermark_file,  # watermark image
+                '-filter_complex', 
+                f'[0:v][1:v] overlay={overlay_position}:enable=\'between(t,0,999999)\'',  # overlay filter
+                '-c:a', 'copy',  # copy audio stream
+                '-c:v', 'libx264',  # video codec
+                '-preset', 'fast',  # encoding speed
+                '-crf', '23',  # quality
+                output_path
+            ]
+            
+            logger.info(f"🔧 تشغيل أمر FFmpeg...")
+            logger.debug(f"📝 الأمر: {' '.join(ffmpeg_cmd)}")
+            
+            # تشغيل FFmpeg
+            process = subprocess.run(
+                ffmpeg_cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes timeout
+            )
+            
+            if process.returncode == 0:
+                logger.info(f"✅ تم تطبيق العلامة المائية بـ FFmpeg: {output_path}")
+                
+                # حذف ملف العلامة المائية المؤقت إذا كان نصياً
+                if watermark_settings['watermark_type'] == 'text' and watermark_file != watermark_settings.get('watermark_image_path'):
+                    try:
+                        os.unlink(watermark_file)
+                    except:
+                        pass
+                
+                return output_path
+            else:
+                logger.error(f"❌ فشل FFmpeg: {process.stderr}")
+                return None
+                
+        except subprocess.TimeoutExpired:
+            logger.error("⏰ انتهت مهلة انتظار FFmpeg")
+            return None
+        except FileNotFoundError:
+            logger.warning("⚠️ FFmpeg غير مثبت، سيتم استخدام OpenCV")
+            return None
+        except Exception as e:
+            logger.error(f"خطأ في FFmpeg: {e}")
+            return None
+
+    def _create_text_watermark_for_ffmpeg(self, watermark_settings: dict, video_path: str) -> Optional[str]:
+        """إنشاء ملف صورة للعلامة المائية النصية لاستخدامها مع FFmpeg"""
+        try:
+            # الحصول على أبعاد الفيديو
+            cap = cv2.VideoCapture(video_path)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            
+            # إنشاء العلامة المائية النصية
+            color = watermark_settings['text_color'] if not watermark_settings['use_original_color'] else '#FFFFFF'
+            watermark_img = self.create_text_watermark(
+                watermark_settings['watermark_text'],
+                watermark_settings['font_size'],
+                color,
+                watermark_settings['opacity'],
+                (width, height)
+            )
+            
+            if watermark_img is None:
+                return None
+            
+            # حفظ العلامة المائية كملف مؤقت
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+            watermark_img.save(temp_file.name, 'PNG')
+            temp_file.close()
+            
+            return temp_file.name
+            
+        except Exception as e:
+            logger.error(f"خطأ في إنشاء علامة مائية نصية لـ FFmpeg: {e}")
+            return None
+    
+    def apply_watermark_to_video_opencv(self, video_path: str, watermark_settings: dict) -> Optional[str]:
+        """تطبيق العلامة المائية على فيديو باستخدام OpenCV - الطريقة البديلة"""
+        try:
+            logger.info(f"🎬 بدء معالجة الفيديو بـ OpenCV: {video_path}")
+            
             # فتح الفيديو
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -310,16 +453,23 @@ class WatermarkProcessor:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
+            logger.info(f"📊 خصائص الفيديو: {width}x{height}, {fps} FPS, {total_frames} إطار")
+            
             # إنشاء ملف مؤقت للفيديو الجديد
             temp_dir = tempfile.gettempdir()
-            output_path = os.path.join(temp_dir, f"watermarked_{os.path.basename(video_path)}")
+            output_path = os.path.join(temp_dir, f"watermarked_opencv_{int(time.time())}_{os.path.basename(video_path)}")
             
-            # إعداد كاتب الفيديو
-            fourcc = cv2.VideoWriter.fourcc(*'mp4v')
+            # إعداد كاتب الفيديو مع تحسينات
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
             
+            if not out.isOpened():
+                logger.error("فشل في إنشاء كاتب الفيديو")
+                cap.release()
+                return None
+            
             # تحضير العلامة المائية
-            watermark_img = None
+            watermark_opencv = None
             
             if watermark_settings['watermark_type'] == 'text' and watermark_settings['watermark_text']:
                 color = watermark_settings['text_color'] if not watermark_settings['use_original_color'] else '#FFFFFF'
@@ -331,7 +481,7 @@ class WatermarkProcessor:
                     (width, height)
                 )
                 if watermark_pil:
-                    watermark_img = cv2.cvtColor(np.array(watermark_pil), cv2.COLOR_RGBA2BGRA)
+                    watermark_opencv = cv2.cvtColor(np.array(watermark_pil), cv2.COLOR_RGBA2BGRA)
             
             elif watermark_settings['watermark_type'] == 'image' and watermark_settings['watermark_image_path']:
                 watermark_pil = self.load_image_watermark(
@@ -342,59 +492,132 @@ class WatermarkProcessor:
                     watermark_settings.get('position', 'bottom_right')
                 )
                 if watermark_pil:
-                    watermark_img = cv2.cvtColor(np.array(watermark_pil), cv2.COLOR_RGBA2BGRA)
+                    watermark_opencv = cv2.cvtColor(np.array(watermark_pil), cv2.COLOR_RGBA2BGRA)
             
-            if watermark_img is None:
+            if watermark_opencv is None:
+                logger.warning("فشل في تحضير العلامة المائية لـ OpenCV")
                 cap.release()
                 out.release()
                 return video_path
             
             # حساب موقع العلامة المائية مع الإزاحة اليدوية
-            watermark_height, watermark_width = watermark_img.shape[:2]
+            watermark_height, watermark_width = watermark_opencv.shape[:2]
             offset_x = watermark_settings.get('offset_x', 0)
             offset_y = watermark_settings.get('offset_y', 0)
-            position = self.calculate_position((width, height), (watermark_width, watermark_height), watermark_settings['position'], offset_x, offset_y)
+            position = self.calculate_position((width, height), (watermark_width, watermark_height), 
+                                            watermark_settings['position'], offset_x, offset_y)
             x, y = position
             
-            # معالجة كل إطار
+            logger.info(f"📍 موقع العلامة المائية: ({x}, {y}), حجم: {watermark_width}x{watermark_height}")
+            
+            # معالجة الإطارات
             frame_count = 0
+            batch_size = 30  # معالجة 30 إطار في المرة الواحدة لتحسين الأداء
+            last_progress_report = 0
+            
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
                 
-                # تطبيق العلامة المائية على الإطار
                 try:
-                    # إنشاء قناع للعلامة المائية
-                    alpha = watermark_img[:, :, 3] / 255.0
-                    
-                    # تطبيق العلامة المائية
-                    for c in range(0, 3):
-                        frame[y:y+watermark_height, x:x+watermark_width, c] = (
-                            alpha * watermark_img[:, :, c] + 
-                            (1 - alpha) * frame[y:y+watermark_height, x:x+watermark_width, c]
-                        )
-                except Exception as e:
-                    logger.warning(f"خطأ في تطبيق العلامة المائية على الإطار {frame_count}: {e}")
+                    # التأكد من أن العلامة المائية تقع داخل حدود الإطار
+                    if (x + watermark_width <= width and y + watermark_height <= height and
+                        x >= 0 and y >= 0):
+                        
+                        # تطبيق العلامة المائية بحذر
+                        roi = frame[y:y+watermark_height, x:x+watermark_width]
+                        
+                        if roi.shape[:2] == (watermark_height, watermark_width):
+                            # إنشاء قناع للعلامة المائية
+                            if watermark_opencv.shape[2] == 4:  # BGRA
+                                alpha = watermark_opencv[:, :, 3] / 255.0
+                                alpha = np.expand_dims(alpha, axis=2)
+                                
+                                # تطبيق العلامة المائية مع الشفافية
+                                for c in range(3):  # BGR channels
+                                    roi[:, :, c] = (alpha[:, :, 0] * watermark_opencv[:, :, c] + 
+                                                   (1 - alpha[:, :, 0]) * roi[:, :, c])
+                                
+                                frame[y:y+watermark_height, x:x+watermark_width] = roi
+                            else:
+                                # معالجة بسيطة بدون شفافية
+                                cv2.addWeighted(roi, 0.7, watermark_opencv[:, :, :3], 0.3, 0, roi)
+                                frame[y:y+watermark_height, x:x+watermark_width] = roi
+                
+                except Exception as frame_error:
+                    logger.debug(f"تخطي إطار {frame_count}: {frame_error}")
                 
                 # كتابة الإطار
                 out.write(frame)
                 frame_count += 1
                 
-                # إظهار التقدم كل 100 إطار
-                if frame_count % 100 == 0:
+                # إظهار التقدم كل 5%
+                if total_frames > 0:
                     progress = (frame_count / total_frames) * 100
-                    logger.info(f"معالجة الفيديو: {progress:.1f}% ({frame_count}/{total_frames})")
+                    if progress - last_progress_report >= 5:
+                        logger.info(f"📈 معالجة الفيديو: {progress:.1f}% ({frame_count}/{total_frames})")
+                        last_progress_report = progress
             
             # إغلاق الملفات
             cap.release()
             out.release()
             
-            logger.info(f"تم تطبيق العلامة المائية على الفيديو: {output_path}")
-            return output_path
+            # التحقق من نجاح العملية
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logger.info(f"✅ تم تطبيق العلامة المائية بـ OpenCV: {output_path}")
+                return output_path
+            else:
+                logger.error("❌ فشل في إنشاء ملف الفيديو المعالج")
+                return None
+                
+        except Exception as e:
+            logger.error(f"خطأ في معالجة الفيديو بـ OpenCV: {e}")
+            return None
+        finally:
+            # تنظيف الموارد
+            try:
+                if 'cap' in locals():
+                    cap.release()
+                if 'out' in locals():
+                    out.release()
+            except:
+                pass
+
+    def apply_watermark_to_video(self, video_path: str, watermark_settings: dict) -> Optional[str]:
+        """تطبيق العلامة المائية على فيديو - المنطق الرئيسي مع اختيار أفضل طريقة"""
+        try:
+            logger.info(f"🎬 بدء تطبيق العلامة المائية على الفيديو: {os.path.basename(video_path)}")
+            
+            # التحقق من وجود الملف
+            if not os.path.exists(video_path):
+                logger.error(f"ملف الفيديو غير موجود: {video_path}")
+                return None
+            
+            # التحقق من حجم الملف
+            file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
+            logger.info(f"📁 حجم الفيديو: {file_size_mb:.1f} MB")
+            
+            # محاولة استخدام FFmpeg أولاً (الأسرع)
+            result = self.apply_watermark_to_video_ffmpeg(video_path, watermark_settings)
+            
+            if result and os.path.exists(result):
+                logger.info("✅ تم استخدام FFmpeg بنجاح")
+                return result
+            
+            # في حالة فشل FFmpeg، استخدم OpenCV
+            logger.warning("⚠️ فشل FFmpeg، جاري المحاولة بـ OpenCV...")
+            result = self.apply_watermark_to_video_opencv(video_path, watermark_settings)
+            
+            if result and os.path.exists(result):
+                logger.info("✅ تم استخدام OpenCV بنجاح")
+                return result
+            
+            logger.error("❌ فشل في تطبيق العلامة المائية بكلا الطريقتين")
+            return None
             
         except Exception as e:
-            logger.error(f"خطأ في تطبيق العلامة المائية على الفيديو: {e}")
+            logger.error(f"خطأ عام في تطبيق العلامة المائية على الفيديو: {e}")
             return None
     
     def should_apply_watermark(self, media_type: str, watermark_settings: dict) -> bool:
@@ -430,38 +653,99 @@ class WatermarkProcessor:
             media_type = self.get_media_type_from_file(file_name)
             
             if not self.should_apply_watermark(media_type, watermark_settings):
+                logger.info(f"تخطي العلامة المائية للملف {file_name} - غير مفعلة لنوع {media_type}")
                 return media_bytes
             
             if media_type == 'photo':
+                logger.info(f"🖼️ تطبيق العلامة المائية على الصورة: {file_name}")
                 return self.apply_watermark_to_image(media_bytes, watermark_settings)
             
             elif media_type == 'video':
+                logger.info(f"🎬 تطبيق العلامة المائية على الفيديو: {file_name}")
+                
                 # حفظ الفيديو مؤقتاً
                 temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1])
                 temp_input.write(media_bytes)
                 temp_input.close()
                 
-                # تطبيق العلامة المائية
-                watermarked_path = self.apply_watermark_to_video(temp_input.name, watermark_settings)
-                
-                if watermarked_path and os.path.exists(watermarked_path):
-                    # قراءة الفيديو المعالج
-                    with open(watermarked_path, 'rb') as f:
-                        watermarked_bytes = f.read()
+                try:
+                    # تطبيق العلامة المائية
+                    watermarked_path = self.apply_watermark_to_video(temp_input.name, watermark_settings)
                     
-                    # حذف الملفات المؤقتة
-                    os.unlink(temp_input.name)
-                    os.unlink(watermarked_path)
-                    
-                    return watermarked_bytes
-                else:
-                    os.unlink(temp_input.name)
+                    if watermarked_path and os.path.exists(watermarked_path):
+                        # قراءة الفيديو المعالج
+                        with open(watermarked_path, 'rb') as f:
+                            watermarked_bytes = f.read()
+                        
+                        logger.info(f"✅ تم تطبيق العلامة المائية على الفيديو بنجاح")
+                        
+                        # حذف الملفات المؤقتة
+                        try:
+                            os.unlink(temp_input.name)
+                            os.unlink(watermarked_path)
+                        except:
+                            pass
+                        
+                        return watermarked_bytes
+                    else:
+                        logger.warning(f"⚠️ فشل في معالجة الفيديو، إرجاع الملف الأصلي")
+                        os.unlink(temp_input.name)
+                        return media_bytes
+                        
+                except Exception as video_error:
+                    logger.error(f"❌ خطأ في معالجة الفيديو: {video_error}")
+                    try:
+                        os.unlink(temp_input.name)
+                    except:
+                        pass
                     return media_bytes
             
             else:
                 # نوع وسائط غير مدعوم للعلامة المائية
+                logger.debug(f"نوع الوسائط {media_type} غير مدعوم للعلامة المائية")
                 return media_bytes
                 
         except Exception as e:
             logger.error(f"خطأ في معالجة الوسائط بالعلامة المائية: {e}")
             return media_bytes
+
+    def get_video_info(self, video_path: str) -> dict:
+        """الحصول على معلومات الفيديو"""
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return {}
+            
+            info = {
+                'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                'fps': cap.get(cv2.CAP_PROP_FPS),
+                'frame_count': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+                'duration': cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS) if cap.get(cv2.CAP_PROP_FPS) > 0 else 0
+            }
+            
+            cap.release()
+            return info
+            
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على معلومات الفيديو: {e}")
+            return {}
+
+    def test_video_processing(self, video_path: str) -> bool:
+        """اختبار قدرة النظام على معالجة الفيديوهات"""
+        try:
+            # اختبار OpenCV
+            cap = cv2.VideoCapture(video_path)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                cap.release()
+                if ret:
+                    logger.info("✅ OpenCV يعمل بشكل صحيح")
+                    return True
+            
+            logger.warning("⚠️ مشكلة في OpenCV")
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في اختبار معالجة الفيديو: {e}")
+            return False
