@@ -67,6 +67,17 @@ class Database:
                 )
             ''')
 
+            # User settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    timezone TEXT DEFAULT 'Asia/Riyadh',
+                    language TEXT DEFAULT 'ar',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
             # User sessions table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS user_sessions (
@@ -3362,6 +3373,80 @@ class Database:
             logger.error(f"خطأ في تحديث إعدادات الترجمة: {e}")
             return False
     
+    # ===== User Settings Management =====
+    
+    def get_user_settings(self, user_id):
+        """Get user settings including timezone and language"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT timezone, language 
+                FROM user_settings 
+                WHERE user_id = ?
+            ''', (user_id,))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'timezone': result[0],
+                    'language': result[1]
+                }
+            else:
+                # Create default settings for new user
+                self.create_user_settings(user_id)
+                return {
+                    'timezone': 'Asia/Riyadh',
+                    'language': 'ar'
+                }
+    
+    def create_user_settings(self, user_id):
+        """Create default user settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO user_settings (user_id, timezone, language)
+                VALUES (?, 'Asia/Riyadh', 'ar')
+            ''', (user_id,))
+            conn.commit()
+            
+    def update_user_timezone(self, user_id, timezone):
+        """Update user timezone setting"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure user settings exist
+            cursor.execute('''
+                INSERT OR IGNORE INTO user_settings (user_id, timezone, language)
+                VALUES (?, 'Asia/Riyadh', 'ar')
+            ''', (user_id,))
+            
+            # Update timezone
+            cursor.execute('''
+                UPDATE user_settings 
+                SET timezone = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            ''', (timezone, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+            
+    def update_user_language(self, user_id, language):
+        """Update user language setting"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure user settings exist
+            cursor.execute('''
+                INSERT OR IGNORE INTO user_settings (user_id, timezone, language)
+                VALUES (?, 'Asia/Riyadh', 'ar')
+            ''', (user_id,))
+            
+            # Update language
+            cursor.execute('''
+                UPDATE user_settings 
+                SET language = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            ''', (language, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+    
     def toggle_translation(self, task_id: int) -> bool:
         """Toggle translation on/off for a task"""
         try:
@@ -3736,3 +3821,83 @@ class Database:
                 
         except Exception as e:
             logger.error(f"خطأ في إضافة دعم أوضاع فلتر اللغة: {e}")
+    # ===== User Settings Methods =====
+    
+    def get_user_settings(self, user_id):
+        """Get user settings from database"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT timezone, language FROM user_settings 
+                    WHERE user_id = ?
+                """, (user_id,))
+                
+                result = cursor.fetchone()
+                
+                if result:
+                    return {
+                        "timezone": result[0],
+                        "language": result[1]
+                    }
+                else:
+                    # Return default values
+                    return {
+                        "timezone": "Asia/Riyadh",
+                        "language": "ar"
+                    }
+                    
+        except Exception as e:
+            print(f"خطأ في استرجاع إعدادات المستخدم: {e}")
+            return {"timezone": "Asia/Riyadh", "language": "ar"}
+    
+    def update_user_timezone(self, user_id, timezone):
+        """Update user timezone"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Try to update first
+                cursor.execute("""
+                    UPDATE user_settings SET timezone = ?
+                    WHERE user_id = ?
+                """, (timezone, user_id))
+                
+                # If no rows were affected, insert new record
+                if cursor.rowcount == 0:
+                    cursor.execute("""
+                        INSERT INTO user_settings (user_id, timezone, language)
+                        VALUES (?, ?, ?)
+                    """, (user_id, timezone, "ar"))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            print(f"خطأ في تحديث المنطقة الزمنية: {e}")
+            return False
+    
+    def update_user_language(self, user_id, language):
+        """Update user language"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Try to update first
+                cursor.execute("""
+                    UPDATE user_settings SET language = ?
+                    WHERE user_id = ?
+                """, (language, user_id))
+                
+                # If no rows were affected, insert new record
+                if cursor.rowcount == 0:
+                    cursor.execute("""
+                        INSERT INTO user_settings (user_id, timezone, language)
+                        VALUES (?, ?, ?)
+                    """, (user_id, "Asia/Riyadh", language))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            print(f"خطأ في تحديث اللغة: {e}")
+            return False
+

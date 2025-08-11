@@ -63,6 +63,8 @@ class SimpleTelegramBot:
             buttons = [
                 [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
                 [Button.inline("⚙️ الإعدادات", b"settings")],
+                [Button.inline("🌍 المنطقة الزمنية", b"timezone_settings")],
+                [Button.inline("🌐 تغيير اللغة", b"language_settings")],
                 [Button.inline("ℹ️ حول البوت", b"about")]
             ]
 
@@ -219,6 +221,16 @@ class SimpleTelegramBot:
                 await self.cancel_auth(event)
             elif data == "login": # Added handler for login button
                 await self.handle_relogin(event)
+            elif data == "timezone_settings":
+                await self.show_timezone_settings(event)
+            elif data == "language_settings":
+                await self.show_language_settings(event)
+            elif data.startswith("set_timezone_"):
+                timezone = data.replace("set_timezone_", "")
+                await self.set_user_timezone(event, timezone)
+            elif data.startswith("set_language_"):
+                language = data.replace("set_language_", "")
+                await self.set_user_language(event, language)
             elif data.startswith("advanced_filters_"): # Handler for advanced filters
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -7936,3 +7948,110 @@ def run_simple_bot():
 
 if __name__ == '__main__':
     run_simple_bot()
+    # ===== User Settings Functions =====
+    
+    async def show_timezone_settings(self, event):
+        """Show timezone settings menu"""
+        user_id = event.sender_id
+        user_settings = self.db.get_user_settings(user_id)
+        current_timezone = user_settings.get("timezone", "Asia/Riyadh")
+        
+        # Common timezone options for Arabic users
+        timezones = [
+            ("Asia/Riyadh", "🇸🇦 السعودية (GMT+3)"),
+            ("Asia/Dubai", "🇦🇪 الإمارات (GMT+4)"),
+            ("Asia/Kuwait", "🇰🇼 الكويت (GMT+3)"),
+            ("Asia/Qatar", "🇶🇦 قطر (GMT+3)"),
+            ("Asia/Bahrain", "🇧🇭 البحرين (GMT+3)"),
+            ("Asia/Baghdad", "🇮🇶 العراق (GMT+3)"),
+            ("Asia/Damascus", "🇸🇾 سوريا (GMT+3)"),
+            ("Asia/Beirut", "🇱🇧 لبنان (GMT+2)"),
+            ("Africa/Cairo", "🇪🇬 مصر (GMT+2)"),
+            ("Africa/Casablanca", "🇲🇦 المغرب (GMT+1)"),
+            ("Africa/Tunis", "🇹🇳 تونس (GMT+1)"),
+            ("Africa/Algiers", "🇩🇿 الجزائر (GMT+1)"),
+            ("Asia/Amman", "🇯🇴 الأردن (GMT+3)"),
+            ("Asia/Jerusalem", "🇵🇸 فلسطين (GMT+2)"),
+            ("Europe/London", "🇬🇧 لندن (GMT+0)"),
+            ("Europe/Paris", "🇫🇷 باريس (GMT+1)"),
+            ("Europe/Berlin", "🇩🇪 برلين (GMT+1)"),
+            ("America/New_York", "🇺🇸 نيويورك (GMT-5)"),
+            ("America/Los_Angeles", "🇺🇸 لوس أنجلوس (GMT-8)"),
+            ("Asia/Tokyo", "🇯🇵 طوكيو (GMT+9)")
+        ]
+        
+        buttons = []
+        for tz_code, tz_name in timezones:
+            status = "✅" if tz_code == current_timezone else "⚪"
+            buttons.append([Button.inline(f"{status} {tz_name}", f"set_timezone_{tz_code}")])
+        
+        buttons.append([Button.inline("🔙 القائمة الرئيسية", "main_menu")])
+        
+        await event.edit(
+            f"🌍 **إعدادات المنطقة الزمنية**\\n\\n"
+            f"📍 **المنطقة الزمنية الحالية**: {current_timezone}\\n\\n"
+            f"🕐 **أهمية المنطقة الزمنية**:\\n"
+            f"• تؤثر على فلتر ساعات العمل والنوم\\n"
+            f"• تحدد أوقات تشغيل وإيقاف المهام\\n"
+            f"• تؤثر على فلتر الأيام حسب توقيتك المحلي\\n\\n"
+            f"اختر منطقتك الزمنية:",
+            buttons=buttons
+        )
+        
+    async def show_language_settings(self, event):
+        """Show language settings menu"""
+        user_id = event.sender_id
+        user_settings = self.db.get_user_settings(user_id)
+        current_language = user_settings.get("language", "ar")
+        
+        languages = [
+            ("ar", "🇸🇦 العربية"),
+            ("en", "🇺🇸 English"),
+            ("fr", "🇫🇷 Français"),
+            ("es", "🇪🇸 Español"),
+            ("de", "🇩🇪 Deutsch"),
+            ("it", "🇮🇹 Italiano"),
+            ("ru", "🇷🇺 Русский"),
+            ("tr", "🇹🇷 Türkçe"),
+            ("fa", "🇮🇷 فارسی"),
+            ("ur", "🇵🇰 اردو")
+        ]
+        
+        buttons = []
+        for lang_code, lang_name in languages:
+            status = "✅" if lang_code == current_language else "⚪"
+            buttons.append([Button.inline(f"{status} {lang_name}", f"set_language_{lang_code}")])
+        
+        buttons.append([Button.inline("🔙 القائمة الرئيسية", "main_menu")])
+        
+        await event.edit(
+            f"🌐 **إعدادات اللغة**\\n\\n"
+            f"📝 **اللغة الحالية**: {current_language}\\n\\n"
+            f"💬 **ملاحظة**: حالياً البوت يعمل باللغة العربية فقط\\n"
+            f"هذا الإعداد محفوظ للمستقبل عند إضافة دعم لغات أخرى\\n\\n"
+            f"اختر لغتك المفضلة:",
+            buttons=buttons
+        )
+        
+    async def set_user_timezone(self, event, timezone):
+        """Set user timezone"""
+        user_id = event.sender_id
+        
+        success = self.db.update_user_timezone(user_id, timezone)
+        if success:
+            await event.answer(f"✅ تم تحديث المنطقة الزمنية إلى: {timezone}")
+            await self.show_timezone_settings(event)
+        else:
+            await event.answer("❌ فشل في تحديث المنطقة الزمنية")
+            
+    async def set_user_language(self, event, language):
+        """Set user language"""
+        user_id = event.sender_id
+        
+        success = self.db.update_user_language(user_id, language)
+        if success:
+            await event.answer(f"✅ تم تحديث اللغة إلى: {language}")
+            await self.show_language_settings(event)
+        else:
+            await event.answer("❌ فشل في تحديث اللغة")
+
