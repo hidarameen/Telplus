@@ -1045,30 +1045,34 @@ class UserbotService:
             logger.error(f"خطأ في فحص فلتر الوسائط: {e}")
             return True  # Default to allowed on error
 
-    def is_admin_allowed(self, task_id, sender_id):
-        """Check if message sender is allowed by admin filters"""
+    async def is_admin_allowed(self, task_id, sender_id):
+        """Check if message sender is allowed by admin filters using new logic"""
         try:
             from database.database import Database
             db = Database()
 
-            logger.error(f"🚨 [ADMIN FILTER DEBUG] المهمة: {task_id}, المرسل: {sender_id}")
+            logger.info(f"👮‍♂️ [ADMIN FILTER] فحص المهمة: {task_id}, المرسل: {sender_id}")
 
             # Check if admin filter is enabled for this task
             admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
-            logger.error(f"🚨 [ADMIN FILTER DEBUG] فلتر المشرفين مُفعل: {admin_filter_enabled}")
+            logger.info(f"👮‍♂️ [ADMIN FILTER] فلتر المشرفين مُفعل: {admin_filter_enabled}")
 
             if not admin_filter_enabled:
-                logger.error(f"🚨 فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
+                logger.info(f"👮‍♂️ فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
                 return True
 
-            # DEBUG: Get all allowed admins for this task
-            allowed_admins = db.get_task_allowed_admins(task_id)
-            logger.error(f"🚨 [ADMIN FILTER DEBUG] جميع المشرفين المسموح لهم للمهمة {task_id}: {allowed_admins}")
-
-            # Check if sender is in allowed admin list
-            is_allowed = db.is_admin_allowed(task_id, sender_id)
-            logger.error(f"🚨 [ADMIN FILTER DEBUG] نتيجة فحص قاعدة البيانات: {is_allowed}")
-            logger.error(f"🚨 فحص فلتر المشرفين: المهمة {task_id}, المرسل {sender_id}, مسموح: {is_allowed}")
+            # Create a fake message object for the new filter logic
+            fake_message = type('FakeMessage', (), {
+                'sender_id': sender_id,
+                'post_author': None,  # No author signature in this context
+                'from_id': None
+            })()
+            
+            # Use the new admin filter logic
+            is_blocked = await self._check_admin_filter(task_id, fake_message)
+            is_allowed = not is_blocked  # Invert because _check_admin_filter returns True if blocked
+            
+            logger.info(f"👮‍♂️ [ADMIN FILTER] نتيجة فحص جديد: المرسل {sender_id}, محظور: {is_blocked}, مسموح: {is_allowed}")
             return is_allowed
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
