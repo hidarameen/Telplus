@@ -6417,8 +6417,12 @@ class SimpleTelegramBot:
                     await event.respond("❌ يجب أن تكون الصورة بصيغة PNG, JPG, JPEG أو WebP")
                     return
                 
+                # Create watermark_images directory if it doesn't exist
+                import os
+                os.makedirs("watermark_images", exist_ok=True)
+                
                 # Download file
-                download_path = await event.download_media(file=file, path="watermark_images/")
+                download_path = await event.download_media(file="watermark_images/")
                 
                 if download_path:
                     # Update image path in database
