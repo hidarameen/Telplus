@@ -306,7 +306,7 @@ class UserbotService:
 
                         # Check admin filter first (if enabled)
                         logger.error(f"🚨 === بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id} ===")
-                        admin_allowed = self.is_admin_allowed(task_id, event.sender_id)
+                        admin_allowed = await self.is_admin_allowed_with_message(task_id, event.message)
                         logger.error(f"🚨 === نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed} ===")
 
                         # Check media filter
@@ -1043,6 +1043,34 @@ class UserbotService:
             return is_allowed
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر الوسائط: {e}")
+            return True  # Default to allowed on error
+
+    async def is_admin_allowed_with_message(self, task_id, message):
+        """Check if message sender is allowed by admin filters using the actual message object"""
+        try:
+            from database.database import Database
+            db = Database()
+
+            logger.info(f"👮‍♂️ [ADMIN FILTER] فحص المهمة: {task_id}, المرسل: {message.sender_id}")
+
+            # Check if admin filter is enabled for this task
+            admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
+            logger.info(f"👮‍♂️ [ADMIN FILTER] فلتر المشرفين مُفعل: {admin_filter_enabled}")
+
+            if not admin_filter_enabled:
+                logger.info(f"👮‍♂️ فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
+                return True
+
+            # Use the actual message object with proper author signature
+            is_blocked = await self._check_admin_filter(task_id, message)
+            is_allowed = not is_blocked  # Invert because _check_admin_filter returns True if blocked
+            
+            logger.info(f"👮‍♂️ [ADMIN FILTER] نتيجة فحص جديد: المرسل {message.sender_id}, محظور: {is_blocked}, مسموح: {is_allowed}")
+            return is_allowed
+        except Exception as e:
+            logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
+            import traceback
+            logger.error(f"تفاصيل الخطأ: {traceback.format_exc()}")
             return True  # Default to allowed on error
 
     async def is_admin_allowed(self, task_id, sender_id):

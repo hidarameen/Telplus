@@ -8,6 +8,13 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes - August 11, 2025
 
+- **CRITICAL ADMIN FILTER BUG FIX**: Fixed major issue where blocked admins' messages were still being forwarded despite proper signature detection:
+  - **ROOT CAUSE**: The `is_admin_allowed` function was creating a fake message object without the actual `post_author` field
+  - **SOLUTION**: Added new `is_admin_allowed_with_message` function that passes the real message object with signature
+  - **IMPACT**: Admin filtering now properly blocks messages from admins marked as blocked (is_allowed=0) in the database
+  - **VERIFICATION**: System now correctly identifies and blocks admin "H" (ID: 6602517122) when signature is enabled
+  - **DATE**: August 11, 2025
+
 - **ADMIN FILTER AUTHOR SIGNATURE SYSTEM**: Revolutionary enhancement enabling admin filtering for channel messages using Telegram's built-in Author Signature feature:
   - **NATIVE AUTHOR SIGNATURE**: Uses Telegram's official `post_author` property instead of text parsing
   - **DUAL DETECTION METHOD**: Uses sender ID for groups/supergroups and Author Signature for channels
