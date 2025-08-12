@@ -900,7 +900,7 @@ class SimpleTelegramBot:
                 if len(parts) >= 4:
                     try:
                         task_id = int(parts[3])
-                        await self.toggle_inline_button_filter(event, task_id)
+                        await self.toggle_inline_button_block_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الأزرار: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -981,7 +981,12 @@ class SimpleTelegramBot:
                     try:
                         task_id = int(parts[2])
                         day_number = int(parts[3])
-                        await self.toggle_day_filter(event, task_id, day_number)
+                        # Ensure day_number is within valid range (0-6)
+                        if 0 <= day_number <= 6:
+                            await self.toggle_day_filter(event, task_id, day_number)
+                        else:
+                            logger.error(f"❌ رقم اليوم خارج النطاق المسموح: {day_number}")
+                            await event.answer("❌ رقم اليوم غير صحيح")
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فلتر اليوم: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -1554,7 +1559,7 @@ class SimpleTelegramBot:
                 if len(parts) >= 4:
                     try:
                         task_id = int(parts[3])
-                        await self.toggle_inline_button_block(event, task_id)
+                        await self.toggle_inline_button_block_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الأزرار: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -1879,7 +1884,7 @@ class SimpleTelegramBot:
         days = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
         day_buttons = []
         
-        for i, day in enumerate(days, 1):
+        for i, day in enumerate(days):  # Use 0-based indexing (Monday=0, Sunday=6)
             is_selected = any(df['day_number'] == i for df in day_filters)
             icon = "✅" if is_selected else "❌"
             day_buttons.append(Button.inline(f"{icon} {day}", f"toggle_day_{task_id}_{i}"))
@@ -1900,11 +1905,16 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
+        # Add timestamp to force UI refresh
+        import time
+        timestamp = int(time.time()) % 100
+        
         await event.edit(
             f"📅 فلتر الأيام - المهمة #{task_id}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"📋 الأيام المحددة: {len(day_filters)}/7\n\n"
-            f"اختر الأيام المسموح بالتوجيه فيها:",
+            f"اختر الأيام المسموح بالتوجيه فيها:\n"
+            f"⏰ آخر تحديث: {timestamp}",
             buttons=buttons
         )
 
@@ -1928,7 +1938,8 @@ class SimpleTelegramBot:
             
             if success:
                 days = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
-                await event.answer(f"✅ {action} {days[day_number]}")
+                day_name = days[day_number] if 0 <= day_number < len(days) else f"اليوم {day_number}"
+                await event.answer(f"✅ {action} {day_name}")
                 
                 # Force refresh UserBot tasks
                 try:
@@ -1938,14 +1949,12 @@ class SimpleTelegramBot:
                 except Exception as e:
                     logger.error(f"خطأ في تحديث مهام UserBot: {e}")
                 
-                # Refresh the menu - catch content modification error
-                try:
-                    await self.show_day_filters(event, task_id)
-                except Exception as e:
-                    if "Content of the message was not modified" in str(e):
-                        logger.debug("المحتوى لم يتغير، تجاهل الخطأ")
-                    else:
-                        raise e
+                # Force refresh with timestamp to avoid "Content not modified" error
+                import time
+                timestamp = int(time.time() * 1000) % 10000
+                
+                # Simple refresh - the timestamp in show_day_filters should handle it
+                await self.show_day_filters(event, task_id)
             else:
                 await event.answer("❌ فشل في التحديث")
                 
@@ -2733,6 +2742,10 @@ class SimpleTelegramBot:
             buttons=buttons
         )
 
+    async def show_working_hours(self, event, task_id):
+        """Show working hours schedule interface"""
+        return await self.show_working_hours_schedule(event, task_id)
+    
     async def show_working_hours_schedule(self, event, task_id):
         """Show working hours schedule interface"""
         user_id = event.sender_id
@@ -2781,11 +2794,16 @@ class SimpleTelegramBot:
         else:  # sleep_hours
             description = "🟢 الساعات الخضراء: سيتم حظر الرسائل (ساعات نوم)\n🔴 الساعات الحمراء: سيتم توجيه الرسائل"
         
+        # Add timestamp to force UI refresh
+        import time
+        timestamp = int(time.time()) % 100
+        
         await event.edit(
             f"🕐 **جدولة ساعات العمل** - المهمة #{task_id}\n\n"
             f"⚙️ **الوضع:** {'🏢 ساعات العمل' if mode == 'work_hours' else '😴 ساعات النوم'}\n\n"
             f"{description}\n\n"
-            f"اضغط على الساعة لتبديل حالتها:",
+            f"اضغط على الساعة لتبديل حالتها:\n"
+            f"⏰ آخر تحديث: {timestamp}",
             buttons=buttons
         )
 
@@ -3027,12 +3045,17 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
+        # Add timestamp to force UI refresh
+        import time
+        timestamp = int(time.time()) % 100
+        
         await event.edit(
             f"🌍 فلتر اللغات - المهمة #{task_id}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"🗣️ عدد اللغات: {len(languages)}\n"
             f"⚙️ الوضع: {mode_text}\n\n"
-            f"💡 هذا الفلتر يتحكم في الرسائل حسب لغة النص",
+            f"💡 هذا الفلتر يتحكم في الرسائل حسب لغة النص\n"
+            f"⏰ آخر تحديث: {timestamp}",
             buttons=buttons
         )
 
@@ -3154,15 +3177,52 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع لفلتر التكرار", f"duplicate_filter_{task_id}")]
         ]
         
+        # Add timestamp to force UI refresh
+        import time
+        timestamp = int(time.time()) % 100
+        
         await event.edit(
             f"⚙️ إعدادات فلتر التكرار - المهمة #{task_id}\n\n"
             f"📏 نسبة التشابه: {threshold}%\n"
             f"⏱️ النافذة الزمنية: {time_window} ساعة\n"
             f"📝 فحص النص: {'مفعل' if check_text else 'معطل'}\n"
             f"🎬 فحص الوسائط: {'مفعل' if check_media else 'معطل'}\n\n"
-            f"💡 اضبط هذه الإعدادات لتحكم أدق في كشف التكرار",
+            f"💡 اضبط هذه الإعدادات لتحكم أدق في كشف التكرار\n"
+            f"⏰ آخر تحديث: {timestamp}",
             buttons=buttons
         )
+
+    async def toggle_inline_button_block_mode(self, event, task_id):
+        """Toggle inline button filter mode between block message and remove buttons"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current setting and toggle it
+            current_setting = self.db.get_inline_button_filter_setting(task_id)
+            new_setting = not current_setting  # Toggle: False=remove buttons, True=block message
+            
+            success = self.db.set_inline_button_filter_setting(task_id, new_setting)
+            
+            if success:
+                mode_text = "حظر الرسائل" if new_setting else "حذف الأزرار"
+                await event.answer(f"✅ تم تغيير الوضع إلى: {mode_text}")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the display
+                await self.show_inline_button_filter(event, task_id)
+            else:
+                await event.answer("❌ فشل في تغيير الوضع")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل وضع فلتر الأزرار الإنلاين: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
 
     async def show_inline_button_filter(self, event, task_id):
         """Show inline button filter settings"""
@@ -3187,11 +3247,16 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
+        # Add timestamp to force UI refresh
+        import time
+        timestamp = int(time.time()) % 100
+        
         await event.edit(
             f"🔘 فلتر الأزرار الإنلاين - المهمة #{task_id}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"⚙️ الوضع: {mode_text}\n\n"
-            f"💡 هذا الفلتر يتحكم في الرسائل التي تحتوي على أزرار إنلاين",
+            f"💡 هذا الفلتر يتحكم في الرسائل التي تحتوي على أزرار إنلاين\n"
+            f"⏰ آخر تحديث: {timestamp}",
             buttons=buttons
         )
 
@@ -9271,12 +9336,7 @@ class SimpleTelegramBot:
                 await self._refresh_userbot_tasks(user_id)
                 
                 # Refresh the language filter display
-                try:
-                    await self.show_language_filter(event, task_id)
-                except Exception as e:
-                    if "Content of the message was not modified" not in str(e):
-                        raise e
-                    logger.debug("المحتوى لم يتغير، وضع اللغة محدث بنجاح")
+                await self.show_language_filters(event, task_id)
             else:
                 await event.answer("❌ فشل في تغيير الوضع")
                 
