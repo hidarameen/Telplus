@@ -1614,7 +1614,7 @@ class SimpleTelegramBot:
                 if len(parts) >= 4:
                     try:
                         task_id = int(parts[3])
-                        await self.schedule_working_hours(event, task_id)
+                        await self.show_working_hours_schedule(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لجدولة ساعات العمل: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -1624,7 +1624,7 @@ class SimpleTelegramBot:
                     try:
                         task_id = int(parts[2])
                         hour = int(parts[3])
-                        await self.toggle_working_hour(event, task_id, hour)
+                        await self.toggle_hour(event, task_id, hour)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة أو الساعة: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -2807,35 +2807,7 @@ class SimpleTelegramBot:
             buttons=buttons
         )
 
-    async def toggle_working_hour(self, event, task_id, hour):
-        """Toggle a specific working hour"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        try:
-            # Toggle the hour
-            current_state = self.db.toggle_working_hour(task_id, hour)
-            status = "مفعلة" if current_state else "معطلة"
-            await event.answer(f"✅ الساعة {hour:02d}:00 أصبحت {status}")
-            
-            # Force refresh UserBot tasks
-            try:
-                from userbot_service.userbot import userbot_instance
-                if user_id in userbot_instance.clients:
-                    await userbot_instance.refresh_user_tasks(user_id)
-            except Exception as e:
-                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
-            
-            # Refresh the schedule display
-            await self.show_working_hours_schedule(event, task_id)
-            
-        except Exception as e:
-            logger.error(f"خطأ في تبديل الساعة {hour} للمهمة {task_id}: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+
 
     async def select_all_hours(self, event, task_id):
         """Select all working hours"""
@@ -2856,8 +2828,13 @@ class SimpleTelegramBot:
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
             
-            # Refresh the schedule display
-            await self.show_working_hours_schedule(event, task_id)
+            # Refresh the schedule display with try-catch for content unchanged error
+            try:
+                await self.show_working_hours_schedule(event, task_id)
+            except Exception as e:
+                if "Content of the message was not modified" not in str(e):
+                    raise e
+                logger.debug("المحتوى لم يتغير، جميع الساعات محدثة بنجاح")
             
         except Exception as e:
             logger.error(f"خطأ في تحديد جميع الساعات للمهمة {task_id}: {e}")
@@ -2882,8 +2859,13 @@ class SimpleTelegramBot:
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
             
-            # Refresh the schedule display
-            await self.show_working_hours_schedule(event, task_id)
+            # Refresh the schedule display with try-catch for content unchanged error
+            try:
+                await self.show_working_hours_schedule(event, task_id)
+            except Exception as e:
+                if "Content of the message was not modified" not in str(e):
+                    raise e
+                logger.debug("المحتوى لم يتغير، جميع الساعات محدثة بنجاح")
             
         except Exception as e:
             logger.error(f"خطأ في إلغاء جميع الساعات للمهمة {task_id}: {e}")
