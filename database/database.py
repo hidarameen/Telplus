@@ -3130,6 +3130,38 @@ class Database:
 
             return False
 
+    def set_button_filter_mode(self, task_id: int, mode: str):
+        """Set button filter mode (remove_buttons or block_message)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure button filter settings exist
+            cursor.execute('INSERT OR IGNORE INTO task_inline_button_filters (task_id) VALUES (?)', (task_id,))
+            cursor.execute('''
+                UPDATE task_inline_button_filters 
+                SET action_mode = ?
+                WHERE task_id = ?
+            ''', (mode, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def set_duplicate_settings(self, task_id: int, **kwargs):
+        """Set duplicate filter settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure duplicate settings exist
+            cursor.execute('INSERT OR IGNORE INTO task_duplicate_settings (task_id) VALUES (?)', (task_id,))
+            
+            # Update the settings
+            if 'repeat_mode_enabled' in kwargs:
+                cursor.execute('''
+                    UPDATE task_duplicate_settings 
+                    SET repeat_mode_enabled = ?
+                    WHERE task_id = ?
+                ''', (kwargs['repeat_mode_enabled'], task_id))
+            
+            conn.commit()
+            return cursor.rowcount > 0
+
     # ===== Inline Button and Forwarded Message Filters =====
 
     def get_inline_button_filter_setting(self, task_id: int) -> bool:

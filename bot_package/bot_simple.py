@@ -8868,7 +8868,7 @@ class SimpleTelegramBot:
         else:
             await event.answer("❌ فشل في تغيير وضع الفلتر")
 
-    async def toggle_admin(self, event, task_id, admin_id):
+    async def toggle_admin(self, event, task_id, admin_id, source_chat_id=None):
         """Toggle admin filter status"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
@@ -8886,8 +8886,11 @@ class SimpleTelegramBot:
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
             
-            # Refresh the admin list display
-            await self.show_admin_list(event, task_id)
+            # Refresh the appropriate admin list display
+            if source_chat_id:
+                await self.show_source_admins(event, task_id, source_chat_id)
+            else:
+                await self.show_admin_list(event, task_id)
         else:
             await event.answer("❌ فشل في تحديث إعدادات المشرف")
 
@@ -8928,7 +8931,7 @@ class SimpleTelegramBot:
         current_mode = current_settings.get('action_mode', 'remove_buttons')
         new_mode = 'block_message' if current_mode == 'remove_buttons' else 'remove_buttons'
         
-        success = self.db.update_button_filter_mode(task_id, new_mode)
+        success = self.db.set_button_filter_mode(task_id, new_mode)
         
         if success:
             mode_names = {
@@ -8990,7 +8993,7 @@ class SimpleTelegramBot:
         current_repeat_mode = current_settings.get('repeat_mode_enabled', False)
         new_repeat_mode = not current_repeat_mode
         
-        success = self.db.update_duplicate_settings(task_id, repeat_mode_enabled=new_repeat_mode)
+        success = self.db.set_duplicate_settings(task_id, repeat_mode_enabled=new_repeat_mode)
         
         if success:
             mode_text = "تفعيل وضع التكرار" if new_repeat_mode else "تعطيل وضع التكرار"
@@ -9000,9 +9003,360 @@ class SimpleTelegramBot:
             await self._refresh_userbot_tasks(user_id)
             
             # Refresh the duplicate filter display
-            await self.show_duplicate_filter(event, task_id)
+            try:
+                await self.show_duplicate_filter(event, task_id)
+            except Exception as e:
+                if "Content of the message was not modified" not in str(e):
+                    raise e
+                logger.debug("المحتوى لم يتغير، وضع التكرار محدث بنجاح")
         else:
             await event.answer("❌ فشل في تغيير وضع التكرار")
+
+    async def toggle_hour(self, event, task_id, hour):
+        """Toggle specific hour in working hours schedule"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current working hours
+            current_settings = self.db.get_working_hours(task_id)
+            schedule = current_settings.get('schedule', {})
+            
+            # Toggle the hour
+            current_state = schedule.get(hour, False)
+            new_state = not current_state
+            
+            # Update in database
+            success = self.db.set_working_hour_schedule(task_id, hour, new_state)
+            
+            if success:
+                action = "تم تفعيل" if new_state else "تم تعطيل"
+                await event.answer(f"✅ {action} الساعة {hour}")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Force refresh by editing with updated content and timestamp
+                try:
+                    await self.show_working_hours(event, task_id)
+                except Exception as e:
+                    if "Content of the message was not modified" not in str(e):
+                        raise e
+                    # If content unchanged, just answer user
+                    logger.debug("المحتوى لم يتغير، نص الساعة محدث بنجاح")
+            else:
+                await event.answer("❌ فشل في تحديث الساعة")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل الساعة {hour} للمهمة {task_id}: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def select_all_hours(self, event, task_id, select_all=True):
+        """Select or deselect all hours"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Update all hours
+            for hour in range(24):
+                self.db.set_working_hour_schedule(task_id, hour, select_all)
+            
+            action = "تم تحديد جميع الساعات" if select_all else "تم إلغاء تحديد جميع الساعات"
+            await event.answer(f"✅ {action}")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Force refresh by editing with updated content
+            try:
+                await self.show_working_hours(event, task_id)
+            except Exception as e:
+                if "Content of the message was not modified" not in str(e):
+                    raise e
+                # If content unchanged, operation was successful anyway
+                logger.debug("المحتوى لم يتغير، جميع الساعات محدثة بنجاح")
+            
+        except Exception as e:
+            action = "تحديد" if select_all else "إلغاء"
+            logger.error(f"خطأ في {action} جميع الساعات للمهمة {task_id}: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def show_source_admins(self, event, task_id, source_chat_id):
+        """Show admins for a specific source chat"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get admins from UserBot
+            from userbot_service.userbot import userbot_instance
+            if user_id not in userbot_instance.clients:
+                await event.answer("❌ UserBot غير متصل")
+                return
+                
+            # Get chat admins
+            client = userbot_instance.clients[user_id]
+            try:
+                from telethon.tl.types import ChannelParticipantsAdmins
+                admins = await client.get_participants(int(source_chat_id), filter=ChannelParticipantsAdmins())
+                
+                if not admins:
+                    await event.answer("❌ لم يتم العثور على مشرفين")
+                    return
+                    
+                # Get current admin filters
+                admin_filters = self.db.get_admin_filters(task_id)
+                filtered_admin_ids = {af['admin_user_id'] for af in admin_filters}
+                
+                message = f"👥 مشرفو المصدر {source_chat_id}\n\n"
+                
+                buttons = []
+                for admin in admins[:10]:  # Limit to 10 admins
+                    if admin.bot:
+                        continue  # Skip bots
+                        
+                    # Check if admin is filtered
+                    is_filtered = admin.id in filtered_admin_ids
+                    icon = "✅" if is_filtered else "❌"
+                    
+                    name = f"{admin.first_name or ''} {admin.last_name or ''}".strip()
+                    if not name:
+                        name = admin.username or f"User {admin.id}"
+                        
+                    button_text = f"{icon} {name}"
+                    if len(button_text) > 30:
+                        button_text = button_text[:27] + "..."
+                        
+                    buttons.append([Button.inline(button_text, f"toggle_admin_{task_id}_{admin.id}_{source_chat_id}")])
+                
+                buttons.append([
+                    Button.inline("🔄 تحديث القائمة", f"refresh_source_admins_{task_id}_{source_chat_id}"),
+                    Button.inline("🔙 رجوع", f"admin_filter_{task_id}")
+                ])
+                
+                await event.edit(message, buttons=buttons)
+                
+            except Exception as e:
+                logger.error(f"خطأ في جلب مشرفي المصدر {source_chat_id}: {e}")
+                await event.answer("❌ فشل في جلب قائمة المشرفين")
+                
+        except Exception as e:
+            logger.error(f"خطأ في عرض مشرفي المصدر: {e}")
+            await event.answer("❌ حدث خطأ")
+
+    async def refresh_source_admin_list(self, event, task_id, source_chat_id):
+        """Refresh the admin list for a source"""
+        await self.show_source_admins(event, task_id, source_chat_id)
+
+    async def toggle_admin(self, event, task_id, admin_id, source_chat_id):
+        """Toggle admin filter for specific admin"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Check if admin is currently filtered
+            admin_filters = self.db.get_admin_filters(task_id)
+            is_filtered = any(af['admin_user_id'] == int(admin_id) for af in admin_filters)
+            
+            if is_filtered:
+                # Remove admin filter
+                success = self.db.remove_admin_filter(task_id, int(admin_id))
+                action = "تم إلغاء فلترة"
+            else:
+                # Add admin filter
+                success = self.db.add_admin_filter(task_id, int(admin_id))
+                action = "تم فلترة"
+            
+            if success:
+                await event.answer(f"✅ {action} المشرف")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the admin list
+                await self.show_source_admins(event, task_id, source_chat_id)
+            else:
+                await event.answer("❌ فشل في تحديث الفلتر")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل فلتر المشرف {admin_id}: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def toggle_language(self, event, task_id, language_code):
+        """Toggle specific language in language filter"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current language filters
+            language_filters = self.db.get_language_filters(task_id)
+            is_selected = any(lf['language_code'] == language_code for lf in language_filters)
+            
+            if is_selected:
+                # Remove language
+                success = self.db.remove_language_filter(task_id, language_code)
+                action = "تم إلغاء تحديد"
+            else:
+                # Add language
+                success = self.db.add_language_filter(task_id, language_code)
+                action = "تم تحديد"
+            
+            if success:
+                language_names = {
+                    'ar': 'العربية', 'en': 'الإنجليزية', 'es': 'الإسبانية',
+                    'fr': 'الفرنسية', 'de': 'الألمانية', 'ru': 'الروسية',
+                    'tr': 'التركية', 'fa': 'الفارسية', 'ur': 'الأردية'
+                }
+                lang_name = language_names.get(language_code, language_code)
+                await event.answer(f"✅ {action} {lang_name}")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the language filter display
+                try:
+                    await self.show_language_filter(event, task_id)
+                except Exception as e:
+                    if "Content of the message was not modified" not in str(e):
+                        raise e
+                    logger.debug("المحتوى لم يتغير، اللغة محدثة بنجاح")
+            else:
+                await event.answer("❌ فشل في تحديث اللغة")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل فلتر اللغة {language_code}: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def toggle_language_mode(self, event, task_id):
+        """Toggle language filter mode between allow and block"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current mode and toggle
+            current_settings = self.db.get_language_filter_settings(task_id)
+            current_mode = current_settings.get('filter_mode', 'allow')
+            new_mode = 'block' if current_mode == 'allow' else 'allow'
+            
+            success = self.db.set_language_filter_mode(task_id, new_mode)
+            
+            if success:
+                mode_text = "السماح" if new_mode == 'allow' else "الحظر"
+                await event.answer(f"✅ تم تغيير الوضع إلى {mode_text}")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the language filter display
+                try:
+                    await self.show_language_filter(event, task_id)
+                except Exception as e:
+                    if "Content of the message was not modified" not in str(e):
+                        raise e
+                    logger.debug("المحتوى لم يتغير، وضع اللغة محدث بنجاح")
+            else:
+                await event.answer("❌ فشل في تغيير الوضع")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل وضع فلتر اللغة: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def toggle_forwarding_filter_mode(self, event, task_id):
+        """Toggle forwarding filter mode"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current setting and toggle
+            current_setting = self.db.get_forwarded_message_filter_setting(task_id)
+            new_setting = not current_setting
+            
+            success = self.db.set_forwarded_message_filter(task_id, new_setting)
+            
+            if success:
+                action = "تم تفعيل" if new_setting else "تم تعطيل"
+                await event.answer(f"✅ {action} فلتر الرسائل المُعاد توجيهها")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the filter display
+                try:
+                    await self.show_forwarded_filter(event, task_id)
+                except Exception as e:
+                    if "Content of the message was not modified" not in str(e):
+                        raise e
+                    logger.debug("المحتوى لم يتغير، فلتر التوجيه محدث بنجاح")
+            else:
+                await event.answer("❌ فشل في تغيير الفلتر")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل فلتر الرسائل المُعاد توجيهها: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def toggle_transparent_button_filter(self, event, task_id):
+        """Toggle transparent button filter"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current setting and toggle
+            current_setting = self.db.get_inline_button_filter_setting(task_id)
+            new_setting = not current_setting
+            
+            success = self.db.set_inline_button_filter(task_id, new_setting)
+            
+            if success:
+                action = "تم تفعيل" if new_setting else "تم تعطيل"
+                await event.answer(f"✅ {action} فلتر الأزرار الشفافة")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the filter display - use generic filter menu
+                try:
+                    await self.show_advanced_filters(event, task_id)
+                except Exception as e:
+                    if "Content of the message was not modified" not in str(e):
+                        raise e
+                    logger.debug("المحتوى لم يتغير، فلتر الأزرار الشفافة محدث بنجاح")
+            else:
+                await event.answer("❌ فشل في تغيير الفلتر")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل فلتر الأزرار الشفافة: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
 
 async def run_simple_bot():
     """Run the simple telegram bot"""
