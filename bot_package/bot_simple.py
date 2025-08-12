@@ -2772,7 +2772,7 @@ class SimpleTelegramBot:
             row_buttons = []
             for col in range(6):
                 hour = row * 6 + col
-                is_enabled = schedule.get(str(hour), False)
+                is_enabled = schedule.get(hour, False)
                 status = "🟢" if is_enabled else "🔴"
                 row_buttons.append(
                     Button.inline(f"{status}{hour:02d}", f"toggle_hour_{task_id}_{hour}")
@@ -2819,9 +2819,8 @@ class SimpleTelegramBot:
             return
         
         try:
-            # Enable all hours using the new schedule method
-            for hour in range(24):
-                self.db.set_working_hour_schedule(task_id, hour, True)
+            # Enable all hours using database function
+            self.db.set_all_working_hours(task_id, True)
             
             await event.answer("✅ تم تحديد جميع الساعات")
             
@@ -2850,9 +2849,8 @@ class SimpleTelegramBot:
             return
         
         try:
-            # Disable all hours using the new schedule method
-            for hour in range(24):
-                self.db.set_working_hour_schedule(task_id, hour, False)
+            # Disable all hours using database function
+            self.db.set_all_working_hours(task_id, False)
             
             await event.answer("✅ تم إلغاء تحديد جميع الساعات")
             
@@ -9063,30 +9061,24 @@ class SimpleTelegramBot:
             current_settings = self.db.get_working_hours(task_id)
             schedule = current_settings.get('schedule', {})
             
-            # Toggle the hour
-            current_state = schedule.get(hour, False)
-            new_state = not current_state
+            # Toggle the hour using database function directly
+            new_state = self.db.toggle_working_hour(task_id, hour)
+            success = True
             
-            # Update in database
-            success = self.db.set_working_hour_schedule(task_id, hour, new_state)
+            action = "تم تفعيل" if new_state else "تم تعطيل"
+            await event.answer(f"✅ {action} الساعة {hour:02d}:00")
             
-            if success:
-                action = "تم تفعيل" if new_state else "تم تعطيل"
-                await event.answer(f"✅ {action} الساعة {hour}")
-                
-                # Force refresh UserBot tasks
-                await self._refresh_userbot_tasks(user_id)
-                
-                # Force refresh by editing with updated content and timestamp
-                try:
-                    await self.show_working_hours(event, task_id)
-                except Exception as e:
-                    if "Content of the message was not modified" not in str(e):
-                        raise e
-                    # If content unchanged, just answer user
-                    logger.debug("المحتوى لم يتغير، نص الساعة محدث بنجاح")
-            else:
-                await event.answer("❌ فشل في تحديث الساعة")
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Force refresh by editing with updated content and timestamp
+            try:
+                await self.show_working_hours_schedule(event, task_id)
+            except Exception as e:
+                if "Content of the message was not modified" not in str(e):
+                    raise e
+                # If content unchanged, just answer user
+                logger.debug("المحتوى لم يتغير، نص الساعة محدث بنجاح")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل الساعة {hour} للمهمة {task_id}: {e}")
