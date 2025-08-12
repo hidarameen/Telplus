@@ -313,7 +313,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS task_working_hours (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id INTEGER NOT NULL UNIQUE,
-                    mode TEXT DEFAULT 'work_hours' CHECK (mode IN ('work_hours', 'sleep_hours')),
+                    mode TEXT DEFAULT 'work_hours',
                     timezone_offset INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2981,18 +2981,20 @@ class Database:
 
             if result:
                 return {
-                    'check_text_similarity': bool(result['check_text_similarity']),
-                    'check_media_similarity': bool(result['check_media_similarity']),
-                    'similarity_threshold': float(result['similarity_threshold']),
+                    'enabled': True,  # Add enabled field for consistency
+                    'check_text': bool(result['check_text_similarity']),
+                    'check_media': bool(result['check_media_similarity']),
+                    'similarity_threshold': int(result['similarity_threshold'] * 100),  # Convert to percentage
                     'time_window_hours': int(result['time_window_hours'])
                 }
             else:
                 # Create default settings
                 self.create_default_duplicate_settings(task_id)
                 return {
-                    'check_text_similarity': True,
-                    'check_media_similarity': True,
-                    'similarity_threshold': 0.85,
+                    'enabled': False,  # Default to disabled
+                    'check_text': True,
+                    'check_media': True,
+                    'similarity_threshold': 80,  # Percentage
                     'time_window_hours': 24
                 }
 
@@ -3045,6 +3047,43 @@ class Database:
                 SET check_media_similarity = ?
                 WHERE task_id = ?
             ''', (enabled, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_duplicate_setting(self, task_id: int, setting_type: str, value):
+        """Update a specific duplicate setting"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure default settings exist first
+            cursor.execute('INSERT OR IGNORE INTO task_duplicate_settings (task_id) VALUES (?)', (task_id,))
+            
+            if setting_type == 'check_text':
+                cursor.execute('''
+                    UPDATE task_duplicate_settings 
+                    SET check_text_similarity = ?
+                    WHERE task_id = ?
+                ''', (value, task_id))
+            elif setting_type == 'check_media':
+                cursor.execute('''
+                    UPDATE task_duplicate_settings 
+                    SET check_media_similarity = ?
+                    WHERE task_id = ?
+                ''', (value, task_id))
+            elif setting_type == 'similarity_threshold':
+                # Convert percentage to decimal
+                decimal_value = value / 100.0 if isinstance(value, (int, float)) else 0.8
+                cursor.execute('''
+                    UPDATE task_duplicate_settings 
+                    SET similarity_threshold = ?
+                    WHERE task_id = ?
+                ''', (decimal_value, task_id))
+            elif setting_type == 'time_window_hours':
+                cursor.execute('''
+                    UPDATE task_duplicate_settings 
+                    SET time_window_hours = ?
+                    WHERE task_id = ?
+                ''', (value, task_id))
+            
             conn.commit()
             return cursor.rowcount > 0
 
