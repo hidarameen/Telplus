@@ -2847,19 +2847,14 @@ class SimpleTelegramBot:
             return
         
         try:
-            # Enable all hours
+            # Enable all hours using the new schedule method
             for hour in range(24):
-                self.db.set_working_hour(task_id, hour, True)
+                self.db.set_working_hour_schedule(task_id, hour, True)
             
             await event.answer("✅ تم تحديد جميع الساعات")
             
             # Force refresh UserBot tasks
-            try:
-                from userbot_service.userbot import userbot_instance
-                if user_id in userbot_instance.clients:
-                    await userbot_instance.refresh_user_tasks(user_id)
-            except Exception as e:
-                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+            await self._refresh_userbot_tasks(user_id)
             
             # Refresh the schedule display
             await self.show_working_hours_schedule(event, task_id)
@@ -2878,19 +2873,14 @@ class SimpleTelegramBot:
             return
         
         try:
-            # Disable all hours
+            # Disable all hours using the new schedule method
             for hour in range(24):
-                self.db.set_working_hour(task_id, hour, False)
+                self.db.set_working_hour_schedule(task_id, hour, False)
             
             await event.answer("✅ تم إلغاء تحديد جميع الساعات")
             
             # Force refresh UserBot tasks
-            try:
-                from userbot_service.userbot import userbot_instance
-                if user_id in userbot_instance.clients:
-                    await userbot_instance.refresh_user_tasks(user_id)
-            except Exception as e:
-                logger.error(f"خطأ في تحديث مهام UserBot: {e}")
+            await self._refresh_userbot_tasks(user_id)
             
             # Refresh the schedule display
             await self.show_working_hours_schedule(event, task_id)
@@ -9120,39 +9110,7 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في تبديل الساعة {hour} للمهمة {task_id}: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
 
-    async def select_all_hours(self, event, task_id, select_all=True):
-        """Select or deselect all hours"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-            
-        try:
-            # Update all hours
-            for hour in range(24):
-                self.db.set_working_hour_schedule(task_id, hour, select_all)
-            
-            action = "تم تحديد جميع الساعات" if select_all else "تم إلغاء تحديد جميع الساعات"
-            await event.answer(f"✅ {action}")
-            
-            # Force refresh UserBot tasks
-            await self._refresh_userbot_tasks(user_id)
-            
-            # Force refresh by editing with updated content
-            try:
-                await self.show_working_hours(event, task_id)
-            except Exception as e:
-                if "Content of the message was not modified" not in str(e):
-                    raise e
-                # If content unchanged, operation was successful anyway
-                logger.debug("المحتوى لم يتغير، جميع الساعات محدثة بنجاح")
-            
-        except Exception as e:
-            action = "تحديد" if select_all else "إلغاء"
-            logger.error(f"خطأ في {action} جميع الساعات للمهمة {task_id}: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+
 
     async def show_source_admins(self, event, task_id, source_chat_id):
         """Show admins for a specific source chat"""
