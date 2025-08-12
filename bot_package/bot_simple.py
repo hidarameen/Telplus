@@ -1619,7 +1619,7 @@ class SimpleTelegramBot:
                     try:
                         task_id = int(parts[2])
                         hour = int(parts[3])
-                        await self.toggle_hour(event, task_id, hour)
+                        await self.toggle_working_hour(event, task_id, hour)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة أو الساعة: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -1927,7 +1927,7 @@ class SimpleTelegramBot:
                 action = "تم تحديد"
             
             if success:
-                days = ["", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+                days = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
                 await event.answer(f"✅ {action} {days[day_number]}")
                 
                 # Force refresh UserBot tasks
@@ -1959,13 +1959,13 @@ class SimpleTelegramBot:
         
         try:
             if select_all:
-                # Add all days using set_day_filter
-                for day_num in range(1, 8):
+                # Add all days using set_day_filter (0-6 for Monday-Sunday)
+                for day_num in range(0, 7):
                     self.db.set_day_filter(task_id, day_num, True)
                 await event.answer("✅ تم تحديد جميع الأيام")
             else:
-                # Remove all days using set_day_filter with False
-                for day_num in range(1, 8):
+                # Remove all days using set_day_filter with False (0-6 for Monday-Sunday)
+                for day_num in range(0, 7):
                     self.db.set_day_filter(task_id, day_num, False)
                 await event.answer("✅ تم إلغاء تحديد جميع الأيام")
             
@@ -5059,7 +5059,7 @@ class SimpleTelegramBot:
             # Get current settings
             settings = self.db.get_working_hours(task_id)
             current_mode = settings.get('mode', 'work_hours')
-            new_mode = 'off_hours' if current_mode == 'work_hours' else 'work_hours'
+            new_mode = 'sleep_hours' if current_mode == 'work_hours' else 'work_hours'
             
             # Update mode
             success = self.db.update_working_hours(task_id, mode=new_mode)
@@ -8484,6 +8484,525 @@ class SimpleTelegramBot:
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
         await event.answer(f"✅ {status_text} تحكم المعدل")
         await self.show_rate_limit_settings(event, task_id)
+
+    async def show_admin_list(self, event, task_id):
+        """Show admin list for filter management"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get source chat IDs for this task
+        sources = self.db.get_task_sources(task_id)
+        if not sources:
+            await event.edit(
+                f"⚠️ لا توجد مصادر للمهمة: {task_name}\n\n"
+                f"يجب إضافة مصادر أولاً لعرض قائمة المشرفين",
+                buttons=[[Button.inline("🔙 رجوع", f"admin_filters_{task_id}")]]
+            )
+            return
+            
+        # Get admin filters for this task
+        admin_filters = self.db.get_admin_filters(task_id)
+        enabled_admins = [str(admin_filter['admin_user_id']) for admin_filter in admin_filters if admin_filter.get('is_enabled', False)]
+        
+        buttons = []
+        for source in sources:
+            chat_id = source['chat_id']
+            chat_name = source['chat_name'] or str(chat_id)
+            
+            # Check if this admin is enabled
+            is_enabled = str(chat_id) in enabled_admins
+            status_icon = "✅" if is_enabled else "❌"
+            
+            buttons.append([
+                Button.inline(
+                    f"{status_icon} {chat_name}",
+                    f"toggle_admin_{task_id}_{chat_id}"
+                )
+            ])
+        
+        buttons.extend([
+            [Button.inline("🔄 تحديث القائمة", f"refresh_admins_{task_id}")],
+            [Button.inline("🔙 رجوع", f"admin_filters_{task_id}")]
+        ])
+        
+        await event.edit(
+            f"👥 قائمة المشرفين - {task_name}\n\n"
+            f"📋 المشرفون المتاحون:\n"
+            f"✅ = مفعل للفلترة\n"
+            f"❌ = معطل للفلترة\n\n"
+            f"💡 فقط الرسائل من المشرفين المفعلين ستمر عبر الفلتر",
+            buttons=buttons
+        )
+
+    async def refresh_admin_list(self, event, task_id):
+        """Refresh admin list"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        await event.answer("🔄 جاري تحديث قائمة المشرفين...")
+        
+        # Force refresh the admin list display
+        await self.show_admin_list(event, task_id)
+
+    async def handle_watermark_setting_input(self, event, task_id, setting_type):
+        """Handle watermark setting input"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.respond("❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            if setting_type == 'text':
+                success = self.db.update_watermark_text(task_id, message_text)
+                setting_name = "نص العلامة المائية"
+            elif setting_type == 'position_x':
+                value = int(message_text)
+                success = self.db.update_watermark_position(task_id, x=value)
+                setting_name = "موقع X للعلامة المائية"
+            elif setting_type == 'position_y':
+                value = int(message_text)
+                success = self.db.update_watermark_position(task_id, y=value)
+                setting_name = "موقع Y للعلامة المائية"
+            else:
+                await event.respond("❌ نوع إعداد غير مدعوم")
+                return
+                
+            if success:
+                await event.respond(f"✅ تم تحديث {setting_name}")
+            else:
+                await event.respond(f"❌ فشل في تحديث {setting_name}")
+                
+        except ValueError:
+            await event.respond("❌ قيمة غير صحيحة. يرجى إدخال رقم صحيح")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث إعداد العلامة المائية: {e}")
+            await event.respond("❌ حدث خطأ أثناء التحديث")
+        
+        # Clear user state
+        self.clear_user_state(user_id)
+
+    async def handle_edit_character_range(self, event, task_id):
+        """Handle character range input"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.respond("❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            value = int(message_text)
+            if value < 1:
+                await event.respond("❌ يجب أن يكون العدد أكبر من 0")
+                return
+                
+            success = self.db.update_character_limit(task_id, value)
+            
+            if success:
+                await event.respond(f"✅ تم تحديث حد الأحرف إلى {value}")
+            else:
+                await event.respond("❌ فشل في تحديث حد الأحرف")
+                
+        except ValueError:
+            await event.respond("❌ يرجى إدخال رقم صحيح")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث حد الأحرف: {e}")
+            await event.respond("❌ حدث خطأ أثناء التحديث")
+        
+        # Clear user state
+        self.clear_user_state(user_id)
+
+    async def handle_edit_rate_count(self, event, task_id):
+        """Handle rate count input"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.respond("❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            value = int(message_text)
+            if value < 1:
+                await event.respond("❌ يجب أن يكون العدد أكبر من 0")
+                return
+                
+            success = self.db.update_rate_limit_count(task_id, value)
+            
+            if success:
+                await event.respond(f"✅ تم تحديث عدد الرسائل إلى {value}")
+            else:
+                await event.respond("❌ فشل في تحديث عدد الرسائل")
+                
+        except ValueError:
+            await event.respond("❌ يرجى إدخال رقم صحيح")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث عدد الرسائل: {e}")
+            await event.respond("❌ حدث خطأ أثناء التحديث")
+        
+        # Clear user state
+        self.clear_user_state(user_id)
+
+    async def handle_edit_rate_period(self, event, task_id):
+        """Handle rate period input"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.respond("❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            value = int(message_text)
+            if value < 1:
+                await event.respond("❌ يجب أن يكون العدد أكبر من 0")
+                return
+                
+            success = self.db.update_rate_limit_period(task_id, value)
+            
+            if success:
+                await event.respond(f"✅ تم تحديث فترة التحكم إلى {value} ثانية")
+            else:
+                await event.respond("❌ فشل في تحديث فترة التحكم")
+                
+        except ValueError:
+            await event.respond("❌ يرجى إدخال رقم صحيح")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث فترة التحكم: {e}")
+            await event.respond("❌ حدث خطأ أثناء التحديث")
+        
+        # Clear user state
+        self.clear_user_state(user_id)
+
+    async def handle_edit_forwarding_delay(self, event, task_id):
+        """Handle forwarding delay input"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.respond("❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            value = int(message_text)
+            if value < 0:
+                await event.respond("❌ يجب أن يكون العدد 0 أو أكبر")
+                return
+                
+            success = self.db.update_forwarding_delay(task_id, value)
+            
+            if success:
+                await event.respond(f"✅ تم تحديث تأخير التوجيه إلى {value} ثانية")
+            else:
+                await event.respond("❌ فشل في تحديث تأخير التوجيه")
+                
+        except ValueError:
+            await event.respond("❌ يرجى إدخال رقم صحيح")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث تأخير التوجيه: {e}")
+            await event.respond("❌ حدث خطأ أثناء التحديث")
+        
+        # Clear user state
+        self.clear_user_state(user_id)
+
+    async def handle_edit_sending_interval(self, event, task_id):
+        """Handle sending interval input"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.respond("❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            value = int(message_text)
+            if value < 1:
+                await event.respond("❌ يجب أن يكون العدد أكبر من 0")
+                return
+                
+            success = self.db.update_sending_interval(task_id, value)
+            
+            if success:
+                await event.respond(f"✅ تم تحديث فترة الإرسال إلى {value} ثانية")
+            else:
+                await event.respond("❌ فشل في تحديث فترة الإرسال")
+                
+        except ValueError:
+            await event.respond("❌ يرجى إدخال رقم صحيح")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث فترة الإرسال: {e}")
+            await event.respond("❌ حدث خطأ أثناء التحديث")
+        
+        # Clear user state
+        self.clear_user_state(user_id)
+
+    async def handle_set_working_hours(self, event, task_id):
+        """Handle working hours input"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.respond("❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            # Parse hours range (e.g., "9-17" or "9:00-17:30")
+            if '-' in message_text:
+                start_str, end_str = message_text.split('-', 1)
+                start_hour = int(start_str.strip().split(':')[0])
+                end_hour = int(end_str.strip().split(':')[0])
+                
+                if start_hour < 0 or start_hour > 23 or end_hour < 0 or end_hour > 23:
+                    await event.respond("❌ الساعات يجب أن تكون بين 0-23")
+                    return
+                    
+                success = self.db.set_working_hours_range(task_id, start_hour, end_hour)
+                
+                if success:
+                    await event.respond(f"✅ تم تحديث ساعات العمل من {start_hour}:00 إلى {end_hour}:00")
+                else:
+                    await event.respond("❌ فشل في تحديث ساعات العمل")
+            else:
+                await event.respond("❌ تنسيق غير صحيح. استخدم تنسيق مثل: 9-17")
+                
+        except ValueError:
+            await event.respond("❌ تنسيق غير صحيح. استخدم تنسيق مثل: 9-17")
+        except Exception as e:
+            logger.error(f"خطأ في تحديث ساعات العمل: {e}")
+            await event.respond("❌ حدث خطأ أثناء التحديث")
+        
+        # Clear user state
+        self.clear_user_state(user_id)
+
+    async def handle_add_language_filter(self, event, task_id):
+        """Handle adding language filter"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.respond("❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            # Parse language codes (e.g., "ar,en,fr")
+            language_codes = [lang.strip().lower() for lang in message_text.split(',')]
+            
+            # Validate language codes
+            valid_codes = {'ar', 'en', 'fr', 'de', 'es', 'ru', 'ja', 'zh', 'ko', 'hi', 'it', 'pt'}
+            invalid_codes = [code for code in language_codes if code not in valid_codes]
+            
+            if invalid_codes:
+                await event.respond(f"❌ رموز لغات غير صحيحة: {', '.join(invalid_codes)}\n"
+                                  f"الرموز المدعومة: {', '.join(sorted(valid_codes))}")
+                return
+                
+            success = self.db.add_language_filters(task_id, language_codes)
+            
+            if success:
+                await event.respond(f"✅ تم إضافة فلاتر اللغات: {', '.join(language_codes)}")
+            else:
+                await event.respond("❌ فشل في إضافة فلاتر اللغات")
+                
+        except Exception as e:
+            logger.error(f"خطأ في إضافة فلاتر اللغات: {e}")
+            await event.respond("❌ حدث خطأ أثناء الإضافة")
+        
+        # Clear user state
+        self.clear_user_state(user_id)
+
+    async def toggle_language_mode(self, event, task_id):
+        """Toggle language filter mode between allow and block"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current mode and toggle it
+        current_mode = self.db.get_language_filter_mode(task_id)
+        new_mode = 'block' if current_mode == 'allow' else 'allow'
+        
+        success = self.db.set_language_filter_mode(task_id, new_mode)
+        
+        if success:
+            mode_names = {
+                'allow': 'السماح فقط للغات المحددة',
+                'block': 'حظر اللغات المحددة'
+            }
+            await event.answer(f"✅ تم تغيير وضع الفلتر إلى: {mode_names[new_mode]}")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Refresh the language filters display
+            await self.show_language_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير وضع الفلتر")
+
+    async def toggle_admin(self, event, task_id, admin_id):
+        """Toggle admin filter status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Toggle admin filter status
+        success = self.db.toggle_admin_filter(task_id, int(admin_id))
+        
+        if success:
+            await event.answer("✅ تم تحديث إعدادات المشرف")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Refresh the admin list display
+            await self.show_admin_list(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث إعدادات المشرف")
+
+    async def toggle_language_filter(self, event, task_id, language_code):
+        """Toggle specific language filter"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Toggle language filter status
+        success = self.db.toggle_language_filter(task_id, language_code)
+        
+        if success:
+            await event.answer(f"✅ تم تحديث فلتر اللغة {language_code}")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Refresh the language filters display
+            await self.show_language_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تحديث فلتر اللغة")
+
+    async def toggle_button_mode(self, event, task_id):
+        """Toggle button filter mode"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current mode and toggle it
+        current_settings = self.db.get_button_filter_settings(task_id)
+        current_mode = current_settings.get('action_mode', 'remove_buttons')
+        new_mode = 'block_message' if current_mode == 'remove_buttons' else 'remove_buttons'
+        
+        success = self.db.update_button_filter_mode(task_id, new_mode)
+        
+        if success:
+            mode_names = {
+                'remove_buttons': 'حذف الأزرار',
+                'block_message': 'حظر الرسالة'
+            }
+            await event.answer(f"✅ تم تغيير الوضع إلى: {mode_names[new_mode]}")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Refresh the button filters display
+            await self.show_button_filters(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير الوضع")
+
+    async def toggle_forwarded_mode(self, event, task_id):
+        """Toggle forwarded message filter mode"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current mode and toggle it
+        current_settings = self.db.get_forwarded_filter_settings(task_id)
+        current_mode = current_settings.get('mode', 'allow')
+        new_mode = 'block' if current_mode == 'allow' else 'allow'
+        
+        success = self.db.set_forwarded_filter_mode(task_id, new_mode)
+        
+        if success:
+            mode_names = {
+                'allow': 'السماح بالرسائل المُوجهة',
+                'block': 'حظر الرسائل المُوجهة'
+            }
+            await event.answer(f"✅ تم تغيير الوضع إلى: {mode_names[new_mode]}")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Refresh the forwarded message filter display
+            await self.show_forwarded_message_filter(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير الوضع")
+
+    async def toggle_duplicate_mode(self, event, task_id):
+        """Toggle duplicate filter mode"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings and toggle repeat mode
+        current_settings = self.db.get_duplicate_settings(task_id)
+        current_repeat_mode = current_settings.get('repeat_mode_enabled', False)
+        new_repeat_mode = not current_repeat_mode
+        
+        success = self.db.update_duplicate_settings(task_id, repeat_mode_enabled=new_repeat_mode)
+        
+        if success:
+            mode_text = "تفعيل وضع التكرار" if new_repeat_mode else "تعطيل وضع التكرار"
+            await event.answer(f"✅ تم {mode_text}")
+            
+            # Force refresh UserBot tasks
+            await self._refresh_userbot_tasks(user_id)
+            
+            # Refresh the duplicate filter display
+            await self.show_duplicate_filter(event, task_id)
+        else:
+            await event.answer("❌ فشل في تغيير وضع التكرار")
 
 async def run_simple_bot():
     """Run the simple telegram bot"""
