@@ -1,0 +1,60 @@
+# Core Dependencies
+deep-translator>=1.11.4
+flask>=3.1.1
+numpy>=2.2.6
+opencv-python>=4.12.0.88
+psycopg2-binary>=2.9.10
+telegram>=0.0.1
+
+# Telegram Bot Libraries
+python-telegram-bot==20.8
+telethon==1.36.0
+
+# Database
+SQLAlchemy==2.0.34
+
+# Image Processing
+Pillow==10.4.0
+
+# Audio Processing
+mutagen>=1.47.0
+Pillow>=10.4.0
+
+# Video Processing & Optimization
+# ملاحظة: ffmpeg-python هي مكتبة Python للتفاعل مع FFmpeg
+# FFmpeg نفسه يجب تثبيته كأداة نظام منفصلة
+ffmpeg-python>=0.2.0
+
+# Async Support
+asyncio-mqtt==0.16.2
+aiofiles==24.1.0
+
+# Utilities
+requests==2.32.3
+python-dotenv==1.0.1
+cryptography==43.0.1
+
+# Text Processing
+langdetect==1.0.9
+emoji==2.12.1
+
+# Date/Time
+pytz==2024.2
+
+# Logging
+colorlog==6.8.2
+
+# Development
+pytest==8.3.3
+pytest-asyncio==0.24.0
+
+# ===== متطلبات النظام - System Requirements =====
+# 
+# FFmpeg (أداة نظام - system tool):
+# Ubuntu/Debian: sudo apt install ffmpeg
+# CentOS/RHEL: sudo yum install ffmpeg
+# Alpine: apk add ffmpeg
+# macOS: brew install ffmpeg
+#
+# بدون FFmpeg، البوت سيعمل باستخدام OpenCV كبديل
+# لكن الأداء سيكون أفضل مع FFmpeg

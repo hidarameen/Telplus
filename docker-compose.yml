@@ -1,0 +1,72 @@
+
+version: '3.8'
+
+services:
+  enhanced-bot:
+    build: .
+    container_name: enhanced-telegram-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - TZ=UTC
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./watermark_images:/app/watermark_images
+      - /tmp:/tmp  # للوصول إلى الملفات المؤقتة
+    ports:
+      - "8000:8000"
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # قاعدة البيانات (اختيارية - إذا كنت تريد استخدام PostgreSQL)
+  postgres:
+    image: postgres:15-alpine
+    container_name: bot-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=telegram_bot
+      - POSTGRES_USER=bot_user
+      - POSTGRES_PASSWORD=bot_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot_user -d telegram_bot"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis للذاكرة المؤقتة (اختياري)
+  redis:
+    image: redis:7-alpine
+    container_name: bot-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+
+networks:
+  bot-network:
+    driver: bridge

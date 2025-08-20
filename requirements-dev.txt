@@ -1,0 +1,176 @@
+# متطلبات التطوير - Development Requirements
+# Development dependencies for the Enhanced Telegram Bot
+
+# ===== اختبارات =====
+# Testing
+pytest>=8.3.3
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+pytest-mock>=3.12.0
+pytest-xdist>=3.6.0
+pytest-html>=4.1.0
+pytest-benchmark>=4.0.0
+
+# ===== تنسيق الكود =====
+# Code Formatting
+black>=24.0.0
+isort>=5.13.0
+autopep8>=2.0.0
+yapf>=0.40.0
+
+# ===== فحص جودة الكود =====
+# Code Quality
+flake8>=7.0.0
+pylint>=3.1.0
+pylint-errors>=0.1.0
+mypy>=1.8.0
+bandit>=1.7.0
+safety>=2.3.0
+
+# ===== pre-commit hooks =====
+# Pre-commit Hooks
+pre-commit>=3.6.0
+commitizen>=3.20.0
+
+# ===== توثيق =====
+# Documentation
+sphinx>=7.2.0
+sphinx-rtd-theme>=2.0.0
+myst-parser>=2.0.0
+autodoc>=0.5.0
+
+# ===== أدوات التطوير =====
+# Development Tools
+ipython>=8.20.0
+jupyter>=1.0.0
+notebook>=7.0.0
+ipdb>=0.13.0
+debugpy>=1.8.0
+
+# ===== مراقبة الأداء =====
+# Performance Monitoring
+memory-profiler>=0.61.0
+line-profiler>=4.1.0
+py-spy>=0.3.0
+psutil>=5.9.0
+
+# ===== تحليل الكود =====
+# Code Analysis
+radon>=6.0.0
+mccabe>=0.7.0
+coverage>=7.4.0
+diff-cover>=8.0.0
+
+# ===== أدوات Git =====
+# Git Tools
+gitpython>=3.1.0
+gitdb>=4.0.0
+
+# ===== أدوات إضافية =====
+# Additional Tools
+click>=8.1.0
+rich>=13.7.0
+tqdm>=4.66.0
+colorama>=0.4.0
+termcolor>=2.3.0
+
+# ===== أدوات البيئة =====
+# Environment Tools
+python-dotenv>=1.0.1
+environs>=10.0.0
+
+# ===== أدوات السجلات =====
+# Logging Tools
+loguru>=0.7.0
+structlog>=24.1.0
+
+# ===== أدوات التكوين =====
+# Configuration Tools
+pyyaml>=6.0.1
+toml>=0.10.2
+configparser>=6.0.0
+
+# ===== أدوات الأمان =====
+# Security Tools
+bandit>=1.7.0
+safety>=2.3.0
+pip-audit>=2.6.0
+
+# ===== أدوات التعبئة =====
+# Packaging Tools
+setuptools>=69.0.0
+wheel>=0.42.0
+twine>=4.0.0
+build>=1.0.0
+
+# ===== أدوات CI/CD =====
+# CI/CD Tools
+tox>=4.11.0
+nox>=2023.4.22
+
+# ===== أدوات مراقبة الجودة =====
+# Quality Monitoring
+codacy-coverage>=1.3.0
+codecov>=3.1.0
+
+# ===== أدوات إضافية للتطوير =====
+# Additional Development Tools
+watchdog>=3.0.0
+livereload>=2.6.0
+bpython>=0.24.0
+ptpython>=3.0.0
+
+# ===== أدوات قاعدة البيانات =====
+# Database Tools
+alembic>=1.13.0
+sqlalchemy-utils>=0.41.0
+
+# ===== أدوات API =====
+# API Tools
+fastapi>=0.104.0
+uvicorn>=0.24.0
+httpx>=0.25.0
+requests-mock>=1.11.0
+
+# ===== أدوات الوسائط =====
+# Media Tools
+pillow>=10.4.0
+opencv-python>=4.12.0.88
+numpy>=2.2.6
+scikit-image>=0.22.0
+
+# ===== أدوات التشفير =====
+# Cryptography Tools
+cryptography>=43.0.1
+pycryptodome>=3.19.0
+
+# ===== أدوات الشبكة =====
+# Network Tools
+aiohttp>=3.9.0
+websockets>=12.0
+asyncio-mqtt>=0.16.2
+
+# ===== أدوات التخزين =====
+# Storage Tools
+redis>=5.0.0
+pymongo>=4.6.0
+elasticsearch>=8.11.0
+
+# ===== أدوات المراقبة =====
+# Monitoring Tools
+prometheus-client>=0.19.0
+statsd>=4.0.0
+datadog>=0.44.0
+
+# ===== أدوات التطوير المحلي =====
+# Local Development Tools
+docker-compose>=1.29.0
+docker>=6.1.0
+kubectl>=1.28.0
+
+# ===== أدوات إضافية =====
+# Extra Tools
+faker>=20.1.0
+factory-boy>=3.3.0
+freezegun>=1.2.0
+responses>=0.24.0

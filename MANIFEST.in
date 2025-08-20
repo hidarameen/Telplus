@@ -1,0 +1,50 @@
+# تضمين جميع ملفات Python
+include *.py
+
+# تضمين ملفات التكوين
+include *.txt
+include *.md
+include *.yml
+include *.yaml
+include *.toml
+include *.in
+include .env.example
+
+# تضمين ملفات السكريبت
+include *.sh
+
+# تضمين ملفات Docker
+include Dockerfile
+include docker-compose.yml
+
+# تضمين ملفات الترخيص
+include LICENSE
+
+# تضمين ملفات الإصدار
+include VERSION
+
+# تضمين المجلدات
+recursive-include watermark_images *
+recursive-include database *
+recursive-include userbot_service *
+recursive-include bot_package *
+
+# استبعاد الملفات
+exclude *.pyc
+exclude *.pyo
+exclude __pycache__
+exclude .git
+exclude .env
+exclude *.db
+exclude *.log
+exclude logs/
+exclude temp/
+exclude tmp/
+exclude .pytest_cache/
+exclude .coverage
+exclude *.egg-info/
+exclude build/
+exclude dist/
+exclude .venv/
+exclude venv/
+exclude env/
