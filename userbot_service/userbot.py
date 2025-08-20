@@ -1084,86 +1084,85 @@ class UserbotService:
                                         # Process spoiler entities if present
                                         message_text = final_text or event.message.text or "رسالة"
                                         processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
-                                    
-                                    if spoiler_entities:
-                                        # Send with spoiler entities and buttons
-                                        forwarded_msg = await client.send_message(
-                                            target_entity,
-                                            processed_text,
-                                            link_preview=forwarding_settings['link_preview_enabled'],
-                                            silent=forwarding_settings['silent_notifications'],
-                                            formatting_entities=spoiler_entities,
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
+                                        if spoiler_entities:
+                                            # Send with spoiler entities and buttons
+                                            forwarded_msg = await client.send_message(
+                                                target_entity,
+                                                processed_text,
+                                                link_preview=forwarding_settings['link_preview_enabled'],
+                                                silent=forwarding_settings['silent_notifications'],
+                                                formatting_entities=spoiler_entities,
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
+                                        else:
+                                            # Send normally with buttons
+                                            forwarded_msg = await client.send_message(
+                                                target_entity,
+                                                processed_text,
+                                                link_preview=forwarding_settings['link_preview_enabled'],
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML',
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
                                     else:
-                                        # Send normally with buttons
-                                        forwarded_msg = await client.send_message(
-                                            target_entity,
-                                            processed_text,
-                                            link_preview=forwarding_settings['link_preview_enabled'],
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML',
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
-                                else:
-                                    # Regular media message with caption handling
-                                    # Check if caption should be removed
-                                    caption_text = final_text
-                                    text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
-                                    if text_cleaning_settings and text_cleaning_settings.get('remove_caption', False):
-                                        caption_text = None
-                                        logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
-                                    
-                                    # Check if album should be split
-                                    split_album_enabled = forwarding_settings.get('split_album_enabled', False)
-                                    
-                                    # Handle album splitting logic
-                                    if split_album_enabled:
-                                        # Split album: send each media individually
-                                        logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                        # Regular media message with caption handling
+                                        # Check if caption should be removed
+                                        caption_text = final_text
+                                        text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                                        if text_cleaning_settings and text_cleaning_settings.get('remove_caption', False):
+                                            caption_text = None
+                                            logger.info(f"🗑️ تم حذف التسمية التوضيحية للمهمة {task['id']}")
                                         
-                                        # ===== استخدام الوسائط المعالجة مسبقاً =====
-                                        # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
-                                        # هذا يحسن الأداء ويقلل من استهلاك الموارد
-                                        media_to_send = processed_media if processed_media else event.message.media
-                                        filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
-                                        logger.info(f"📁 سيتم إرسال الملف باسم: {filename_to_send}")
+                                        # Check if album should be split
+                                        split_album_enabled = forwarding_settings.get('split_album_enabled', False)
                                         
-                                        from send_file_helper import TelethonFileSender
-                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                            client,
-                                            target_entity,
-                                            media_to_send,
-                                            filename_to_send,
-                                            caption=caption_text,
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML' if caption_text else None,
-                                            force_document=False,
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
-                                    else:
-                                        # Keep album grouped: send as new media (copy mode)
-                                        logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
-                                        
-                                        # ===== استخدام الوسائط المعالجة مسبقاً =====
-                                        # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
-                                        # هذا يحسن الأداء ويقلل من استهلاك الموارد
-                                        media_to_send = processed_media if processed_media else event.message.media
-                                        filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
-                                        
-                                        # In copy mode, we always send as new media, not forward
-                                        from send_file_helper import TelethonFileSender
-                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                            client,
-                                            target_entity,
-                                            media_to_send,
-                                            filename_to_send,
-                                            caption=caption_text,
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML' if caption_text else None,
-                                            force_document=False,
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
+                                        # Handle album splitting logic
+                                        if split_album_enabled:
+                                            # Split album: send each media individually
+                                            logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
+                                            
+                                            # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                            # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
+                                            # هذا يحسن الأداء ويقلل من استهلاك الموارد
+                                            media_to_send = processed_media if processed_media else event.message.media
+                                            filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
+                                            logger.info(f"📁 سيتم إرسال الملف باسم: {filename_to_send}")
+                                            
+                                            from send_file_helper import TelethonFileSender
+                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                client,
+                                                target_entity,
+                                                media_to_send,
+                                                filename_to_send,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                force_document=False,
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
+                                        else:
+                                            # Keep album grouped: send as new media (copy mode)
+                                            logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
+                                            
+                                            # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                            # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
+                                            # هذا يحسن الأداء ويقلل من استهلاك الموارد
+                                            media_to_send = processed_media if processed_media else event.message.media
+                                            filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
+                                            
+                                            # In copy mode, we always send as new media, not forward
+                                            from send_file_helper import TelethonFileSender
+                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                client,
+                                                target_entity,
+                                                media_to_send,
+                                                filename_to_send,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                force_document=False,
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
                         else:
                             # No media
                             if (event.message.text or final_text):
