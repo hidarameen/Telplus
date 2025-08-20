@@ -1129,17 +1129,29 @@ class UserbotService:
                                             logger.info(f"📁 سيتم إرسال الملف باسم: {filename_to_send}")
                                             
                                             from send_file_helper import TelethonFileSender
-                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                                client,
-                                                target_entity,
-                                                media_to_send,
-                                                filename_to_send,
-                                                caption=caption_text,
-                                                silent=forwarding_settings['silent_notifications'],
-                                                parse_mode='HTML' if caption_text else None,
-                                                force_document=False,
-                                                buttons=original_reply_markup or inline_buttons,
-                                            )
+                                            if media_to_send is not None:
+                                                forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                    client,
+                                                    target_entity,
+                                                    media_to_send,
+                                                    filename_to_send,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if caption_text else None,
+                                                    force_document=False,
+                                                    buttons=original_reply_markup or inline_buttons,
+                                                )
+                                            else:
+                                                # Safety fallback to text
+                                                forward_text = caption_text or (event.message.text or "رسالة")
+                                                forwarded_msg = await client.send_message(
+                                                    target_entity,
+                                                    forward_text,
+                                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if forward_text else None,
+                                                    buttons=original_reply_markup or inline_buttons,
+                                                )
                                         else:
                                             # Keep album grouped: send as new media (copy mode)
                                             logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
@@ -1152,17 +1164,29 @@ class UserbotService:
                                             
                                             # In copy mode, we always send as new media, not forward
                                             from send_file_helper import TelethonFileSender
-                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                                client,
-                                                target_entity,
-                                                media_to_send,
-                                                filename_to_send,
-                                                caption=caption_text,
-                                                silent=forwarding_settings['silent_notifications'],
-                                                parse_mode='HTML' if caption_text else None,
-                                                force_document=False,
-                                                buttons=original_reply_markup or inline_buttons,
-                                            )
+                                            if media_to_send is not None:
+                                                forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                    client,
+                                                    target_entity,
+                                                    media_to_send,
+                                                    filename_to_send,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if caption_text else None,
+                                                    force_document=False,
+                                                    buttons=original_reply_markup or inline_buttons,
+                                                )
+                                            else:
+                                                # Safety fallback to text
+                                                forward_text = caption_text or (event.message.text or "رسالة")
+                                                forwarded_msg = await client.send_message(
+                                                    target_entity,
+                                                    forward_text,
+                                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if forward_text else None,
+                                                    buttons=original_reply_markup or inline_buttons,
+                                                )
                         else:
                             # No media
                             if (event.message.text or final_text):
@@ -1279,17 +1303,29 @@ class UserbotService:
                                             
                                             # استخدام مساعد إرسال الملفات للتعامل مع أسماء الملفات بشكل صحيح
                                             from send_file_helper import TelethonFileSender
-                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                                client,
-                                                target_entity,
-                                                media_to_send,
-                                                filename_to_send,
-                                                caption=caption_text,
-                                                silent=forwarding_settings['silent_notifications'],
-                                                parse_mode='HTML' if caption_text else None,
-                                                force_document=False,
-                                                buttons=original_reply_markup or inline_buttons,
-                                            )
+                                            if media_to_send is not None:
+                                                forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                    client,
+                                                    target_entity,
+                                                    media_to_send,
+                                                    filename_to_send,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if caption_text else None,
+                                                    force_document=False,
+                                                    buttons=original_reply_markup or inline_buttons,
+                                                )
+                                            else:
+                                                # Fallback to text to avoid None as file
+                                                forward_text = caption_text or (event.message.text or "رسالة")
+                                                forwarded_msg = await client.send_message(
+                                                    target_entity,
+                                                    forward_text,
+                                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if forward_text else None,
+                                                    buttons=original_reply_markup or inline_buttons,
+                                                )
                                         else:
                                             # Keep album grouped: send as new media (copy mode)
                                             logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (تحويل لوضع النسخ)")
@@ -1303,17 +1339,29 @@ class UserbotService:
                                             
                                             # In forward mode with requires_copy_mode, we also send as new media
                                             from send_file_helper import TelethonFileSender
-                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                                client,
-                                                target_entity,
-                                                media_to_send,
-                                                filename_to_send,
-                                                caption=caption_text,
-                                                silent=forwarding_settings['silent_notifications'],
-                                                parse_mode='HTML' if caption_text else None,
-                                                force_document=False,
-                                                buttons=original_reply_markup or inline_buttons,
-                                            )
+                                            if media_to_send is not None:
+                                                forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                    client,
+                                                    target_entity,
+                                                    media_to_send,
+                                                    filename_to_send,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if caption_text else None,
+                                                    force_document=False,
+                                                    buttons=original_reply_markup or inline_buttons,
+                                                )
+                                            else:
+                                                # Fallback to text
+                                                forward_text = caption_text or (event.message.text or "رسالة")
+                                                forwarded_msg = await client.send_message(
+                                                    target_entity,
+                                                    forward_text,
+                                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if forward_text else None,
+                                                    buttons=original_reply_markup or inline_buttons,
+                                                )
                                 else:
                                     # Process spoiler entities if present
                                     message_text = final_text or "رسالة"
