@@ -430,7 +430,7 @@ class WatermarkProcessor:
                 
                 # الحصول على خصائص الفيديو
                 width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height = int(cap.get(cv2.CAP_PROP_PROP_FRAME_HEIGHT))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 fps = cap.get(cv2.CAP_PROP_FPS)
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
@@ -1048,7 +1048,7 @@ class WatermarkProcessor:
         }
 
     def compress_video_preserve_quality(self, input_path: str, output_path: str, target_size_mb: float = None) -> bool:
-        """ضغط الفيديو مع الحفاظ على الدقة والجودة - محسن لحل مشكلة الحجم الكبير"""
+        """ضغط الفيديو الأقصى مع الحفاظ على الدقة والجودة - مُحسن بالكامل"""
         try:
             if not self.ffmpeg_available:
                 logger.warning("FFmpeg غير متوفر، لا يمكن ضغط الفيديو")
@@ -1065,38 +1065,40 @@ class WatermarkProcessor:
             original_height = video_info.get('height', 0)
             original_fps = video_info.get('fps', 30)
             duration = video_info.get('duration', 0)
+            original_bitrate = video_info.get('bitrate', 2000000)
             
             logger.info(f"📹 معلومات الفيديو الأصلي: {original_width}x{original_height}, {original_fps} FPS, {original_size:.2f} MB")
             
-            # حساب معدل البت الأمثل لضغط أفضل
+            # حساب معدل البت للضغط الأقصى
             if target_size_mb and original_size > target_size_mb:
-                # حساب معدل البت المطلوب للوصول للحجم المستهدف
+                # حساب معدل البت للوصول للحجم المستهدف
                 target_bitrate = int((target_size_mb * 8 * 1024 * 1024) / duration)
-                target_bitrate = max(target_bitrate, 500000)  # حد أدنى 500 kbps
-                
+                target_bitrate = max(target_bitrate, 400000)  # حد أدنى أقل 400 kbps
                 logger.info(f"🎯 الحجم المستهدف: {target_size_mb:.2f} MB, معدل البت: {target_bitrate/1000:.0f} kbps")
             else:
-                # استخدام معدل البت الأصلي مع تحسين كبير
-                original_bitrate = video_info.get('bitrate', 2000000)
-                target_bitrate = int(original_bitrate * 0.6)  # تقليل 40% للحصول على حجم أصغر
-                logger.info(f"🔄 تحسين كبير: معدل البت {target_bitrate/1000:.0f} kbps (تقليل 40%)")
+                # ضغط أقصى: تقليل 70% من معدل البت الأصلي
+                target_bitrate = int(original_bitrate * 0.3)  # تقليل 70% للحصول على أقصى ضغط
+                target_bitrate = max(target_bitrate, 400000)  # حد أدنى 400 kbps
+                logger.info(f"🔄 تحسين كبير: معدل البت {target_bitrate/1000:.0f} kbps (تقليل 70%)")
             
-            # إعدادات FFmpeg محسنة للحصول على حجم أصغر مع الحفاظ على الجودة
+            # إعدادات FFmpeg للضغط الأقصى مع الحفاظ على الجودة المرئية
             cmd = [
                 'ffmpeg', '-y',
                 '-i', input_path,
-                # إعدادات الفيديو - ضغط محسن
+                # إعدادات فيديو - ضغط أقصى
                 '-c:v', 'libx264',           # كودك H.264
-                '-preset', 'slow',           # بطيء للحصول على ضغط أفضل
-                '-crf', '25',                # جودة عالية مع ضغط أفضل (25 بدلاً من 18)
-                '-maxrate', f'{target_bitrate}',
-                '-bufsize', f'{target_bitrate * 2}',
-                '-profile:v', 'main',        # ملف H.264 متوسط (أصغر من high)
-                '-level', '4.0',             # مستوى H.264 متوسط
-                # إعدادات الصوت - ضغط محسن
+                '-preset', 'veryslow',       # أبطأ preset للحصول على أفضل ضغط
+                '-crf', '30',                # ضغط أقصى (30 بدلاً من 25)
+                '-maxrate', f'{target_bitrate}',  # معدل البت الأقصى
+                '-bufsize', f'{target_bitrate}',  # buffer size مطابق
+                '-profile:v', 'baseline',    # ملف H.264 أساسي (أصغر حجم)
+                '-level', '3.1',             # مستوى منخفض للحجم الأصغر
+                '-tune', 'film',             # تحسين للمحتوى المرئي
+                '-g', '15',                  # مجموعة صور أصغر (keyframe كل 15 إطار)
+                # إعدادات صوت - ضغط أقصى
                 '-c:a', 'aac',               # كودك الصوت
-                '-b:a', '96k',               # معدل بت صوت أقل (96k بدلاً من 128k)
-                '-ar', '44100',              # معدل عينات قياسي
+                '-b:a', '48k',               # معدل بت صوت منخفض (48k بدلاً من 96k)
+                '-ar', '22050',              # معدل عينات منخفض للحجم الأصغر
                 # إعدادات إضافية للضغط
                 '-movflags', '+faststart',   # تحسين التشغيل
                 '-pix_fmt', 'yuv420p',       # تنسيق بكسل متوافق

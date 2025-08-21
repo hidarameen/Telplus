@@ -82,7 +82,7 @@ def _is_video_filename(name: str) -> bool:
         return False
 
 def _extract_video_info_from_bytes(video_bytes: bytes, filename: str) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[bytes]]:
-    """استخراج معلومات الفيديو: العرض، الارتفاع، المدة، والمعاينة"""
+    """استخراج معلومات الفيديو الشامل: العرض، الارتفاع، المدة، والمعاينة"""
     width = None
     height = None
     duration = None
@@ -94,34 +94,48 @@ def _extract_video_info_from_bytes(video_bytes: bytes, filename: str) -> Tuple[O
         temp_file.close()
         
         try:
-            # محاولة استخدام ffmpeg لاستخراج معلومات الفيديو
+            # أولاً: محاولة استخدام ffmpeg لاستخراج معلومات شاملة
             import subprocess
             import json
             
-            # استخراج معلومات الفيديو
+            # استخراج معلومات الفيديو مع format info للحصول على المدة الدقيقة
             cmd = [
-                'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams',
-                temp_file.name
+                'ffprobe', '-v', 'quiet', '-print_format', 'json', 
+                '-show_format', '-show_streams', temp_file.name
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
                 data = json.loads(result.stdout)
-                video_stream = next((stream for stream in data['streams'] if stream['codec_type'] == 'video'), None)
                 
+                # الحصول على معلومات stream الفيديو
+                video_stream = next((stream for stream in data['streams'] if stream['codec_type'] == 'video'), None)
                 if video_stream:
                     width = int(video_stream.get('width', 0))
                     height = int(video_stream.get('height', 0))
-                    duration = float(video_stream.get('duration', 0))
+                    # محاولة الحصول على المدة من stream
+                    stream_duration = video_stream.get('duration')
+                    if stream_duration:
+                        duration = float(stream_duration)
+                
+                # الحصول على المدة من format info (أكثر دقة)
+                if 'format' in data and 'duration' in data['format']:
+                    duration = float(data['format']['duration'])
+                    
+                logger.info(f"🎬 معلومات الفيديو: {width}x{height}, مدة: {duration}s")
                     
                 # استخراج معاينة باستخدام ffmpeg
                 try:
                     thumb_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
                     thumb_temp.close()
                     
+                    # أخذ screenshot من منتصف الفيديو للحصول على معاينة أفضل
+                    midpoint = max(1, duration / 2) if duration else 1
                     cmd_thumb = [
-                        'ffmpeg', '-y', '-i', temp_file.name, '-ss', '00:00:01.000',
-                        '-vf', 'scale=320:240', '-vframes', '1', '-f', 'mjpeg',
+                        'ffmpeg', '-y', '-i', temp_file.name, 
+                        '-ss', str(midpoint), '-vframes', '1', 
+                        '-vf', 'scale=320:240:force_original_aspect_ratio=decrease',
+                        '-f', 'mjpeg', '-q:v', '2',  # جودة عالية للمعاينة
                         thumb_temp.name
                     ]
                     
@@ -129,14 +143,34 @@ def _extract_video_info_from_bytes(video_bytes: bytes, filename: str) -> Tuple[O
                     if result_thumb.returncode == 0:
                         with open(thumb_temp.name, 'rb') as f:
                             thumbnail = f.read()
+                        logger.info("✅ تم إنشاء معاينة الفيديو بنجاح")
                             
                     import os
                     os.unlink(thumb_temp.name)
-                except Exception:
-                    logger.warning("فشل في إنشاء معاينة الفيديو")
+                except Exception as e:
+                    logger.warning(f"فشل في إنشاء معاينة الفيديو: {e}")
                     
         except Exception as e:
             logger.warning(f"ffmpeg غير متوفر أو خطأ في استخراج معلومات الفيديو: {e}")
+            
+            # خطة بديلة: استخدام OpenCV
+            try:
+                import cv2
+                cap = cv2.VideoCapture(temp_file.name)
+                if cap.isOpened():
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    
+                    if fps > 0 and frame_count > 0:
+                        duration = frame_count / fps
+                        logger.info(f"✅ OpenCV: معلومات الفيديو {width}x{height}, مدة: {duration:.1f}s")
+                    
+                    cap.release()
+            except Exception as cv_error:
+                logger.warning(f"فشل في استخدام OpenCV: {cv_error}")
+                
         finally:
             try:
                 import os
@@ -149,87 +183,7 @@ def _extract_video_info_from_bytes(video_bytes: bytes, filename: str) -> Tuple[O
     
     return width, height, int(duration) if duration else None, thumbnail
 
-def _extract_video_info_from_bytes(video_bytes: bytes, filename: str) -> Tuple[Optional[int], Optional[int], Optional[int]]:
-    """استخراج مدة وأبعاد الفيديو من البايتات"""
-    duration = None
-    width = None
-    height = None
-    try:
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=("." + filename.split(".")[-1] if "." in filename else ".mp4"))
-        temp_file.write(video_bytes)
-        temp_file.close()
-        
-        try:
-            # Try using OpenCV first
-            import cv2
-            cap = cv2.VideoCapture(temp_file.name)
-            if cap.isOpened():
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                
-                if fps > 0 and frame_count > 0:
-                    duration = int(frame_count / fps)
-                    if duration > 0:
-                        logger.info(f"✅ OpenCV استخرج معلومات الفيديو: مدة={duration}s, أبعاد={width}x{height}")
-                
-                cap.release()
-        except Exception as e:
-            # Fallback: try with ffprobe if available
-            if duration is None or duration <= 0:
-                try:
-                    import subprocess
-                    import json
-                    result = subprocess.run([
-                        'ffprobe', '-v', 'quiet', '-print_format', 'json',
-                        '-show_format', '-show_streams', temp_file.name
-                    ], capture_output=True, text=True, timeout=15)
-                    
-                    if result.returncode == 0:
-                        info = json.loads(result.stdout)
-                        # Get format duration first
-                        if 'format' in info and 'duration' in info['format']:
-                            duration = int(float(info['format']['duration']))
-                            logger.info(f"✅ FFprobe استخرج مدة الفيديو من المعلومات العامة: {duration}s")
-                        
-                        # Get video stream info
-                        video_stream = next((s for s in info['streams'] if s['codec_type'] == 'video'), None)
-                        if video_stream:
-                            if duration is None or duration <= 0:
-                                stream_duration = video_stream.get('duration')
-                                if stream_duration:
-                                    duration = int(float(stream_duration))
-                                    logger.info(f"✅ FFprobe استخرج مدة الفيديو من Stream: {duration}s")
-                            
-                            if width is None or width <= 0:
-                                width = int(video_stream.get('width', 0))
-                            if height is None or height <= 0:
-                                height = int(video_stream.get('height', 0))
-                except Exception as e:
-                    logger.warning(f"⚠️ فشل في استخدام FFprobe: {e}")
-        
-        finally:
-            try:
-                import os
-                os.unlink(temp_file.name)
-            except Exception:
-                pass
-    except Exception:
-        pass
-    
-    # Final fallback values if extraction completely failed
-    if duration is None or duration <= 0:
-        duration = 1  # At least 1 second to avoid 00:00 display
-        logger.warning("⚠️ لم يتم استخراج مدة الفيديو - استخدام القيمة الافتراضية 1 ثانية")
-    
-    if width is None or width <= 0:
-        width = 640
-    if height is None or height <= 0:
-        height = 480
-    
-    logger.info(f"🎬 معلومات الفيديو النهائية: مدة={duration}s, أبعاد={width}x{height}")
-    return duration, width, height
+
 
 def _extract_audio_cover_thumbnail(audio_bytes: bytes) -> Optional[bytes]:
     """استخراج صورة غلاف كصورة مصغّرة (JPEG) من ملف صوتي بايتات إن أمكن"""
