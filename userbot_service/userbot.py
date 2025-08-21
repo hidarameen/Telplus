@@ -830,25 +830,40 @@ class UserbotService:
                                 # Process audio ONCE and cache for all targets
                                 logger.info("🔧 بدء معالجة المقطع الصوتي لأول مرة - سيتم حفظه للاستخدام المتكرر")
                                 
-                                # تحميل الوسائط واستخراج اسم مناسب
-                                media_bytes = await event.message.download_media(bytes)
-                                if not media_bytes:
-                                    logger.warning("⚠️ فشل تحميل الوسائط - سيتم استخدام الوسائط الأصلية")
-                                    processed_media = event.message.media
-                                    processed_filename = None
+                                # تحميل الوسائط واستخراج اسم مناسب - مرة واحدة فقط
+                                if not hasattr(self, '_current_media_cache'):
+                                    self._current_media_cache = {}
+                                
+                                media_cache_key_download = f"{event.message.id}_{event.chat_id}_download"
+                                
+                                if media_cache_key_download in self._current_media_cache:
+                                    media_bytes, file_name, file_ext = self._current_media_cache[media_cache_key_download]
+                                    logger.info("🔄 استخدام الوسائط المحمّلة من التخزين المؤقت")
                                 else:
-                                    file_name = "media_file"
-                                    file_ext = ""
-                                    if hasattr(event.message.media, 'document') and event.message.media.document:
-                                        doc = event.message.media.document
-                                        if hasattr(doc, 'attributes'):
-                                            for attr in doc.attributes:
-                                                if hasattr(attr, 'file_name') and attr.file_name:
-                                                    file_name = attr.file_name
-                                                    if '.' in file_name:
-                                                        file_ext = '.' + file_name.split('.')[-1].lower()
-                                                        file_name = file_name.rsplit('.', 1)[0]
-                                                    break
+                                    media_bytes = await event.message.download_media(bytes)
+                                    if not media_bytes:
+                                        logger.warning("⚠️ فشل تحميل الوسائط - سيتم استخدام الوسائط الأصلية")
+                                        processed_media = event.message.media
+                                        processed_filename = None
+                                    else:
+                                        file_name = "media_file"
+                                        file_ext = ""
+                                        if hasattr(event.message.media, 'document') and event.message.media.document:
+                                            doc = event.message.media.document
+                                            if hasattr(doc, 'attributes'):
+                                                for attr in doc.attributes:
+                                                    if hasattr(attr, 'file_name') and attr.file_name:
+                                                        file_name = attr.file_name
+                                                        if '.' in file_name:
+                                                            file_ext = '.' + file_name.split('.')[-1].lower()
+                                                            file_name = file_name.rsplit('.', 1)[0]
+                                                        break
+                                        
+                                        # حفظ البيانات المحمّلة في التخزين المؤقت لهذه الرسالة
+                                        self._current_media_cache[media_cache_key_download] = (media_bytes, file_name, file_ext)
+                                        logger.info("💾 تم حفظ الوسائط المحمّلة في التخزين المؤقت لإعادة الاستخدام")
+                                
+                                if media_bytes:
                                     full_name = file_name + (file_ext or '')
                                     processed_media, processed_filename = await self.apply_audio_metadata(event, first_task['id'], media_bytes, full_name)
                                     
@@ -862,6 +877,8 @@ class UserbotService:
                         else:
                             # لا علامة مائية ولا وسوم صوتية: لا تنزيل/معالجة - سيتم الإرسال كنسخ خادم إن أمكن
                             logger.info("⏭️ لا علامة مائية ولا وسوم صوتية مطلوبة → إرسال كوسائط عادية دون تنزيل/رفع")
+                            processed_media = None
+                            processed_filename = None
                     except Exception as e:
                         logger.error(f"❌ خطأ في معالجة الوسائط: {e}")
                         processed_media = event.message.media
@@ -1288,6 +1305,11 @@ class UserbotService:
 
             except Exception as e:
                 logger.error(f"خطأ في معالج الرسائل للمستخدم {user_id}: {e}")
+            finally:
+                # تنظيف التخزين المؤقت المحلي بعد معالجة كل رسالة
+                if hasattr(self, '_current_media_cache'):
+                    self._current_media_cache.clear()
+                    logger.info("🗑️ تم تنظيف التخزين المؤقت المحلي للوسائط")
 
         @client.on(events.MessageEdited)
         async def message_edit_handler(event):
