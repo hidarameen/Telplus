@@ -2196,6 +2196,13 @@ class UserbotService:
                 from send_file_helper import TelethonFileSender
                 
                 # Use TelethonFileSender to upload with proper attributes but cache result
+                # CRITICAL FIX: Force video files to be sent as video, not document
+                if filename and filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v')):
+                    kwargs["force_document"] = False  # إجبار الإرسال كفيديو
+                    # إزالة parse_mode للفيديوهات لتجنب مشاكل التنسيق
+                    if 'parse_mode' in kwargs:
+                        del kwargs['parse_mode']
+                
                 result = await TelethonFileSender.send_file_with_name(
                     client, target_entity, media_bytes, filename, **kwargs
                 )

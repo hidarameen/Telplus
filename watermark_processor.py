@@ -485,23 +485,26 @@ class WatermarkProcessor:
                 target_bitrate = max(target_bitrate, 500000)  # حد أدنى 500 kbps
             else:
                 # استخدام معدل البت الأصلي مع تحسين كبير
-                target_bitrate = int(original_bitrate * 0.7)  # تقليل 30% للحصول على حجم أصغر
+                target_bitrate = int(original_bitrate * 0.5)  # تقليل 50% للحصول على حجم أصغر بشكل أقصى
             
             # استخدام FFmpeg إذا كان متوفراً
             if self.ffmpeg_available:
                 try:
-                    # إعدادات FFmpeg محسنة
+                    # إعدادات FFmpeg محسنة للضغط الأقصى مع الحفاظ على الجودة
                     cmd = [
                         'ffmpeg', '-i', input_path,
                         '-c:v', 'libx264',  # كودك H.264
-                        '-preset', 'medium',  # توازن بين السرعة والجودة
-                        '-crf', '25',  # جودة ثابتة محسنة (25 بدلاً من 23)
-                        '-maxrate', f'{target_bitrate}',
-                        '-bufsize', f'{target_bitrate * 2}',
+                        '-preset', 'slower',  # ضغط أقصى (slower بدلاً من medium)
+                        '-crf', '28',  # ضغط أقصى مع جودة مقبولة (28 بدلاً من 25)
+                        '-maxrate', f'{int(target_bitrate * 0.6)}',  # تقليل معدل البت بنسبة 40%
+                        '-bufsize', f'{target_bitrate}',
                         '-c:a', 'aac',  # كودك الصوت
-                        '-b:a', '96k',  # معدل بت صوت أقل
+                        '-b:a', '64k',  # معدل بت صوت أقل (64k بدلاً من 96k)
                         '-movflags', '+faststart',  # تحسين التشغيل
                         '-pix_fmt', 'yuv420p',  # تنسيق بكسل متوافق
+                        '-profile:v', 'main',  # ملف H.264 متوسط (أصغر من high)
+                        '-tune', 'film',  # تحسين للفيديوهات
+                        '-g', '30',  # مجموعة صور كل 30 إطار
                         '-y',  # استبدال الملف الموجود
                         output_path
                     ]
@@ -1334,23 +1337,26 @@ class WatermarkProcessor:
                 target_bitrate = max(target_bitrate, 500000)  # حد أدنى 500 kbps
             else:
                 # استخدام معدل البت الأصلي مع تحسين كبير
-                target_bitrate = int(original_bitrate * 0.7)  # تقليل 30% للحصول على حجم أصغر
+                target_bitrate = int(original_bitrate * 0.5)  # تقليل 50% للحصول على حجم أصغر بشكل أقصى
             
             # استخدام FFmpeg إذا كان متوفراً
             if self.ffmpeg_available:
                 try:
-                    # إعدادات FFmpeg محسنة
+                    # إعدادات FFmpeg محسنة للضغط الأقصى مع الحفاظ على الجودة
                     cmd = [
                         'ffmpeg', '-i', input_path,
                         '-c:v', 'libx264',  # كودك H.264
-                        '-preset', 'medium',  # توازن بين السرعة والجودة
-                        '-crf', '25',  # جودة ثابتة محسنة (25 بدلاً من 23)
-                        '-maxrate', f'{target_bitrate}',
-                        '-bufsize', f'{target_bitrate * 2}',
+                        '-preset', 'slower',  # ضغط أقصى (slower بدلاً من medium)
+                        '-crf', '28',  # ضغط أقصى مع جودة مقبولة (28 بدلاً من 25)
+                        '-maxrate', f'{int(target_bitrate * 0.6)}',  # تقليل معدل البت بنسبة 40%
+                        '-bufsize', f'{target_bitrate}',
                         '-c:a', 'aac',  # كودك الصوت
-                        '-b:a', '96k',  # معدل بت صوت أقل
+                        '-b:a', '64k',  # معدل بت صوت أقل (64k بدلاً من 96k)
                         '-movflags', '+faststart',  # تحسين التشغيل
                         '-pix_fmt', 'yuv420p',  # تنسيق بكسل متوافق
+                        '-profile:v', 'main',  # ملف H.264 متوسط (أصغر من high)
+                        '-tune', 'film',  # تحسين للفيديوهات
+                        '-g', '30',  # مجموعة صور كل 30 إطار
                         '-y',  # استبدال الملف الموجود
                         output_path
                     ]

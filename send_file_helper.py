@@ -346,7 +346,8 @@ class TelethonFileSender:
                         ))
                         attributes.append(DocumentAttributeFilename(file_name=filename))
                         kwargs["attributes"] = attributes
-                        kwargs.setdefault("force_document", False)
+                        kwargs["force_document"] = False  # CRITICAL: إجبار الإرسال كفيديو وليس ملف
+                        kwargs.setdefault("parse_mode", None)  # إزالة parse_mode للفيديوهات
                         logger.info(f"🎬 إضافة سمات فيديو للملف: {filename} (مدة: {duration}s, أبعاد: {width}x{height})")
                     except Exception as e_attr:
                         logger.warning(f"⚠️ تعذر إضافة سمات الفيديو: {e_attr}")
