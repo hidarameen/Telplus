@@ -18,8 +18,16 @@ class Database:
 
     def get_connection(self):
         """Get SQLite database connection"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=120, check_same_thread=False, isolation_level=None)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            conn.execute('PRAGMA busy_timeout=120000')
+            conn.execute('PRAGMA foreign_keys=ON')
+            conn.execute('PRAGMA wal_autocheckpoint=1000')
+        except Exception:
+            pass
         return conn
 
     def init_database(self):
@@ -778,13 +786,13 @@ class Database:
                     SELECT COUNT(*) as count FROM task_inline_buttons 
                     WHERE task_id = ?
                 ''', (task_id,))
-                buttons_count = cursor.fetchone()['count']
+                buttons_count = cursor.fetchone()[0]
                 
                 return {
-                    'header_enabled': header_result['enabled'] if header_result else False,
-                    'header_text': header_result['header_text'] if header_result else None,
-                    'footer_enabled': footer_result['enabled'] if footer_result else False,
-                    'footer_text': footer_result['footer_text'] if footer_result else None,
+                    'header_enabled': header_result[0] if header_result else False,
+                    'header_text': header_result[1] if header_result else None,
+                    'footer_enabled': footer_result[0] if footer_result else False,
+                    'footer_text': footer_result[1] if footer_result else None,
                     'inline_buttons_enabled': buttons_count > 0
                 }
         except Exception as e:

@@ -1,12 +1,124 @@
 """
 مساعد لإرسال الملفات مع اسم مخصص في Telethon
 يحل مشكلة إرسال البيانات الخام (bytes) مع اسم ملف صحيح
+ويضيف سمات خاصة للصوت لضمان إرساله كملف موسيقى وليس مستند.
 """
 import io
 import logging
-from typing import Union, Optional
+import tempfile
+from typing import Union, Optional, Tuple
+from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+def _is_audio_filename(name: str) -> bool:
+    try:
+        lower = name.lower()
+        return lower.endswith((".mp3", ".m4a", ".aac", ".ogg", ".wav", ".flac", ".wma", ".opus"))
+    except Exception:
+        return False
+
+def _extract_audio_tags_from_bytes(audio_bytes: bytes, filename: str) -> Tuple[Optional[str], Optional[str], Optional[int]]:
+    """استخراج العنوان والمؤدي والمدة من بايتات ملف صوتي باستخدام mutagen"""
+    title = None
+    artist = None
+    duration = None
+    try:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=("." + filename.split(".")[-1] if "." in filename else ".mp3"))
+        temp_file.write(audio_bytes)
+        temp_file.close()
+        try:
+            import mutagen
+            audio = mutagen.File(temp_file.name)
+            if audio is not None:
+                try:
+                    if hasattr(audio, 'info') and hasattr(audio.info, 'length'):
+                        duration = int(audio.info.length)
+                except Exception:
+                    duration = None
+                try:
+                    tags = getattr(audio, 'tags', None)
+                    if tags:
+                        if hasattr(tags, 'getall'):
+                            try:
+                                t = tags.getall('TIT2')
+                                if t:
+                                    title = str(t[0].text[0]) if hasattr(t[0], 'text') and t[0].text else None
+                            except Exception:
+                                pass
+                            try:
+                                a = tags.getall('TPE1')
+                                if a:
+                                    artist = str(a[0].text[0]) if hasattr(a[0], 'text') and a[0].text else None
+                            except Exception:
+                                pass
+                        elif hasattr(tags, 'get'):
+                            try:
+                                title = (tags.get('title') or [None])[0]
+                            except Exception:
+                                pass
+                            try:
+                                artist = (tags.get('artist') or [None])[0]
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+        finally:
+            try:
+                import os
+                os.unlink(temp_file.name)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return title, artist, duration
+
+def _extract_audio_cover_thumbnail(audio_bytes: bytes) -> Optional[bytes]:
+    """استخراج صورة غلاف كصورة مصغّرة (JPEG) من ملف صوتي بايتات إن أمكن"""
+    try:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        temp_file.write(audio_bytes)
+        temp_file.close()
+        cover_data = None
+        try:
+            import mutagen
+            from mutagen.id3 import ID3, APIC
+            audio = mutagen.File(temp_file.name)
+            if isinstance(audio, ID3) or hasattr(audio, 'tags'):
+                tags = audio if isinstance(audio, ID3) else getattr(audio, 'tags', None)
+                if tags:
+                    # البحث عن APIC (صورة غلاف)
+                    pics = []
+                    try:
+                        pics = tags.getall('APIC') if hasattr(tags, 'getall') else []
+                    except Exception:
+                        apic = tags.get('APIC:') if hasattr(tags, 'get') else None
+                        pics = [apic] if apic else []
+                    for pic in pics:
+                        if pic and hasattr(pic, 'data') and pic.data:
+                            cover_data = pic.data
+                            break
+            if not cover_data:
+                return None
+            # تحويل الصورة إلى JPEG مصغّر مناسب كـ thumb
+            try:
+                img = Image.open(io.BytesIO(cover_data))
+                img = img.convert('RGB')
+                img.thumbnail((320, 320))
+                out = io.BytesIO()
+                img.save(out, format='JPEG', quality=85)
+                out.seek(0)
+                return out.getvalue()
+            except Exception:
+                return cover_data
+        finally:
+            try:
+                import os
+                os.unlink(temp_file.name)
+            except Exception:
+                pass
+    except Exception:
+        return None
 
 class TelethonFileSender:
     """مساعد لإرسال الملفات مع أسماء صحيحة"""
@@ -29,6 +141,34 @@ class TelethonFileSender:
                 
                 logger.info(f"🔧 تم إنشاء BytesIO stream مع الاسم: {file_stream.name}")
                 
+                # إضافة سمات الصوت والصورة المصغّرة إن لزم لضمان ظهور الملف كصوت مع معاينة
+                if _is_audio_filename(filename):
+                    try:
+                        from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeFilename
+                        title, artist, duration = _extract_audio_tags_from_bytes(file_data, filename)
+                        attributes = list(kwargs.pop('attributes', []) or [])
+                        attributes.append(DocumentAttributeAudio(
+                            duration=duration or 0,
+                            title=title or None,
+                            performer=artist or None,
+                        ))
+                        # تأكيد اسم الملف كسِمة ضمن الوثيقة
+                        attributes.append(DocumentAttributeFilename(file_name=filename))
+                        kwargs['attributes'] = attributes
+                        kwargs.setdefault('force_document', False)
+                        # محاولة استخراج صورة الغلاف لتكون صورة مصغّرة للملف الصوتي
+                        if not kwargs.get('thumb'):
+                            try:
+                                cover_thumb = _extract_audio_cover_thumbnail(file_data)
+                                if cover_thumb:
+                                    kwargs['thumb'] = cover_thumb
+                                    logger.info("🖼️ تم تعيين صورة مصغّرة للملف الصوتي من صورة الغلاف")
+                            except Exception as e_thumb:
+                                logger.warning(f"⚠️ تعذر استخراج صورة مصغّرة للملف الصوتي: {e_thumb}")
+                        logger.info(f"🎵 إضافة سمات صوتية: title='{title}', artist='{artist}', duration={duration}")
+                    except Exception as e_attr:
+                        logger.warning(f"⚠️ تعذر إضافة سمات الصوت: {e_attr}")
+
                 # إرسال الملف مع stream
                 result = await client.send_file(entity, file_stream, **kwargs)
                 logger.info(f"✅ تم إرسال الملف {filename} بنجاح باستخدام BytesIO")

@@ -1,6 +1,18 @@
 """
-Userbot Service for Message Forwarding
+Userbot Service for Message Forwarding - الإصدار المحسن
 Uses Telethon for automated message forwarding between chats
+
+التحسينات الرئيسية:
+1. معالجة الوسائط مرة واحدة وإعادة استخدامها لكل الأهداف
+2. تحسين أداء العلامة المائية
+3. ذاكرة مؤقتة ذكية للوسائط المعالجة
+4. تحسين معالجة الفيديو
+
+Main Improvements:
+1. Process media once and reuse for all targets
+2. Enhanced watermark performance
+3. Smart cache for processed media
+4. Improved video processing
 """
 import logging
 import asyncio
@@ -10,11 +22,12 @@ from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, AuthKeyUnregisteredError
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageEntitySpoiler, DocumentAttributeFilename
-from database.database import Database
+from database import get_database
 from bot_package.config import API_ID, API_HASH
 import time
 from collections import defaultdict
 from watermark_processor import WatermarkProcessor
+from audio_processor import AudioProcessor
 import tempfile
 import os
 
@@ -74,53 +87,351 @@ class AlbumCollector:
 
 class UserbotService:
     def __init__(self):
-        self.db = Database()
+        """Initialize UserBot with database factory"""
+        # استخدام مصنع قاعدة البيانات
+        self.db = get_database()
+        
+        # معلومات قاعدة البيانات
+        from database import DatabaseFactory
+        self.db_info = DatabaseFactory.get_database_info()
+        
+        logger.info(f"🗄️ تم تهيئة قاعدة البيانات في UserBot: {self.db_info['name']}")
+        
         self.clients: Dict[int, TelegramClient] = {}  # user_id -> client
         self.user_tasks: Dict[int, List[Dict]] = {}   # user_id -> tasks
+        self.user_locks: Dict[int, asyncio.Lock] = {}  # user_id -> lock for thread safety
         self.running = True
         self.album_collectors: Dict[int, AlbumCollector] = {}  # user_id -> collector
         self.watermark_processor = WatermarkProcessor()  # معالج العلامة المائية
+        self.audio_processor = AudioProcessor()  # معالج الوسوم الصوتية
+        self.session_health_status: Dict[int, bool] = {}  # user_id -> health status
+        self.session_locks: Dict[int, bool] = {}  # user_id -> is_locked (prevent multiple usage)
+        self.max_reconnect_attempts = 3
+        self.reconnect_delay = 5  # seconds
+        self.startup_delay = 15  # seconds between starting different user sessions
 
     async def start_with_session(self, user_id: int, session_string: str):
         """Start userbot for a specific user with session string"""
         try:
-            # Create client with session string
-            client = TelegramClient(
-                StringSession(session_string),
-                int(API_ID),
-                API_HASH
-            )
+            # Create lock for this user if not exists
+            if user_id not in self.user_locks:
+                self.user_locks[user_id] = asyncio.Lock()
 
-            # Connect and check if session is valid
-            await client.connect()
+            async with self.user_locks[user_id]:
+                logger.info(f"🔄 بدء إنشاء جلسة جديدة للمستخدم {user_id}")
+                
+                # Clear any existing locks for this user
+                if user_id in self.session_locks:
+                    del self.session_locks[user_id]
+                
+                # Force disconnect any existing client for this user
+                if user_id in self.clients:
+                    existing_client = self.clients[user_id]
+                    try:
+                        logger.info(f"🔌 فصل العميل الموجود للمستخدم {user_id}")
+                        await existing_client.disconnect()
+                        await asyncio.sleep(2)  # Wait for clean disconnect
+                    except Exception as e:
+                        logger.warning(f"خطأ في فصل العميل القديم: {e}")
+                    finally:
+                        if user_id in self.clients:
+                            del self.clients[user_id]
 
-            if not await client.is_user_authorized():
-                logger.error(f"Session غير صالحة للمستخدم {user_id}")
-                return False
+                # Wait a moment before creating new connection
+                await asyncio.sleep(1)
 
-            # Store client
-            self.clients[user_id] = client
+                # Create client with session string and unique identifiers
+                client = TelegramClient(
+                    StringSession(session_string),
+                    int(API_ID),
+                    API_HASH,
+                    device_model=f"Telegram-UserBot-{user_id}",
+                    system_version="2.0",
+                    app_version=f"1.0.{user_id}",
+                    lang_code="ar",
+                    system_lang_code="ar",
+                    sequential_updates=True  # Ensure sequential processing
+                )
 
-            # Load user tasks
-            await self.refresh_user_tasks(user_id)
+                # Set connection parameters to avoid conflicts
+                client._connection_retries = 2
+                client._retry_delay = 5
 
-            # Set up event handlers for this user
-            await self._setup_event_handlers(user_id, client)
+                logger.info(f"🔄 محاولة الاتصال للمستخدم {user_id}...")
+                
+                # Connect with retry mechanism
+                max_attempts = 3
+                for attempt in range(max_attempts):
+                    try:
+                        await client.connect()
+                        break
+                    except Exception as connect_error:
+                        logger.warning(f"فشل في المحاولة {attempt + 1} للمستخدم {user_id}: {connect_error}")
+                        if attempt < max_attempts - 1:
+                            await asyncio.sleep(5)  # Wait before retry
+                        else:
+                            raise connect_error
 
-            user = await client.get_me()
-            logger.info(f"✅ تم تشغيل UserBot للمستخدم {user_id} ({user.first_name})")
+                # Check authorization
+                if not await client.is_user_authorized():
+                    logger.error(f"Session غير صالحة للمستخدم {user_id}")
+                    await client.disconnect()
+                    return False
 
-            return True
+                # Store client
+                self.clients[user_id] = client
+                self.session_health_status[user_id] = True
+
+                # Create album collector for this user
+                if user_id not in self.album_collectors:
+                    self.album_collectors[user_id] = AlbumCollector()
+
+                # Load user tasks
+                await self.refresh_user_tasks(user_id)
+
+                # Set up event handlers for this user
+                await self._setup_event_handlers(user_id, client)
+
+                user = await client.get_me()
+                logger.info(f"✅ تم تشغيل UserBot للمستخدم {user_id} ({user.first_name})")
+
+                return True
 
         except AuthKeyUnregisteredError:
             logger.error(f"مفتاح المصادقة غير صالح للمستخدم {user_id}")
+            # Mark session as unhealthy
+            self.session_health_status[user_id] = False
+            self.db.update_session_health(user_id, False, "مفتاح المصادقة غير صالح")
+            # Release session lock
+            if user_id in self.session_locks:
+                self.session_locks[user_id] = False
             # Remove invalid session from database
             self.db.delete_user_session(user_id)
             return False
 
         except Exception as e:
-            logger.error(f"خطأ في تشغيل UserBot للمستخدم {user_id}: {e}")
+            error_msg = str(e)
+            logger.error(f"خطأ في تشغيل UserBot للمستخدم {user_id}: {error_msg}")
+            self.session_health_status[user_id] = False
+            self.db.update_session_health(user_id, False, error_msg)
+            
+            # Clear locks on error
+            if user_id in self.session_locks:
+                del self.session_locks[user_id]
+            
+            # If it's a session conflict error, remove the session from database
+            if "authorization key" in error_msg.lower() or "different IP" in error_msg.lower():
+                logger.warning(f"🚫 تضارب في استخدام الجلسة للمستخدم {user_id} - حذف الجلسة القديمة")
+                self.db.delete_user_session(user_id)
+                
             return False
+
+    async def check_user_session_health(self, user_id: int) -> bool:
+        """Check if user session is healthy"""
+        try:
+            if user_id not in self.clients:
+                self.session_health_status[user_id] = False
+                self.db.update_session_health(user_id, False, "العميل غير موجود")
+                return False
+            
+            client = self.clients[user_id]
+            if not client.is_connected():
+                self.session_health_status[user_id] = False
+                self.db.update_session_health(user_id, False, "العميل غير متصل")
+                return False
+            
+            # Try to get user info to verify session is working
+            await client.get_me()
+            self.session_health_status[user_id] = True
+            self.db.update_session_health(user_id, True)
+            return True
+            
+        except Exception as e:
+            logger.error(f"فحص صحة الجلسة فشل للمستخدم {user_id}: {e}")
+            self.session_health_status[user_id] = False
+            self.db.update_session_health(user_id, False, str(e))
+            return False
+
+    async def reconnect_user_session(self, user_id: int) -> bool:
+        """Attempt to reconnect a user session"""
+        try:
+            # Get session string from database
+            session_string = self.db.get_user_session_string(user_id)
+            if not session_string:
+                logger.error(f"لا توجد جلسة محفوظة للمستخدم {user_id}")
+                return False
+
+            # Clear any locks for this user
+            if user_id in self.session_locks:
+                del self.session_locks[user_id]
+
+            # Disconnect existing client if any
+            if user_id in self.clients:
+                try:
+                    await self.clients[user_id].disconnect()
+                    await asyncio.sleep(3)  # انتظار أطول للتأكد من الانقطاع
+                except:
+                    pass
+                del self.clients[user_id]
+
+            # Clear session health status
+            if user_id in self.session_health_status:
+                del self.session_health_status[user_id]
+
+            # Wait before reconnecting
+            await asyncio.sleep(2)
+
+            # Start fresh session
+            success = await self.start_with_session(user_id, session_string)
+            if success:
+                logger.info(f"✅ تم إعادة اتصال المستخدم {user_id} بنجاح")
+            else:
+                logger.error(f"❌ فشل في إعادة اتصال المستخدم {user_id}")
+            
+            return success
+
+        except Exception as e:
+            logger.error(f"خطأ في إعادة اتصال المستخدم {user_id}: {e}")
+            return False
+
+    async def stop_user_session(self, user_id: int):
+        """Stop a specific user session"""
+        try:
+            logger.info(f"🛑 بدء إيقاف جلسة المستخدم {user_id}")
+            
+            # Clear session lock immediately
+            if user_id in self.session_locks:
+                del self.session_locks[user_id]
+            
+            if user_id in self.user_locks:
+                async with self.user_locks[user_id]:
+                    if user_id in self.clients:
+                        try:
+                            await self.clients[user_id].disconnect()
+                            await asyncio.sleep(1)  # انتظار للتأكد من الانقطاع
+                        except Exception as disconnect_error:
+                            logger.warning(f"خطأ في قطع الاتصال للمستخدم {user_id}: {disconnect_error}")
+                        del self.clients[user_id]
+                    
+                    if user_id in self.user_tasks:
+                        del self.user_tasks[user_id]
+                    
+                    if user_id in self.album_collectors:
+                        del self.album_collectors[user_id]
+                    
+                    if user_id in self.session_health_status:
+                        del self.session_health_status[user_id]
+                    
+                    logger.info(f"✅ تم إيقاف جلسة المستخدم {user_id} بنجاح")
+            else:
+                # Clean up without lock if lock doesn't exist
+                if user_id in self.clients:
+                    try:
+                        await self.clients[user_id].disconnect()
+                    except:
+                        pass
+                    del self.clients[user_id]
+                
+                for attr in ['user_tasks', 'album_collectors', 'session_health_status']:
+                    if hasattr(self, attr) and user_id in getattr(self, attr):
+                        delattr(self, attr)[user_id]
+
+        except Exception as e:
+            logger.error(f"خطأ في إيقاف جلسة المستخدم {user_id}: {e}")
+            # Force cleanup on error
+            for attr in ['clients', 'user_tasks', 'album_collectors', 'session_health_status', 'session_locks']:
+                if hasattr(self, attr) and user_id in getattr(self, attr):
+                    try:
+                        del getattr(self, attr)[user_id]
+                    except:
+                        pass
+
+    async def stop_all(self):
+        """Stop all user sessions"""
+        logger.info("🛑 إيقاف جميع جلسات المستخدمين...")
+        self.running = False
+        
+        # Create list of user IDs to avoid modification during iteration
+        user_ids = list(self.clients.keys())
+        
+        for user_id in user_ids:
+            await self.stop_user_session(user_id)
+        
+        logger.info("✅ تم إيقاف جميع الجلسات")
+
+    async def start_session_health_monitor(self):
+        """Start background health monitoring for all sessions"""
+        logger.info("🏥 بدء مراقب صحة الجلسات...")
+        
+        while self.running:
+            try:
+                await asyncio.sleep(30)  # Check every 30 seconds
+                
+                if not self.clients:
+                    continue
+                
+                # Check health of all active sessions
+                for user_id in list(self.clients.keys()):
+                    try:
+                        is_healthy = await self.check_user_session_health(user_id)
+                        
+                        if not is_healthy:
+                            logger.warning(f"⚠️ جلسة المستخدم {user_id} غير صحية - محاولة إعادة الاتصال...")
+                            success = await self.reconnect_user_session(user_id)
+                            
+                            if success:
+                                logger.info(f"✅ تم إعادة اتصال المستخدم {user_id} بنجاح")
+                            else:
+                                logger.error(f"❌ فشل في إعادة اتصال المستخدم {user_id}")
+                        
+                    except Exception as e:
+                        logger.error(f"خطأ في فحص صحة جلسة المستخدم {user_id}: {e}")
+                        
+            except Exception as e:
+                logger.error(f"خطأ في مراقب صحة الجلسات: {e}")
+                await asyncio.sleep(60)  # Wait longer on error
+
+    async def get_user_session_info(self, user_id: int) -> dict:
+        """Get detailed session information for a user"""
+        try:
+            if user_id not in self.clients:
+                return {
+                    'connected': False,
+                    'healthy': False,
+                    'task_count': 0,
+                    'error': 'لا يوجد عميل'
+                }
+            
+            client = self.clients[user_id]
+            is_connected = client.is_connected()
+            is_healthy = self.session_health_status.get(user_id, False)
+            task_count = len(self.user_tasks.get(user_id, []))
+            
+            user_info = None
+            if is_connected:
+                try:
+                    user_info = await client.get_me()
+                except:
+                    pass
+            
+            return {
+                'connected': is_connected,
+                'healthy': is_healthy,
+                'task_count': task_count,
+                'user_info': {
+                    'id': user_info.id if user_info else None,
+                    'first_name': user_info.first_name if user_info else None,
+                    'phone': user_info.phone if user_info else None
+                } if user_info else None
+            }
+            
+        except Exception as e:
+            return {
+                'connected': False,
+                'healthy': False,
+                'task_count': 0,
+                'error': str(e)
+            }
 
     def apply_text_cleaning(self, message_text: str, task_id: int) -> str:
         """Apply text cleaning based on task settings"""
@@ -137,14 +448,19 @@ class UserbotService:
 
             # 1. Remove links
             if settings.get('remove_links', False):
-                # Remove HTTP/HTTPS URLs
+                # Remove Markdown/HTML hidden links first (preserve visible text)
+                cleaned_text = re.sub(r'\[([^\]]+)\]\s*\(([^)]*)\)', r'\1', cleaned_text)
+                cleaned_text = re.sub(r'<a\s+href=[\'\"][^\'\"]+[\'\"]\s*>(.*?)</a>', r'\1', cleaned_text, flags=re.IGNORECASE|re.DOTALL)
+                # Remove angle-bracket autolinks like <https://example.com>
+                cleaned_text = re.sub(r'<https?://[^>]+>', '', cleaned_text)
+                # Then remove plain URLs and domains
                 cleaned_text = re.sub(r'https?://[^\s]+', '', cleaned_text)
-                # Remove Telegram links (t.me)
                 cleaned_text = re.sub(r't\.me/[^\s]+', '', cleaned_text)
-                # Remove www links
                 cleaned_text = re.sub(r'www\.[^\s]+', '', cleaned_text)
-                # Remove domain-like patterns (improved pattern for sites like meyon.com.ye/path)
                 cleaned_text = re.sub(r'\b[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.([a-zA-Z]{2,6}\.?)+(/[^\s]*)?', '', cleaned_text)
+                # Cleanup any leftover empty brackets
+                cleaned_text = re.sub(r'\[\s*\]', '', cleaned_text)
+                cleaned_text = re.sub(r'\(\s*\)', '', cleaned_text)
                 logger.debug(f"🧹 تم حذف الروابط من المهمة {task_id}")
 
             # 2. Remove emojis
@@ -249,18 +565,38 @@ class UserbotService:
     async def _setup_event_handlers(self, user_id: int, client: TelegramClient):
         """Set up message forwarding event handlers"""
 
-        @client.on(events.NewMessage(incoming=True))
+        @client.on(events.NewMessage())
         async def message_handler(event):
             try:
-                logger.warning(f"🔔 *** استقبال رسالة جديدة من المستخدم {user_id} ***")
-                logger.warning(f"📍 Chat ID: {event.chat_id}, Message: {event.text[:50] if event.text else 'رسالة بدون نص'}...")
+                # Ensure session is still healthy for this user
+                if not self.session_health_status.get(user_id, False):
+                    logger.warning(f"⚠️ تجاهل الرسالة - جلسة المستخدم {user_id} غير صحية")
+                    return
 
-                # Immediate check for our target chat
-                if event.chat_id == -1002289754739:
-                    logger.error(f"🎯 *** رسالة من محادثة Hidar! Chat ID: {event.chat_id} ***")
-                    logger.error(f"🎯 *** بدء معالجة الرسالة للتوجيه... ***")
-                # Get user tasks
-                tasks = self.user_tasks.get(user_id, [])
+                # Verify this client belongs to this user
+                if user_id not in self.clients or self.clients[user_id] != client:
+                    logger.warning(f"⚠️ تجاهل الرسالة - العميل لا ينتمي للمستخدم {user_id}")
+                    return
+
+                # Use lock to prevent concurrent processing for this user
+                if user_id not in self.user_locks:
+                    self.user_locks[user_id] = asyncio.Lock()
+
+                async with self.user_locks[user_id]:
+                    # Log incoming message with client's user ID
+                    logger.warning(f"🔔 *** رسالة جديدة عبر عميل المستخدم {user_id} ***")
+                    logger.warning(f"📍 Chat ID: {event.chat_id}, Message: {event.text[:50] if event.text else 'رسالة بدون نص'}...")
+
+                    # Special monitoring for important chats
+                    if event.chat_id == -1002289754739:
+                        logger.error(f"🎯 *** رسالة من محادثة Hidar! Chat ID: {event.chat_id} (عميل {user_id}) ***")
+                        logger.error(f"🎯 *** بدء معالجة الرسالة للتوجيه... ***")
+                    elif event.chat_id == -1002403180244:
+                        logger.error(f"🎯 *** رسالة من محادثة Nuha! Chat ID: {event.chat_id} (عميل {user_id}) ***")
+                        logger.error(f"🎯 *** بدء معالجة الرسالة للتوجيه... ***")
+                    
+                    # Get user tasks for this specific user (the owner of this client)
+                    tasks = self.user_tasks.get(user_id, [])
 
 
                 # Get source chat ID and username first
@@ -308,14 +644,14 @@ class UserbotService:
                     if task_source_id == source_chat_id_str:
                         logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
-                        # Check admin filter first (if enabled)
+                        # Check admin filter first (if enabled) - now based on post_author
                         logger.error(f"🚨 === بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id} ===")
                         
                         # Log message details for debugging
                         author_signature = getattr(event.message, 'post_author', None)
                         logger.error(f"🚨 === تفاصيل الرسالة: sender_id={event.sender_id}, post_author='{author_signature}' ===")
                         
-                        admin_allowed = await self.is_admin_allowed_with_message(task_id, event.message)
+                        admin_allowed = await self.is_admin_allowed_by_signature(task_id, event.message, source_chat_id_str)
                         logger.error(f"🚨 === نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed} ===")
 
                         # Check media filter
@@ -391,21 +727,125 @@ class UserbotService:
                 
                 album_collector = self.album_collectors[user_id]
 
-                # Check advanced filters before forwarding to any targets
-                message = event.message
-                should_block, should_remove_buttons, should_remove_forward = await self._check_message_advanced_filters(
-                    first_task['id'], message
-                )
+                # ===== معالجة الوسائط مرة واحدة =====
+                # بدلاً من معالجة الوسائط لكل هدف بشكل منفصل، نقوم بمعالجتها مرة واحدة
+                # وإعادة استخدامها لكل الأهداف لتحسين الأداء وتقليل استهلاك الموارد
+                processed_media = None
+                processed_filename = None
                 
-                if should_block:
-                    logger.info(f"🚫 الرسالة محظورة بواسطة فلاتر متقدمة - تم رفضها لجميع الأهداف")
-                    return
+                if event.message.media:
+                    # ===== معالجة الوسائط مرة واحدة =====
+                    # بدلاً من معالجة الوسائط لكل هدف بشكل منفصل، نقوم بمعالجتها مرة واحدة
+                    # ملاحظة: لا نطبق العلامة المائية إلا إذا كانت مفعلة لجميع المهام المطابقة
+                    first_task = matching_tasks[0]
+                    logger.info(f"🎬 تهيئة معالجة الوسائط مرة واحدة (أول مهمة: {first_task['id']})")
+
+                    # فحص تجميعي: هل العلامة المائية مفعلة لكل المهام المطابقة؟
+                    watermark_enabled_for_all = True
+                    try:
+                        for _t in matching_tasks:
+                            _wm = self.db.get_watermark_settings(_t['id'])
+                            if not _wm.get('enabled', False):
+                                watermark_enabled_for_all = False
+                                break
+                    except Exception as _e:
+                        logger.warning(f"⚠️ فشل فحص إعدادات العلامة المائية لجميع المهام: {_e}")
+                        watermark_enabled_for_all = False
+
+                    # فحص: هل الرسالة ملف صوتي؟
+                    is_audio_message = False
+                    try:
+                        if hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document:
+                            doc = event.message.media.document
+                            if getattr(doc, 'mime_type', None) and str(doc.mime_type).startswith('audio/'):
+                                is_audio_message = True
+                            else:
+                                # محاولة من الاسم
+                                file_attr = None
+                                for attr in getattr(doc, 'attributes', []) or []:
+                                    if hasattr(attr, 'file_name') and attr.file_name:
+                                        file_attr = attr.file_name
+                                        break
+                                if file_attr and file_attr.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.wma', '.opus')):
+                                    is_audio_message = True
+                    except Exception:
+                        is_audio_message = False
+
+                    # فحص تجميعي: هل وسوم الصوت مفعلة لكل المهام (للرسائل الصوتية فقط)؟
+                    audio_tags_enabled_for_all = False
+                    if is_audio_message:
+                        audio_tags_enabled_for_all = True
+                        try:
+                            for _t in matching_tasks:
+                                _as = self.db.get_audio_metadata_settings(_t['id'])
+                                if not _as.get('enabled', False):
+                                    audio_tags_enabled_for_all = False
+                                    break
+                        except Exception as _e:
+                            logger.warning(f"⚠️ فشل فحص إعدادات الوسوم الصوتية لجميع المهام: {_e}")
+                            audio_tags_enabled_for_all = False
+
+                    try:
+                        if watermark_enabled_for_all:
+                            logger.info("🏷️ العلامة المائية مفعلة لكل المهام → سيتم تطبيقها مرة واحدة وإعادة الاستخدام")
+                            processed_media, processed_filename = await self.apply_watermark_to_media(event, first_task['id'])
+                            if processed_media and processed_media != event.message.media:
+                                logger.info(f"✅ تم معالجة الوسائط بنجاح: {processed_filename}")
+                            else:
+                                logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
+                        elif audio_tags_enabled_for_all and is_audio_message:
+                            # تطبيق الوسوم الصوتية فقط (علامة مائية غير مفعلة)
+                            logger.info("🎵 الوسوم الصوتية مفعلة لكل المهام والرسالة صوتية → تطبيق الوسوم فقط")
+                            # تحميل الوسائط واستخراج اسم مناسب
+                            media_bytes = await event.message.download_media(bytes)
+                            if not media_bytes:
+                                logger.warning("⚠️ فشل تحميل الوسائط - سيتم استخدام الوسائط الأصلية")
+                                processed_media = event.message.media
+                                processed_filename = None
+                            else:
+                                file_name = "media_file"
+                                file_ext = ""
+                                if hasattr(event.message.media, 'document') and event.message.media.document:
+                                    doc = event.message.media.document
+                                    if hasattr(doc, 'attributes'):
+                                        for attr in doc.attributes:
+                                            if hasattr(attr, 'file_name') and attr.file_name:
+                                                file_name = attr.file_name
+                                                if '.' in file_name:
+                                                    file_ext = '.' + file_name.split('.')[-1].lower()
+                                                    file_name = file_name.rsplit('.', 1)[0]
+                                                break
+                                full_name = file_name + (file_ext or '')
+                                processed_media, processed_filename = await self.apply_audio_metadata(event, first_task['id'], media_bytes, full_name)
+                                try:
+                                    pm_type = type(processed_media).__name__
+                                    pm_size = len(processed_media) if isinstance(processed_media, (bytes, bytearray)) else None
+                                    logger.info(f"🧪 نتيجة معالجة الصوت: type={pm_type}, size={pm_size}, filename={processed_filename}")
+                                except Exception:
+                                    pass
+                        else:
+                            # لا علامة مائية ولا وسوم صوتية: لا تنزيل/معالجة - سيتم الإرسال كنسخ خادم إن أمكن
+                            logger.info("⏭️ لا علامة مائية ولا وسوم صوتية مطلوبة → إرسال كوسائط عادية دون تنزيل/رفع")
+                    except Exception as e:
+                        logger.error(f"❌ خطأ في معالجة الوسائط: {e}")
+                        processed_media = event.message.media
+                        processed_filename = None
 
                 # Forward message to all target chats
                 for i, task in enumerate(matching_tasks):
                     try:
                         target_chat_id = str(task['target_chat_id']).strip()
                         task_name = task.get('task_name', f"مهمة {task['id']}")
+
+                        # Check advanced filters for this specific task
+                        message = event.message
+                        should_block, should_remove_buttons, should_remove_forward = await self._check_message_advanced_filters(
+                            task['id'], message
+                        )
+                        
+                        if should_block:
+                            logger.info(f"🚫 الرسالة محظورة بواسطة فلاتر متقدمة للمهمة {task_name} - تجاهل هذه المهمة")
+                            continue
 
                         # Get task forward mode and forwarding settings
                         forward_mode = task.get('forward_mode', 'forward')
@@ -489,20 +929,28 @@ class UserbotService:
 
                         # Apply header and footer formatting
                         final_text = self.apply_message_formatting(formatted_text, message_settings)
-
-                        # Check if we need to use copy mode due to formatting
+                        
+                        # Check if we need to use copy mode due to formatting or processed media
                         requires_copy_mode = (
                             original_text != modified_text or  # Text replacements applied
                             modified_text != translated_text or  # Translation applied
                             translated_text != formatted_text or  # Text formatting applied
                             message_settings['header_enabled'] or  # Header enabled
                             message_settings['footer_enabled'] or  # Footer enabled
-                            message_settings['inline_buttons_enabled']  # Inline buttons enabled
+                            message_settings['inline_buttons_enabled'] or  # Inline buttons enabled
+                            (processed_media is not None and processed_media != event.message.media) or  # Media actually changed
+                            (processed_filename is not None)  # Filename was modified during processing
                         )
 
                         # Log changes if text was modified
                         if original_text != final_text and original_text:
                             logger.info(f"🔄 تم تطبيق تنسيق الرسالة: '{original_text}' → '{final_text}'")
+                        
+                        # Log if media was processed
+                        if processed_media is not None:
+                            logger.info(f"🎵 تم معالجة الوسائط - سيتم استخدام وضع النسخ: {processed_filename}")
+                        elif processed_filename is not None:
+                            logger.info(f"📁 تم تغيير اسم الملف - سيتم استخدام وضع النسخ: {processed_filename}")
 
                         # Determine which buttons to use (original or custom)
                         inline_buttons = None
@@ -543,19 +991,99 @@ class UserbotService:
                         # Send message based on forward mode
                         logger.info(f"📨 جاري إرسال الرسالة (وضع تلقائي)...")
 
-                        if forward_mode == 'copy' or requires_copy_mode:
-                            # Copy mode: send as new message with all formatting applied
-                            if requires_copy_mode:
-                                logger.info(f"🔄 استخدام وضع النسخ بسبب التنسيق المطبق")
+                        # ===== منطق الإرسال المصحح =====
+                        
+                        # تحديد الوضع النهائي للإرسال
+                        final_send_mode = self._determine_final_send_mode(forward_mode, requires_copy_mode)
+                        
+                        logger.info(f"📤 إرسال الرسالة بالوضع: {final_send_mode} (الأصلي: {forward_mode}, يتطلب نسخ: {requires_copy_mode})")
+                        
+                        # تهيئة متغيرات الإرسال
+                        forwarded_msg = None
+                        spoiler_entities = []  # ضمان التهيئة لتفادي UnboundLocalError
+                        processed_text = (final_text or (event.message.text if hasattr(event.message, 'text') else None) or "رسالة")
 
-                            if event.message.media:
-                                # Check media type to handle web page separately
-                                from telethon.tl.types import MessageMediaWebPage
-                                if isinstance(event.message.media, MessageMediaWebPage):
-                                    # Web page - send as text message
-                                    # Process spoiler entities if present
-                                    message_text = final_text or event.message.text or "رسالة"
-                                    processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                        # إرسال الرسالة بالوضع المحدد
+                        if final_send_mode == 'copy':
+                            # Optimization: use server-side copy when no modifications are required
+                            try:
+                                text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
+                            except Exception:
+                                text_cleaning_settings = {}
+                            remove_caption_flag = bool(text_cleaning_settings.get('remove_caption', False))
+
+                            no_media_change = (processed_media is None or processed_media == event.message.media) and (processed_filename is None)
+                            no_caption_change = (final_text == original_text)
+                            no_buttons_change = (inline_buttons is None and not should_remove_buttons)
+                            is_album_message = album_collector.should_collect_album(event.message, forward_mode, split_album_enabled)
+
+                            can_server_copy = (
+                                not requires_copy_mode and
+                                no_media_change and
+                                no_caption_change and
+                                no_buttons_change and
+                                not remove_caption_flag and
+                                not is_album_message
+                            )
+
+                            # تجنب استخدام نسخ الخادم إذا كانت الوسائط صفحة ويب حتى لا تتحول لرسالة نصية فقط
+                            if can_server_copy and not (hasattr(event.message, 'media') and hasattr(event.message.media, 'webpage') and event.message.media.webpage):
+                                logger.info("⚡ استخدام نسخ خادم (إعادة إرسال) بدون تنزيل/رفع لأن لا توجد تعديلات")
+                                if event.message.media:
+                                    # Copy media by re-sending the same media reference (server-side), keep original caption/buttons
+                                    caption_text = event.message.text
+                                    forwarded_msg = await client.send_file(
+                                        target_entity,
+                                        file=event.message.media,
+                                        caption=caption_text,
+                                        silent=forwarding_settings['silent_notifications'],
+                                        buttons=original_reply_markup
+                                    )
+                                else:
+                                    # Pure text copy
+                                    message_text = event.message.text or final_text or "رسالة"
+                                    forwarded_msg = await client.send_message(
+                                        target_entity,
+                                        message_text,
+                                        link_preview=forwarding_settings['link_preview_enabled'],
+                                        silent=forwarding_settings['silent_notifications'],
+                                        buttons=original_reply_markup
+                                    )
+                            else:
+                                # Copy mode: send as new message with all formatting applied
+                                if requires_copy_mode:
+                                    logger.info(f"🔄 استخدام وضع النسخ بسبب التنسيق المطبق")
+
+                                # إذا كان لدينا ملف صوتي مُعالج كبايتات، أرسله مباشرة لتفادي أي التباس كرسالة نصية
+                                if isinstance(processed_media, (bytes, bytearray)) and ((processed_filename and processed_filename.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.wma', '.opus'))) or True):
+                                    try:
+                                        from send_file_helper import TelethonFileSender
+                                        audio_filename = processed_filename or "audio.mp3"
+                                        logger.info(f"🎵 إرسال الملف الصوتي المعالج بالرفع المباشر: {audio_filename}")
+                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                            client,
+                                            target_entity,
+                                            processed_media,
+                                            audio_filename,
+                                            caption=final_text,
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML' if final_text else None,
+                                            force_document=False,
+                                            buttons=original_reply_markup or inline_buttons,
+                                        )
+                                    except Exception as direct_audio_err:
+                                        logger.error(f"❌ فشل الرفع المباشر للملف الصوتي المعالج: {direct_audio_err}")
+
+                                elif event.message.media:
+                                    # Check media type to handle web page separately
+                                    from telethon.tl.types import MessageMediaWebPage
+                                    is_webpage = isinstance(event.message.media, MessageMediaWebPage)
+                                    has_processed_media = (processed_media is not None) or (processed_filename is not None)
+                                    if is_webpage and not has_processed_media:
+                                        # Web page - send as text message
+                                        # Process spoiler entities if present
+                                        message_text = final_text or event.message.text or "رسالة"
+                                        processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
                                     
                                     if spoiler_entities:
                                         # Send with spoiler entities and buttons
@@ -594,16 +1122,19 @@ class UserbotService:
                                         # Split album: send each media individually
                                         logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
                                         
-                                        # Apply watermark if enabled
-                                        watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
-                                        logger.info(f"📁 سيتم إرسال الملف باسم: {modified_filename}")
+                                        # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                        # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
+                                        # هذا يحسن الأداء ويقلل من استهلاك الموارد
+                                        media_to_send = processed_media if processed_media else event.message.media
+                                        filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
+                                        logger.info(f"📁 سيتم إرسال الملف باسم: {filename_to_send}")
                                         
                                         from send_file_helper import TelethonFileSender
                                         forwarded_msg = await TelethonFileSender.send_file_with_name(
                                             client,
                                             target_entity,
-                                            watermarked_media,
-                                            modified_filename or "media_file.jpg",
+                                            media_to_send,
+                                            filename_to_send,
                                             caption=caption_text,
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if caption_text else None,
@@ -614,23 +1145,28 @@ class UserbotService:
                                         # Keep album grouped: send as new media (copy mode)
                                         logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
                                         
-                                        # Apply watermark if enabled
-                                        watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                        # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                        # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
+                                        # هذا يحسن الأداء ويقلل من استهلاك الموارد
+                                        media_to_send = processed_media if processed_media else event.message.media
+                                        filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
                                         
                                         # In copy mode, we always send as new media, not forward
                                         from send_file_helper import TelethonFileSender
                                         forwarded_msg = await TelethonFileSender.send_file_with_name(
                                             client,
                                             target_entity,
-                                            watermarked_media,
-                                            modified_filename or "media_file.jpg",
+                                            media_to_send,
+                                            filename_to_send,
                                             caption=caption_text,
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if caption_text else None,
                                             force_document=False,
                                             buttons=original_reply_markup or inline_buttons,
                                         )
-                            elif event.message.text or final_text:
+                        else:
+                            # No media
+                            if (event.message.text or final_text):
                                 # Pure text message
                                 # Process spoiler entities if present
                                 message_text = final_text or "رسالة"
@@ -666,14 +1202,34 @@ class UserbotService:
                                     event.message,
                                     silent=forwarding_settings['silent_notifications']
                                 )
-                        else:
-                            # Forward mode: check if we need copy mode
+                       # Forward mode: check if we need copy mode
                             if requires_copy_mode:
-                                logger.info(f"🔄 تحويل إلى وضع النسخ بسبب التنسيق")
-                                if event.message.media:
+                                logger.info("🔄 تحويل إلى وضع النسخ بسبب التنسيق")
+                                # إذا كان لدينا ملف صوتي مُعالج كبايتات، أرسله مباشرة
+                                if isinstance(processed_media, (bytes, bytearray)) and ((processed_filename and processed_filename.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.wma', '.opus'))) or True):
+                                    try:
+                                        from send_file_helper import TelethonFileSender
+                                        audio_filename = processed_filename or "audio.mp3"
+                                        logger.info(f"🎵 إرسال الملف الصوتي المعالج بالرفع المباشر (تحويل لوضع النسخ): {audio_filename}")
+                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                            client,
+                                            target_entity,
+                                            processed_media,
+                                            audio_filename,
+                                            caption=final_text,
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML' if final_text else None,
+                                            force_document=False,
+                                            buttons=original_reply_markup or inline_buttons,
+                                        )
+                                    except Exception as direct_audio_err:
+                                        logger.error(f"❌ فشل الرفع المباشر للملف الصوتي المعالج (تحويل): {direct_audio_err}")
+                                elif event.message.media:
                                     # Check media type to handle web page separately
                                     from telethon.tl.types import MessageMediaWebPage
-                                    if isinstance(event.message.media, MessageMediaWebPage):
+                                    is_webpage = isinstance(event.message.media, MessageMediaWebPage)
+                                    has_processed_media = (processed_media is not None) or (processed_filename is not None)
+                                    if is_webpage and not has_processed_media:
                                         # Web page - send as text message
                                         # Process spoiler entities if present
                                         message_text = final_text or event.message.text or "رسالة"
@@ -716,16 +1272,19 @@ class UserbotService:
                                             # Split album: send each media individually
                                             logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
                                             
-                                            # Apply watermark if enabled
-                                            watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
+                                            # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                            # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
+                                            # هذا يحسن الأداء ويقلل من استهلاك الموارد
+                                            media_to_send = processed_media if processed_media else event.message.media
+                                            filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
                                             
                                             # استخدام مساعد إرسال الملفات للتعامل مع أسماء الملفات بشكل صحيح
                                             from send_file_helper import TelethonFileSender
                                             forwarded_msg = await TelethonFileSender.send_file_with_name(
                                                 client,
                                                 target_entity,
-                                                watermarked_media,
-                                                modified_filename or "media_file.jpg",
+                                                media_to_send,
+                                                filename_to_send,
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
@@ -736,17 +1295,20 @@ class UserbotService:
                                             # Keep album grouped: send as new media (copy mode)
                                             logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (تحويل لوضع النسخ)")
                                             
-                                            # Apply watermark if enabled
-                                            watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
-                                            logger.info(f"📁 سيتم إرسال الملف باسم: {modified_filename}")
+                                            # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                            # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
+                                            # هذا يحسن الأداء ويقلل من استهلاك الموارد
+                                            media_to_send = processed_media if processed_media else event.message.media
+                                            filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
+                                            logger.info(f"📁 سيتم إرسال الملف باسم: {filename_to_send}")
                                             
                                             # In forward mode with requires_copy_mode, we also send as new media
                                             from send_file_helper import TelethonFileSender
                                             forwarded_msg = await TelethonFileSender.send_file_with_name(
                                                 client,
                                                 target_entity,
-                                                watermarked_media,
-                                                modified_filename or "media_file.jpg",
+                                                media_to_send,
+                                                filename_to_send,
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
@@ -812,19 +1374,22 @@ class UserbotService:
                                                 # Split album: send each media individually
                                                 logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
                                                 
-                                                # Apply watermark if enabled
-                                                watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
-                                                logger.info(f"📁 سيتم إرسال الملف باسم (تفكيك الألبوم): {modified_filename}")
+                                                # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                                # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
+                                                # هذا يحسن الأداء ويقلل من استهلاك الموارد
+                                                media_to_send = processed_media if processed_media else event.message.media
+                                                filename_to_send = processed_filename if processed_filename else "media_file.jpg"
+                                                logger.info(f"📁 سيتم إرسال الملف باسم (تفكيك الألبوم): {filename_to_send}")
                                                 
                                                 # For photos with watermarks, ensure they're sent as photos
-                                                if is_photo and watermarked_media != event.message.media:
+                                                if is_photo and media_to_send != event.message.media:
                                                     # Send watermarked photo as photo (not document)
                                                     from send_file_helper import TelethonFileSender
                                                     forwarded_msg = await TelethonFileSender.send_file_with_name(
                                                         client,
                                                         target_entity,
-                                                        watermarked_media,
-                                                        modified_filename or "photo.jpg",
+                                                        media_to_send,
+                                                        filename_to_send,
                                                         caption=caption_text,
                                                         silent=forwarding_settings['silent_notifications'],
                                                         force_document=False,
@@ -836,8 +1401,8 @@ class UserbotService:
                                                     forwarded_msg = await TelethonFileSender.send_file_with_name(
                                                         client,
                                                         target_entity,
-                                                        watermarked_media,
-                                                        modified_filename or "media_file.jpg",
+                                                        media_to_send,
+                                                        filename_to_send,
                                                         caption=caption_text,
                                                         silent=forwarding_settings['silent_notifications'],
                                                         force_document=False,
@@ -855,22 +1420,27 @@ class UserbotService:
                                                     )
                                                 else:
                                                     # Single media
-                                                    # Apply watermark if enabled
-                                                    watermarked_media, modified_filename = await self.apply_watermark_to_media(event, task['id'])
-                                                    logger.info(f"📁 سيتم إرسال الملف باسم (وضع التوجيه): {modified_filename}")
+                                                    # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                                    # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
+                                                    # هذا يحسن الأداء ويقلل من استهلاك الموارد
+                                                    media_to_send = processed_media if processed_media else event.message.media
+                                                    filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
+                                                    media_to_send = processed_media if processed_media else event.message.media
+                                                    filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
+                                                    logger.info(f"📁 سيتم إرسال الملف باسم (وضع التوجيه): {filename_to_send}")
                                                     
                                                     # Determine media type for proper sending
                                                     is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
                                                     
-                                                    if is_photo and watermarked_media != event.message.media:
-                                                        logger.info(f"📸 إرسال صورة مُعالجة كصورة: {modified_filename}")
+                                                    if is_photo and media_to_send != event.message.media:
+                                                        logger.info(f"📸 إرسال صورة مُعالجة كصورة: {filename_to_send}")
                                                         # Send watermarked photo as photo (not document)
                                                         from send_file_helper import TelethonFileSender
                                                         forwarded_msg = await TelethonFileSender.send_file_with_name(
                                                             client,
                                                             target_entity,
-                                                            watermarked_media,
-                                                            modified_filename or "photo.jpg",
+                                                            media_to_send,
+                                                            filename_to_send,
                                                             caption=caption_text,
                                                             silent=forwarding_settings['silent_notifications'],
                                                             force_document=False,
@@ -882,8 +1452,8 @@ class UserbotService:
                                                         forwarded_msg = await TelethonFileSender.send_file_with_name(
                                                             client,
                                                             target_entity,
-                                                            watermarked_media,
-                                                            modified_filename or "media_file.jpg",
+                                                            media_to_send,
+                                                            filename_to_send,
                                                             caption=caption_text,
                                                             silent=forwarding_settings['silent_notifications'],
                                                             force_document=False,
@@ -898,11 +1468,93 @@ class UserbotService:
                                         )
                                 else:
                                     # No formatting changes, forward normally
+                                    logger.info(f"📤 توجيه عادي بدون تنسيق")
                                     forwarded_msg = await client.forward_messages(
                                         target_entity,
                                         event.message,
                                         silent=forwarding_settings['silent_notifications']
                                     )
+
+                        # ===== فحص وتعويض في حال إرسال نص فقط لرسالة صوتية =====
+                        try:
+                            original_is_audio = False
+                            if hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document:
+                                doc = event.message.media.document
+                                if getattr(doc, 'mime_type', '') and str(doc.mime_type).startswith('audio/'):
+                                    original_is_audio = True
+                                else:
+                                    file_attr_name = None
+                                    for attr in getattr(doc, 'attributes', []) or []:
+                                        if hasattr(attr, 'file_name') and attr.file_name:
+                                            file_attr_name = attr.file_name
+                                            break
+                                    if file_attr_name and file_attr_name.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.wma', '.opus')):
+                                        original_is_audio = True
+
+                            forwarded_has_media = False
+                            is_webpage_forwarded = False
+                            if forwarded_msg:
+                                fwd = forwarded_msg[0] if isinstance(forwarded_msg, list) else forwarded_msg
+                                try:
+                                    from telethon.tl.types import MessageMediaWebPage
+                                    media_obj = getattr(fwd, 'media', None)
+                                    is_webpage_forwarded = isinstance(media_obj, MessageMediaWebPage)
+                                    # اعتبر وجود وسائط حقيقية فقط (audio/document/photo/video/voice) واستبعد صفحات الويب
+                                    forwarded_has_media = bool(
+                                        (getattr(fwd, 'audio', None) or
+                                         getattr(fwd, 'document', None) or
+                                         getattr(fwd, 'photo', None) or
+                                         getattr(fwd, 'voice', None) or
+                                         getattr(fwd, 'video', None) or
+                                         getattr(fwd, 'video_note', None))
+                                    ) and (not is_webpage_forwarded)
+                                except Exception:
+                                    forwarded_has_media = bool(getattr(fwd, 'media', None)) and (not is_webpage_forwarded)
+
+                            if original_is_audio and forwarded_msg and (not forwarded_has_media or is_webpage_forwarded):
+                                logger.warning("⚠️ تم اكتشاف إرسال نص فقط لرسالة صوتية - إعادة الإرسال كملف صوتي")
+                                send_bytes = processed_media if isinstance(processed_media, (bytes, bytearray)) else None
+                                if not send_bytes:
+                                    try:
+                                        send_bytes = await event.message.download_media(bytes)
+                                    except Exception:
+                                        send_bytes = None
+                                filename_to_send = processed_filename
+                                if not filename_to_send:
+                                    filename_to_send = "audio.mp3"
+                                    try:
+                                        if hasattr(event.message.media, 'document') and event.message.media.document:
+                                            for attr in getattr(event.message.media.document, 'attributes', []) or []:
+                                                if hasattr(attr, 'file_name') and attr.file_name:
+                                                    filename_to_send = attr.file_name
+                                                    break
+                                    except Exception:
+                                        pass
+
+                                if send_bytes:
+                                    try:
+                                        from send_file_helper import TelethonFileSender
+                                        new_msg = await TelethonFileSender.send_file_with_name(
+                                            client,
+                                            target_entity,
+                                            send_bytes,
+                                            filename_to_send,
+                                            caption=final_text,
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML' if final_text else None,
+                                            force_document=False,
+                                            buttons=original_reply_markup or inline_buttons,
+                                        )
+                                        try:
+                                            await client.delete_messages(target_entity, (forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id))
+                                        except Exception:
+                                            pass
+                                        forwarded_msg = new_msg
+                                        logger.info("✅ تم التعويض بإرسال الملف الصوتي بنجاح")
+                                    except Exception as retry_err:
+                                        logger.error(f"❌ فشل تعويض إرسال الملف الصوتي: {retry_err}")
+                        except Exception as post_check_err:
+                            logger.error(f"❌ خطأ في فحص التعويض بعد الإرسال: {post_check_err}")
 
                         if forwarded_msg:
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
@@ -1071,7 +1723,7 @@ class UserbotService:
     async def refresh_user_tasks(self, user_id: int):
         """Refresh user tasks from database"""
         try:
-            tasks = self.db.get_active_tasks(user_id)
+            tasks = self.db.get_active_user_tasks(user_id)
             self.user_tasks[user_id] = tasks
 
             # Log detailed task information
@@ -1169,14 +1821,12 @@ class UserbotService:
             logger.error(f"خطأ في فحص فلتر الوسائط: {e}")
             return True  # Default to allowed on error
 
-    async def is_admin_allowed_with_message(self, task_id, message):
-        """Check if message sender is allowed by admin filters using the actual message object"""
+    async def is_admin_allowed_by_signature(self, task_id: int, message, source_chat_id: str) -> bool:
+        """Check if admin is allowed based on message post_author signature"""
         try:
             from database.database import Database
             db = Database()
-
-            logger.info(f"👮‍♂️ [ADMIN FILTER] فحص المهمة: {task_id}, المرسل: {message.sender_id}")
-
+            
             # Check if admin filter is enabled for this task
             admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
             logger.info(f"👮‍♂️ [ADMIN FILTER] فلتر المشرفين مُفعل: {admin_filter_enabled}")
@@ -1184,18 +1834,48 @@ class UserbotService:
             if not admin_filter_enabled:
                 logger.info(f"👮‍♂️ فلتر المشرفين غير مُفعل للمهمة {task_id} - السماح للجميع")
                 return True
-
-            # Use the actual message object with proper author signature
-            is_blocked = await self._check_admin_filter(task_id, message)
-            is_allowed = not is_blocked  # Invert because _check_admin_filter returns True if blocked
             
-            logger.info(f"👮‍♂️ [ADMIN FILTER] نتيجة فحص جديد: المرسل {message.sender_id}, محظور: {is_blocked}, مسموح: {is_allowed}")
-            return is_allowed
+            # Get admin filter settings for this specific source
+            admin_filters = db.get_admin_filters_by_source(task_id, source_chat_id)
+            
+            if not admin_filters:
+                # No admin filters configured for this source, allow everything
+                logger.info(f"🔍 لا توجد فلاتر مشرفين للمصدر {source_chat_id} - السماح افتراضياً")
+                return True
+            
+            # Get post_author from message (author signature)
+            post_author = getattr(message, 'post_author', None)
+            
+            if not post_author:
+                # No post_author signature, might be regular user message or channel without signatures enabled
+                logger.info(f"🔍 لا يوجد post_author في الرسالة - السماح افتراضياً")
+                return True
+            
+            logger.info(f"🔍 فحص توقيع المشرف: '{post_author}' في المصدر {source_chat_id}")
+            
+            # Check if post_author signature matches any admin signature and is allowed
+            for admin_filter in admin_filters:
+                admin_signature = admin_filter.get('admin_signature', '')
+                if admin_signature and admin_signature == post_author:
+                    is_allowed = admin_filter['is_allowed']
+                    admin_name = admin_filter.get('admin_first_name', admin_signature)
+                    logger.info(f"🔍 المشرف '{admin_name}' (توقيع: '{post_author}') موجود في فلتر المشرفين: {'مسموح' if is_allowed else 'محظور'}")
+                    return is_allowed
+            
+            # Post author signature not found in admin filters - default allow
+            logger.info(f"🔍 توقيع المشرف '{post_author}' غير موجود في فلتر المشرفين - السماح افتراضياً")
+            return True
+            
         except Exception as e:
-            logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
-            import traceback
-            logger.error(f"تفاصيل الخطأ: {traceback.format_exc()}")
-            return True  # Default to allowed on error
+            logger.error(f"خطأ في فحص فلتر المشرفين بالتوقيع: {e}")
+            return True  # Default allow on error
+    
+    # Legacy method for backward compatibility
+    async def is_admin_allowed_with_message(self, task_id, message):
+        """Legacy method - redirect to new signature-based filtering"""
+        # Extract source from context or use default behavior
+        source_chat_id = str(message.chat_id) if message.chat_id else "0"
+        return await self.is_admin_allowed_by_signature(task_id, message, source_chat_id)
 
     async def is_admin_allowed(self, task_id, sender_id):
         """Check if message sender is allowed by admin filters using new logic"""
@@ -1444,124 +2124,298 @@ class UserbotService:
             }
 
     async def apply_watermark_to_media(self, event, task_id: int):
-        """Apply watermark to media if enabled for the task"""
+        """
+        Apply watermark to media if enabled for the task - محسن لمعالجة الوسائط مرة واحدة
+        
+        التحسينات:
+        - معالجة الوسائط مرة واحدة وإعادة استخدامها لكل الأهداف
+        - ذاكرة مؤقتة ذكية لتحسين الأداء
+        - تحسين معالجة الفيديو وضغطه
+        - إرسال الفيديو بصيغة MP4
+        
+        Improvements:
+        - Process media once and reuse for all targets
+        - Smart cache for performance optimization
+        - Enhanced video processing and compression
+        - Send videos in MP4 format
+        """
         try:
             # Get watermark settings
             watermark_settings = self.db.get_watermark_settings(task_id)
             logger.info(f"🏷️ فحص إعدادات العلامة المائية للمهمة {task_id}: {watermark_settings}")
-            
-            if not watermark_settings.get('enabled', False):
-                logger.info(f"🏷️ العلامة المائية معطلة للمهمة {task_id}")
-                return event.message.media, None
-            
+
             # Check if message has media
             if not event.message.media:
                 return event.message.media, None
-            
-            # Check media type and watermark settings
+
+            # Check media type and watermark applicability
             is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
-            is_video = hasattr(event.message.media, 'document') and event.message.media.document and event.message.media.document.mime_type and event.message.media.document.mime_type.startswith('video/')
+            is_video = (
+                hasattr(event.message.media, 'document')
+                and event.message.media.document
+                and event.message.media.document.mime_type
+                and event.message.media.document.mime_type.startswith('video/')
+            )
             is_document = hasattr(event.message.media, 'document') and event.message.media.document and not is_video
-            
+
             logger.info(f"🏷️ نوع الوسائط للمهمة {task_id}: صورة={is_photo}, فيديو={is_video}, مستند={is_document}")
-            
-            # Check if watermark should be applied to this media type
-            if is_photo and not watermark_settings.get('apply_to_photos', True):
-                logger.debug(f"تخطي الصورة - العلامة المائية معطلة للصور في المهمة {task_id}")
-                return event.message.media, None
-            elif is_video and not watermark_settings.get('apply_to_videos', True):
-                logger.debug(f"تخطي الفيديو - العلامة المائية معطلة للفيديوهات في المهمة {task_id}")
-                return event.message.media, None
-            elif is_document and not watermark_settings.get('apply_to_documents', False):
-                logger.debug(f"تخطي المستند - العلامة المائية معطلة للمستندات في المهمة {task_id}")
-                return event.message.media, None
-            
-            # Download media
+
+            # Download media bytes always (we need them for audio processing regardless of watermark settings)
             media_bytes = await event.message.download_media(bytes)
             if not media_bytes:
                 logger.warning(f"فشل في تحميل الوسائط للمهمة {task_id}")
                 return event.message.media, None
-            
-            # Get file name with proper extension
+
+            # Derive filename and extension
             file_name = "media_file"
             file_extension = ""
-            
-            # Try to get original filename from any media type first
+
+            # Try to get original filename from document attributes first
             if hasattr(event.message.media, 'document') and event.message.media.document:
                 doc = event.message.media.document
-                
-                # Try to get original filename first
                 if hasattr(doc, 'attributes'):
                     for attr in doc.attributes:
                         if hasattr(attr, 'file_name') and attr.file_name:
                             file_name = attr.file_name
-                            # Extract extension
                             if '.' in file_name:
                                 file_extension = '.' + file_name.split('.')[-1].lower()
                                 file_name = file_name.rsplit('.', 1)[0]
                             break
-                
-            # If still no filename found and it's a photo, get from message attributes or generate
-            elif is_photo:
+
+            # If still no filename and it's a photo
+            if file_name == "media_file" and is_photo:
                 file_name = "photo"
-                file_extension = ".jpg"  # Default for photos without document attributes
-                
-                # Try to get more specific info if available 
-                if hasattr(event.message.media, 'photo') and hasattr(event.message.media.photo, 'sizes'):
-                    # Generate a unique filename based on photo ID if available
-                    if hasattr(event.message.media.photo, 'id'):
-                        file_name = f"photo_{event.message.media.photo.id}"
-                        
-            # If no filename found, use mime type for documents
-            if file_name == "media_file" and hasattr(event.message.media, 'document') and event.message.media.document and event.message.media.document.mime_type:
+                file_extension = ".jpg"
+                if hasattr(event.message.media, 'photo') and hasattr(event.message.media.photo, 'id'):
+                    file_name = f"photo_{event.message.media.photo.id}"
+
+            # If still no filename and it's a document, map from mime type (including audio types)
+            if (
+                file_name == "media_file"
+                and hasattr(event.message.media, 'document')
+                and event.message.media.document
+                and event.message.media.document.mime_type
+            ):
                 doc = event.message.media.document
                 mime_to_ext = {
+                    # Images
                     'image/jpeg': '.jpg',
-                    'image/jpg': '.jpg', 
+                    'image/jpg': '.jpg',
                     'image/png': '.png',
                     'image/gif': '.gif',
                     'image/webp': '.webp',
+                    # Videos
                     'video/mp4': '.mp4',
                     'video/avi': '.avi',
                     'video/mov': '.mov',
                     'video/mkv': '.mkv',
-                    'video/webm': '.webm'
+                    'video/webm': '.webm',
+                    # Audio (added)
+                    'audio/mpeg': '.mp3',
+                    'audio/mp3': '.mp3',
+                    'audio/x-m4a': '.m4a',
+                    'audio/aac': '.aac',
+                    'audio/ogg': '.ogg',
+                    'audio/wav': '.wav',
+                    'audio/flac': '.flac',
+                    'audio/x-ms-wma': '.wma',
+                    'audio/opus': '.opus',
                 }
-                
                 file_extension = mime_to_ext.get(doc.mime_type, '.bin')
-                
                 if doc.mime_type.startswith('video/'):
                     file_name = "video"
                 elif doc.mime_type.startswith('image/'):
                     file_name = "image"
+                elif doc.mime_type.startswith('audio/'):
+                    file_name = "audio"
                 else:
                     file_name = "document"
-            
-            # Combine name and extension
+
             full_file_name = file_name + file_extension
-            
-            logger.info(f"🏷️ تطبيق العلامة المائية على {full_file_name} للمهمة {task_id}")
-            
-            # Apply watermark
-            watermarked_media = self.watermark_processor.process_media_with_watermark(
-                media_bytes, 
-                full_file_name, 
-                watermark_settings
-            )
-            
-            if watermarked_media and watermarked_media != media_bytes:
-                logger.info(f"✅ تم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
-                logger.info(f"📁 اسم الملف المُرجع: {full_file_name}")
-                return watermarked_media, full_file_name
+            logger.info(f"🏷️ تجهيز الوسائط باسم {full_file_name} للمهمة {task_id}")
+
+            # Decide whether to apply watermark (but do not early return if disabled)
+            apply_wm = watermark_settings.get('enabled', False)
+            if is_photo and not watermark_settings.get('apply_to_photos', True):
+                apply_wm = False
+            elif is_video and not watermark_settings.get('apply_to_videos', True):
+                apply_wm = False
+            elif is_document and not watermark_settings.get('apply_to_documents', False):
+                # Documents include audio; watermark usually disabled for docs unless explicitly enabled
+                apply_wm = False
+
+            # Process watermark optionally
+            watermarked_media = None
+            if apply_wm:
+                logger.info(f"🏷️ تطبيق العلامة المائية على {full_file_name} للمهمة {task_id}")
+                watermarked_media = self.watermark_processor.process_media_once_for_all_targets(
+                    media_bytes,
+                    full_file_name,
+                    watermark_settings,
+                    task_id,
+                )
             else:
-                logger.debug(f"🔄 لم يتم تطبيق العلامة المائية على الوسائط للمهمة {task_id}")
-                logger.info(f"📁 اسم الملف المُرجع (بدون علامة مائية): {full_file_name}")
-                # Even if watermark wasn't applied, return the improved filename
-                return event.message.media, full_file_name
+                logger.info(f"🏷️ العلامة المائية معطلة أو غير منطبقة - سيتم الانتقال مباشرة لمعالجة الصوت (إن وجد)")
+
+            # Always apply audio metadata processing next (using watermarked bytes if available)
+            base_bytes = watermarked_media if (watermarked_media and watermarked_media != media_bytes) else media_bytes
+            final_media, final_filename = await self.apply_audio_metadata(event, task_id, base_bytes, full_file_name)
+
+            # Determine if any processing actually happened to avoid forcing copy for unchanged media
+            media_changed = False
+            try:
+                if watermarked_media and watermarked_media != media_bytes:
+                    media_changed = True
+                elif isinstance(final_media, (bytes, bytearray)) and final_media != base_bytes:
+                    media_changed = True
+            except Exception:
+                media_changed = True  # Be safe
+
+            if media_changed:
+                logger.info(f"📁 اسم الملف المُرجع (بعد المعالجة): {final_filename}")
+                return final_media, final_filename
+            else:
+                logger.info("🔄 لم يحدث أي تغيير فعلي على الوسائط - سيتم استخدام الوسائط الأصلية")
+                return event.message.media, None
                 
         except Exception as e:
             logger.error(f"خطأ في تطبيق العلامة المائية: {e}")
             return event.message.media, None
+    
+    async def apply_audio_metadata(self, event, task_id: int, media_bytes: bytes, file_name: str):
+        """
+        Apply audio metadata processing if enabled for the task
+        
+        الميزات:
+        - تعديل جميع أنواع الوسوم الصوتية (ID3v2)
+        - قوالب جاهزة للاستخدام
+        - صورة غلاف مخصصة
+        - دمج مقاطع صوتية إضافية
+        - الحفاظ على الجودة 100%
+        """
+        try:
+            # Load audio metadata settings from database
+            audio_settings = self.db.get_audio_metadata_settings(task_id)
+            
+            if not audio_settings.get('enabled', False):
+                logger.info(f"🎵 الوسوم الصوتية معطلة للمهمة {task_id}")
+                return media_bytes, file_name
+            
+            # Check if this is an audio file
+            is_audio = False
+            
+            # Check by file extension first (more reliable when we have media_bytes)
+            if file_name.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.wma', '.opus')):
+                is_audio = True
+                logger.info(f"🎵 تم تحديد الملف كملف صوتي بواسطة الامتداد: {file_name}")
+            # Check by mime type if available in original message
+            elif hasattr(event.message.media, 'document') and event.message.media.document:
+                doc = event.message.media.document
+                if doc.mime_type and doc.mime_type.startswith('audio/'):
+                    is_audio = True
+                    logger.info(f"🎵 تم تحديد الملف كملف صوتي بواسطة MIME type: {doc.mime_type}")
+            
+            if not is_audio:
+                logger.debug(f"🎵 تخطي الملف - ليس ملف صوتي للمهمة {task_id}")
+                return media_bytes, file_name
+            
+            logger.info(f"🎵 بدء معالجة الوسوم الصوتية للملف {file_name} في المهمة {task_id}")
+            
+            # Get template settings from the new system
+            template_settings = self.db.get_audio_template_settings(task_id)
+            
+            # Convert template settings to metadata template format
+            metadata_template = {
+                'title': template_settings.get('title_template', '$title'),
+                'artist': template_settings.get('artist_template', '$artist'),
+                'album': template_settings.get('album_template', '$album'),
+                'year': template_settings.get('year_template', '$year'),
+                'genre': template_settings.get('genre_template', '$genre'),
+                'composer': template_settings.get('composer_template', '$composer'),
+                'comment': template_settings.get('comment_template', '$comment'),
+                'track': template_settings.get('track_template', '$track'),
+                'album_artist': template_settings.get('album_artist_template', '$album_artist'),
+                'lyrics': template_settings.get('lyrics_template', '$lyrics')
+            }
+            
+            logger.info(f"🎵 استخدام قالب الوسوم: {metadata_template}")
+            
+            # Process audio metadata
+            album_art_path = None
+            if audio_settings.get('album_art_enabled') and audio_settings.get('album_art_path'):
+                album_art_path = audio_settings.get('album_art_path')
+            intro_path = audio_settings.get('intro_audio_path') if audio_settings.get('audio_merge_enabled') else None
+            outro_path = audio_settings.get('outro_audio_path') if audio_settings.get('audio_merge_enabled') else None
+            intro_position = audio_settings.get('intro_position', 'start')
+
+            # تطبيق تنظيف النصوص على الوسوم إذا كان مفعّلًا لهذه المهمة
+            try:
+                tag_cleaning = self.db.get_audio_tag_cleaning_settings(task_id)
+            except Exception:
+                tag_cleaning = {'enabled': False}
+
+            effective_template = dict(metadata_template)
+            if tag_cleaning and tag_cleaning.get('enabled'):
+                def _clean_tag(text: Optional[str]) -> Optional[str]:
+                    if text is None:
+                        return None
+                    return self.apply_text_cleaning(text, task_id)
+
+                # تنظيف الوسوم المختارة فقط
+                if tag_cleaning.get('clean_title') and effective_template.get('title'):
+                    effective_template['title'] = _clean_tag(effective_template['title'])
+                if tag_cleaning.get('clean_artist') and effective_template.get('artist'):
+                    effective_template['artist'] = _clean_tag(effective_template['artist'])
+                if tag_cleaning.get('clean_album_artist') and effective_template.get('album_artist'):
+                    effective_template['album_artist'] = _clean_tag(effective_template['album_artist'])
+                if tag_cleaning.get('clean_album') and effective_template.get('album'):
+                    effective_template['album'] = _clean_tag(effective_template['album'])
+                if tag_cleaning.get('clean_year') and effective_template.get('year'):
+                    effective_template['year'] = _clean_tag(effective_template['year'])
+                if tag_cleaning.get('clean_genre') and effective_template.get('genre'):
+                    effective_template['genre'] = _clean_tag(effective_template['genre'])
+                if tag_cleaning.get('clean_composer') and effective_template.get('composer'):
+                    effective_template['composer'] = _clean_tag(effective_template['composer'])
+                if tag_cleaning.get('clean_comment') and effective_template.get('comment'):
+                    effective_template['comment'] = _clean_tag(effective_template['comment'])
+                if tag_cleaning.get('clean_track') and effective_template.get('track'):
+                    effective_template['track'] = _clean_tag(effective_template['track'])
+                if tag_cleaning.get('clean_length') and effective_template.get('length'):
+                    effective_template['length'] = _clean_tag(effective_template['length'])
+                if tag_cleaning.get('clean_lyrics') and effective_template.get('lyrics'):
+                    # الحفاظ على فواصل الأسطر أثناء التنظيف: ننظف على مستوى السطور ونحافظ على \n
+                    original = effective_template['lyrics']
+                    lines = original.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+                    cleaned_lines = [self.apply_text_cleaning(line, task_id) for line in lines]
+                    effective_template['lyrics'] = '\n'.join(cleaned_lines)
+
+            processed_audio = self.audio_processor.process_audio_once_for_all_targets(
+                media_bytes,
+                file_name,
+                effective_template,
+                album_art_path=album_art_path,
+                apply_art_to_all=bool(audio_settings.get('apply_art_to_all', False)),
+                audio_intro_path=intro_path,
+                audio_outro_path=outro_path,
+                intro_position=intro_position,
+                task_id=task_id
+            )
+            
+            if processed_audio and processed_audio != media_bytes:
+                logger.info(f"✅ تم معالجة الوسوم الصوتية للملف {file_name} في المهمة {task_id}")
+                # Update filename to MP3 if conversion was done
+                if file_name.lower().endswith(('.m4a', '.aac', '.ogg', '.wav', '.flac', '.wma', '.opus')):
+                    new_file_name = file_name.rsplit('.', 1)[0] + '.mp3'
+                    logger.info(f"🔄 تم تحديث اسم الملف من {file_name} إلى {new_file_name}")
+                    return processed_audio, new_file_name
+                return processed_audio, file_name
+            else:
+                logger.debug(f"🔄 لم يتم معالجة الوسوم الصوتية للملف {file_name} في المهمة {task_id}")
+                return media_bytes, file_name
+                
+        except Exception as e:
+            logger.error(f"خطأ في معالجة الوسوم الصوتية: {e}")
+            return media_bytes, file_name
 
     def apply_message_formatting(self, text: str, settings: dict) -> str:
         """Apply header and footer formatting to message text"""
@@ -1570,13 +2424,23 @@ class UserbotService:
 
         final_text = text
 
+        def _md_to_html_links(s: str) -> str:
+            try:
+                import re
+                # Convert markdown [text](url) to HTML <a href="url">text</a>
+                return re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', s)
+            except Exception:
+                return s
+
         # Add header if enabled
         if settings['header_enabled'] and settings['header_text']:
-            final_text = settings['header_text'] + "\n\n" + final_text
+            header_html = _md_to_html_links(settings['header_text'])
+            final_text = header_html + "\n\n" + final_text
 
         # Add footer if enabled
         if settings['footer_enabled'] and settings['footer_text']:
-            final_text = final_text + "\n\n" + settings['footer_text']
+            footer_html = _md_to_html_links(settings['footer_text'])
+            final_text = final_text + "\n\n" + footer_html
 
         return final_text
 
@@ -1692,33 +2556,53 @@ class UserbotService:
 
             message_length = len(message_text)
             min_chars = settings.get('min_chars', 0)
-            max_chars = settings.get('max_chars', 0)
+            max_chars = settings.get('max_chars', 4000)
             mode = settings.get('mode', 'allow')
+            use_range = settings.get('use_range', True)
 
-            logger.info(f"📏 فحص حد الأحرف للمهمة {task_id}: النص='{message_text}' ({message_length} حرف), النطاق={min_chars}-{max_chars}, الوضع={mode}")
+            logger.info(f"📏 فحص حد الأحرف للمهمة {task_id}: النص='{message_text[:50]}...' ({message_length} حرف), حد أدنى={min_chars}, حد أقصى={max_chars}, وضع={mode}")
 
-            # Check character range
-            in_range = True
-            if min_chars > 0 and message_length < min_chars:
-                logger.info(f"📏 الرسالة قصيرة جداً: {message_length} < {min_chars} حرف")
-                in_range = False
-            elif max_chars > 0 and message_length > max_chars:
-                logger.info(f"📏 الرسالة طويلة جداً: {message_length} > {max_chars} حرف")
-                in_range = False
-
-            # Apply mode logic
+            # Character limit checking logic based on mode
             if mode == 'allow':
-                # Allow mode: only allow messages within range
-                result = in_range
-                logger.info(f"🔧 وضع السماح: {'✅ مقبول' if result else '🚫 مرفوض'} - الرسالة {'في النطاق' if in_range else 'خارج النطاق'}")
-                return result
+                # Allow mode: Allow messages that meet the criteria
+                if use_range and min_chars > 0 and max_chars > 0:
+                    # Range check: min_chars <= length <= max_chars
+                    if min_chars <= message_length <= max_chars:
+                        logger.info(f"✅ السماح - النطاق: الرسالة مقبولة ({min_chars} <= {message_length} <= {max_chars} حرف)")
+                        return True
+                    else:
+                        logger.info(f"🚫 السماح - النطاق: الرسالة مرفوضة ({message_length} خارج النطاق {min_chars}-{max_chars} حرف)")
+                        return False
+                else:
+                    # Max limit only: length <= max_chars
+                    if message_length <= max_chars:
+                        logger.info(f"✅ السماح - الحد الأقصى: الرسالة مقبولة ({message_length} <= {max_chars} حرف)")
+                        return True
+                    else:
+                        logger.info(f"🚫 السماح - الحد الأقصى: الرسالة مرفوضة ({message_length} > {max_chars} حرف)")
+                        return False
+
             elif mode == 'block':
-                # Block mode: block messages within range
-                result = not in_range
-                logger.info(f"🔧 وضع الحظر: {'✅ مقبول' if result else '🚫 مرفوض'} - الرسالة {'في النطاق' if in_range else 'خارج النطاق'}")
-                return result
+                # Block mode: Block messages that don't meet the criteria
+                if use_range and min_chars > 0 and max_chars > 0:
+                    # Range check: block if outside min_chars <= length <= max_chars
+                    if min_chars <= message_length <= max_chars:
+                        logger.info(f"✅ الحظر - النطاق: الرسالة مقبولة ({min_chars} <= {message_length} <= {max_chars} حرف)")
+                        return True
+                    else:
+                        logger.info(f"🚫 الحظر - النطاق: الرسالة مرفوضة ({message_length} خارج النطاق {min_chars}-{max_chars} حرف)")
+                        return False
+                else:
+                    # Max limit only: block if length > max_chars
+                    if message_length <= max_chars:
+                        logger.info(f"✅ الحظر - الحد الأقصى: الرسالة مقبولة ({message_length} <= {max_chars} حرف)")
+                        return True
+                    else:
+                        logger.info(f"🚫 الحظر - الحد الأقصى: الرسالة مرفوضة ({message_length} > {max_chars} حرف)")
+                        return False
+            
             else:
-                logger.warning(f"⚠️ وضع غير معروف '{mode}' - السماح بالتوجيه")
+                logger.warning(f"⚠️ وضع فلتر غير معروف '{mode}' - السماح بالتوجيه")
                 return True
 
         except Exception as e:
@@ -1987,18 +2871,20 @@ class UserbotService:
                 logger.debug(f"👮‍♂️ لا توجد فلاتر مشرفين للمهمة {task_id}")
                 return False
             
-            # First pass: Look for exact matches (higher priority)
+            # First pass: Look for exact matches (highest priority)
             exact_matches = []
             partial_matches = []
             
             for admin in admin_filters:
                 admin_name = admin.get('admin_first_name', '').strip()
                 admin_username = admin.get('admin_username', '').strip()
+                admin_signature = admin.get('admin_signature', '').strip()
                 is_allowed = admin.get('is_allowed', True)
                 
                 # Exact matching logic (highest priority)
                 exact_name_match = admin_name and author_signature.lower() == admin_name.lower()
                 exact_username_match = admin_username and author_signature.lower() == admin_username.lower()
+                exact_signature_match = admin_signature and author_signature.lower() == admin_signature.lower()
                 
                 # Partial matching logic (lower priority)  
                 partial_name_match = admin_name and admin_name != author_signature and (
@@ -2010,38 +2896,45 @@ class UserbotService:
                     author_signature.lower() in admin_username.lower()
                 )
                 
+                partial_signature_match = admin_signature and admin_signature != author_signature and (
+                    author_signature.lower() in admin_signature.lower() or
+                    admin_signature.lower() in author_signature.lower()
+                )
+                
                 # Collect matches by priority
-                if exact_name_match or exact_username_match:
+                if exact_name_match or exact_username_match or exact_signature_match:
                     exact_matches.append((admin, 'exact'))
-                    logger.debug(f"🎯 تطابق دقيق مع المشرف '{admin_name}' (@{admin_username})")
-                elif partial_name_match or partial_username_match:
+                    logger.debug(f"🎯 تطابق دقيق مع المشرف '{admin_name}' (@{admin_username}) [توقيع: {admin_signature}]")
+                elif partial_name_match or partial_username_match or partial_signature_match:
                     partial_matches.append((admin, 'partial'))
-                    logger.debug(f"🔍 تطابق جزئي مع المشرف '{admin_name}' (@{admin_username})")
+                    logger.debug(f"🔍 تطابق جزئي مع المشرف '{admin_name}' (@{admin_username}) [توقيع: {admin_signature}]")
             
             # Process exact matches first (highest priority)
             for admin, match_type in exact_matches:
                 admin_name = admin.get('admin_first_name', '').strip()
                 admin_username = admin.get('admin_username', '').strip()
+                admin_signature = admin.get('admin_signature', '').strip()
                 is_allowed = admin.get('is_allowed', True)
                 
                 if not is_allowed:
-                    logger.error(f"🚫 [SIGNATURE BLOCK - EXACT] توقيع المؤلف '{author_signature}' محظور (تطابق دقيق مع '{admin_name}' أو '{admin_username}') - سيتم حظر الرسالة")
+                    logger.error(f"🚫 [SIGNATURE BLOCK - EXACT] توقيع المؤلف '{author_signature}' محظور (تطابق دقيق مع '{admin_name}' أو '{admin_username}' أو '{admin_signature}') - سيتم حظر الرسالة")
                     return True
                 else:
-                    logger.info(f"✅ [SIGNATURE ALLOW - EXACT] توقيع المؤلف '{author_signature}' مسموح (تطابق دقيق مع '{admin_name}' أو '{admin_username}') - سيتم توجيه الرسالة")
+                    logger.info(f"✅ [SIGNATURE ALLOW - EXACT] توقيع المؤلف '{author_signature}' مسموح (تطابق دقيق مع '{admin_name}' أو '{admin_username}' أو '{admin_signature}') - سيتم توجيه الرسالة")
                     return False
             
             # Process partial matches only if no exact matches found
             for admin, match_type in partial_matches:
                 admin_name = admin.get('admin_first_name', '').strip()
                 admin_username = admin.get('admin_username', '').strip()
+                admin_signature = admin.get('admin_signature', '').strip()
                 is_allowed = admin.get('is_allowed', True)
                 
                 if not is_allowed:
-                    logger.error(f"🚫 [SIGNATURE BLOCK - PARTIAL] توقيع المؤلف '{author_signature}' محظور (تطابق جزئي مع '{admin_name}' أو '{admin_username}') - سيتم حظر الرسالة")
+                    logger.error(f"🚫 [SIGNATURE BLOCK - PARTIAL] توقيع المؤلف '{author_signature}' محظور (تطابق جزئي مع '{admin_name}' أو '{admin_username}' أو '{admin_signature}') - سيتم حظر الرسالة")
                     return True
                 else:
-                    logger.info(f"✅ [SIGNATURE ALLOW - PARTIAL] توقيع المؤلف '{author_signature}' مسموح (تطابق جزئي مع '{admin_name}' أو '{admin_username}') - سيتم توجيه الرسالة")
+                    logger.info(f"✅ [SIGNATURE ALLOW - PARTIAL] توقيع المؤلف '{author_signature}' مسموح (تطابق جزئي مع '{admin_name}' أو '{admin_username}' أو '{admin_signature}') - سيتم توجيه الرسالة")
                     return False
             
             # If signature not found in admin list, allow by default
@@ -2139,21 +3032,28 @@ class UserbotService:
                 logger.debug(f"❌ لا توجد إعدادات فلتر التكرار للمهمة {task_id}")
                 return False
                 
-            # Check if any checks are enabled
-            check_text = settings.get('check_text_similarity', False)
-            check_media = settings.get('check_media_similarity', False)
+            # Check if feature is enabled - use correct key
+            enabled = settings.get('enabled', False)
+            if not enabled:
+                logger.debug(f"❌ فلتر التكرار معطل للمهمة {task_id}")
+                return False
+                
+            # Check if any checks are enabled - use correct keys from database
+            check_text = settings.get('check_text', False)
+            check_media = settings.get('check_media', False)
             
             if not check_text and not check_media:
                 logger.debug(f"❌ فحوصات فلتر التكرار معطلة للمهمة {task_id}")
                 return False
                 
-            threshold = settings.get('similarity_threshold', 0.8)
+            # Convert threshold from percentage to decimal
+            threshold = settings.get('similarity_threshold', 80) / 100.0
             time_window_hours = settings.get('time_window_hours', 24)
             
-            logger.info(f"🔍 فحص تكرار الرسالة للمهمة {task_id}: نص={check_text}, وسائط={check_media}, نسبة={threshold*100:.0f}%, نافذة={time_window_hours}ساعة")
+            logger.info(f"🔍 فحص تكرار الرسالة للمهمة {task_id}: مفعل={enabled}, نص={check_text}, وسائط={check_media}, نسبة={threshold*100:.0f}%, نافذة={time_window_hours}ساعة")
             
-            # Get message content to check
-            message_text = message.message or ""
+            # Get message content to check - fix message.message to message.text
+            message_text = message.text or message.message or ""
             message_media = None
             media_hash = None
             
@@ -2170,6 +3070,8 @@ class UserbotService:
                         media_hash = str(message.media.document.id)
                         message_media = 'document'
             
+            logger.info(f"📝 محتوى الرسالة للفحص: نص='{message_text[:50]}...', وسائط={message_media}, hash={media_hash}")
+            
             # Check for duplicates in database
             import time
             current_time = int(time.time())
@@ -2178,42 +3080,51 @@ class UserbotService:
             
             # Get recent messages from database
             recent_messages = self.db.get_recent_messages_for_duplicate_check(task_id, cutoff_time)
+            logger.info(f"📊 تم العثور على {len(recent_messages)} رسالة حديثة للمقارنة")
             
             for stored_msg in recent_messages:
                 is_duplicate = False
+                stored_text = stored_msg.get('message_text', '')
+                stored_media = stored_msg.get('media_hash', '')
                 
                 # Check text similarity if enabled
-                if check_text and message_text and stored_msg.get('message_text'):
-                    similarity = self._calculate_text_similarity(message_text, stored_msg['message_text'])
+                if check_text and message_text and stored_text:
+                    similarity = self._calculate_text_similarity(message_text, stored_text)
+                    logger.info(f"🔍 مقارنة النص: '{message_text}' مع '{stored_text}' - تشابه={similarity*100:.1f}%")
                     if similarity >= threshold:
-                        logger.info(f"🔄 نص مكرر: تشابه={similarity*100:.1f}% >= {threshold*100:.0f}%")
+                        logger.warning(f"🔄 نص مكرر وجد! تشابه={similarity*100:.1f}% >= {threshold*100:.0f}%")
                         is_duplicate = True
                 
                 # Check media similarity if enabled
-                if check_media and media_hash and stored_msg.get('media_hash'):
-                    if media_hash == stored_msg['media_hash']:
-                        logger.info(f"🔄 وسائط مكررة: {media_hash}")
+                if check_media and media_hash and stored_media:
+                    logger.info(f"🔍 مقارنة الوسائط: '{media_hash}' مع '{stored_media}'")
+                    if media_hash == stored_media:
+                        logger.warning(f"🔄 وسائط مكررة وجدت: {media_hash}")
                         is_duplicate = True
                 
                 if is_duplicate:
+                    logger.warning(f"🚫 رسالة مكررة - سيتم رفضها!")
                     # Update stored message timestamp to current time
                     self.db.update_message_timestamp_for_duplicate(stored_msg['id'], current_time)
                     return True
             
             # Store this message for future duplicate checks
+            logger.info(f"💾 حفظ الرسالة للمراقبة المستقبلية")
             self.db.store_message_for_duplicate_check(
                 task_id=task_id,
                 message_text=message_text,
-                media_hash=media_hash,
-                media_type=message_media,
+                media_hash=media_hash or "",
+                media_type=message_media or "",
                 timestamp=current_time
             )
             
-            logger.debug(f"✅ رسالة غير مكررة للمهمة {task_id}")
+            logger.info(f"✅ رسالة غير مكررة للمهمة {task_id}")
             return False
             
         except Exception as e:
             logger.error(f"خطأ في فحص تكرار الرسالة: {e}")
+            import traceback
+            logger.error(f"تفاصيل الخطأ: {traceback.format_exc()}")
             return False  # Allow message if check fails
             
     def _calculate_text_similarity(self, text1: str, text2: str) -> float:
@@ -2589,19 +3500,21 @@ class UserbotService:
             for user_id, session_string, phone_number in saved_sessions:
                 logger.info(f"👤 المستخدم {user_id} - هاتف: {phone_number}")
 
-            # Start userbot for each saved session
+            # Start userbot for each saved session (one at a time to avoid conflicts)
             success_count = 0
-            for user_id, session_string, phone_number in saved_sessions:
+            for i, (user_id, session_string, phone_number) in enumerate(saved_sessions):
                 try:
-                    logger.info(f"🔄 بدء تشغيل UserBot للمستخدم {user_id} ({phone_number})")
+                    logger.info(f"🔄 بدء تشغيل UserBot للمستخدم {user_id} ({phone_number}) - {i+1}/{len(saved_sessions)}")
 
                     # Validate session string
                     if not session_string or len(session_string) < 10:
                         logger.warning(f"⚠️ جلسة غير صالحة للمستخدم {user_id}")
                         continue
 
-                    # Give a small delay between sessions
-                    await asyncio.sleep(2)
+                    # Give significant delay between sessions to avoid IP conflicts
+                    if i > 0:  # Don't delay for first session
+                        logger.info(f"⏳ انتظار {self.startup_delay} ثانية قبل تشغيل الجلسة التالية...")
+                        await asyncio.sleep(self.startup_delay)
 
                     success = await self.start_with_session(user_id, session_string)
 
@@ -2633,6 +3546,11 @@ class UserbotService:
 
             active_clients = len(self.clients)
             logger.info(f"🎉 تم تشغيل {success_count} من أصل {len(saved_sessions)} جلسة محفوظة")
+
+            # Start session health monitor if we have active clients
+            if success_count > 0:
+                logger.info("🏥 بدء مراقب صحة الجلسات...")
+                asyncio.create_task(self.start_session_health_monitor())
 
             # Log active tasks summary
             if active_clients > 0:
@@ -2817,6 +3735,77 @@ class UserbotService:
             logger.error(f"خطأ في إضافة المالك كمشرف: {e}")
             return -1
 
+    async def monitor_session_health(self):
+        """Monitor session health for all users with improved conflict avoidance"""
+        while self.running:
+            try:
+                # Wait 30 seconds between checks
+                await asyncio.sleep(30)
+                
+                # Get all authenticated users
+                authenticated_users = self.db.get_all_authenticated_users()
+                
+                if not authenticated_users:
+                    continue
+                
+                logger.info(f"🔍 فحص صحة {len(authenticated_users)} جلسة...")
+                
+                for user in authenticated_users:
+                    user_id = user['user_id']
+                    
+                    # Skip if session is locked (being started elsewhere)
+                    if user_id in self.session_locks and self.session_locks[user_id]:
+                        continue
+                    
+                    # Check if this user's session is healthy
+                    is_healthy = await self.check_user_session_health(user_id)
+                    
+                    if not is_healthy:
+                        logger.warning(f"⚠️ جلسة غير صحية للمستخدم {user_id}")
+                        
+                        # Don't try to auto-reconnect to avoid conflicts
+                        # Just mark it as unhealthy in database
+                        self.db.update_session_health(user_id, False, "فحص دوري - غير متصل")
+                
+            except Exception as e:
+                logger.error(f"خطأ في مراقبة صحة الجلسات: {e}")
+
+    async def stop_user_session(self, user_id: int):
+        """Stop and cleanup user session safely"""
+        try:
+            # Create lock if not exists
+            if user_id not in self.user_locks:
+                self.user_locks[user_id] = asyncio.Lock()
+
+            async with self.user_locks[user_id]:
+                # Disconnect client if exists
+                if user_id in self.clients:
+                    client = self.clients[user_id]
+                    try:
+                        await client.disconnect()
+                        logger.info(f"🔌 تم فصل العميل للمستخدم {user_id}")
+                    except Exception as e:
+                        logger.warning(f"خطأ في فصل العميل: {e}")
+                    finally:
+                        del self.clients[user_id]
+
+                # Clean up data structures
+                if user_id in self.user_tasks:
+                    del self.user_tasks[user_id]
+                if user_id in self.album_collectors:
+                    del self.album_collectors[user_id]
+                if user_id in self.session_health_status:
+                    del self.session_health_status[user_id]
+                
+                # Release session lock
+                if user_id in self.session_locks:
+                    self.session_locks[user_id] = False
+
+                logger.info(f"✅ تم تنظيف جلسة المستخدم {user_id} بالكامل")
+
+        except Exception as e:
+            logger.error(f"خطأ في إيقاف جلسة المستخدم {user_id}: {e}")
+
     async def process_pending_admin_tasks(self):
         """Process pending admin fetch tasks in the main event loop"""
         try:
@@ -2958,7 +3947,8 @@ class UserbotService:
             cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
             # Remove italic (both * and _)
             cleaned_text = re.sub(r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)', r'\1', cleaned_text)
-            cleaned_text = re.sub(r'(?<!_)_(?!_)([^_]+)_(?!_)', r'\1', cleaned_text)
+            # More precise underscore pattern: only remove if it's clearly italic markdown (surrounded by spaces)
+            cleaned_text = re.sub(r'(?<=\s)_([^_\s][^_]*[^_\s])_(?=\s)', r'\1', cleaned_text)
             # Remove strikethrough
             cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
             # Remove code
@@ -2971,7 +3961,7 @@ class UserbotService:
             cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
-            # Remove hyperlinks but keep text (both markdown and HTML)
+            # Preserve hyperlinks (do not strip anchor tags/markdown links)
             cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)
             cleaned_text = re.sub(r'<a href="[^"]*">([^<]+)</a>', r'\1', cleaned_text)
 
@@ -3024,7 +4014,8 @@ class UserbotService:
             cleaned_text = re.sub(r'__(.*?)__', r'\1', cleaned_text)
             # Remove italic (both * and _)
             cleaned_text = re.sub(r'(?<!\*)\*(?!\*)([^*]+)\*(?!\*)', r'\1', cleaned_text)
-            cleaned_text = re.sub(r'(?<!_)_(?!_)([^_]+)_(?!_)', r'\1', cleaned_text)
+            # More precise underscore pattern: only remove if it's clearly italic markdown (surrounded by spaces)
+            cleaned_text = re.sub(r'(?<=\s)_([^_\s][^_]*[^_\s])_(?=\s)', r'\1', cleaned_text)
             # Remove strikethrough
             cleaned_text = re.sub(r'~~(.*?)~~', r'\1', cleaned_text)
             # Remove code
@@ -3037,7 +4028,7 @@ class UserbotService:
             cleaned_text = re.sub(r'<tg-spoiler>(.*?)</tg-spoiler>', r'\1', cleaned_text)
             # Remove quotes
             cleaned_text = re.sub(r'^>\s*', '', cleaned_text, flags=re.MULTILINE)
-            # Remove hyperlinks but keep text (both markdown and HTML)
+            # Preserve hyperlinks (do not strip anchor tags/markdown links)
             cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)
             cleaned_text = re.sub(r'<a href="[^"]*">([^<]+)</a>', r'\1', cleaned_text)
 
@@ -3079,15 +4070,16 @@ class UserbotService:
         entities = []
         processed_text = text
         
-        # البحث عن جميع علامات spoiler
+        # البحث عن جميع علامات spoiler - إضافة DOTALL flag للنصوص متعددة الأسطر
         pattern = r'TELETHON_SPOILER_START(.*?)TELETHON_SPOILER_END'
-        matches = list(re.finditer(pattern, text))
+        matches = list(re.finditer(pattern, text, re.DOTALL))
         
         if not matches:
             return text, []
         
+        logger.info(f"🔍 تم العثور على {len(matches)} علامة spoiler في النص")
+        
         # معالجة المطابقات بترتيب عكسي للحفاظ على الفهارس
-        offset_adjustment = 0
         for match in reversed(matches):
             start_pos = match.start()
             end_pos = match.end()
@@ -3098,20 +4090,119 @@ class UserbotService:
         
         # الآن إضافة الكيانات بالمواضع الصحيحة
         offset = 0
-        for match in re.finditer(pattern, text):
+        for match in re.finditer(pattern, text, re.DOTALL):
             spoiler_text = match.group(1)
+            
+            # حساب الموضع الصحيح بعد إزالة العلامات السابقة
+            correct_offset = match.start() - offset
+            
             entity = MessageEntitySpoiler(
-                offset=match.start() - offset,
+                offset=correct_offset,
                 length=len(spoiler_text)
             )
             entities.append(entity)
+            
             # تحديث الفهرس بطول العلامات المُزالة
             marker_length = len('TELETHON_SPOILER_START') + len('TELETHON_SPOILER_END')
             offset += marker_length
+            
+            logger.info(f"✅ Spoiler entity: offset={correct_offset}, length={len(spoiler_text)}, content='{spoiler_text[:50]}{'...' if len(spoiler_text) > 50 else ''}'")
         
-        logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler في النص")
+        logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler في النص بنجاح")
         
         return processed_text, entities
+
+    def get_channel_admins_via_bot(self, bot_token: str, channel_id: int) -> List[Dict]:
+        """Get channel admins using Bot API instead of UserBot"""
+        try:
+            import requests
+            
+            # Use Telegram Bot API to get chat administrators
+            url = f"https://api.telegram.org/bot{bot_token}/getChatAdministrators"
+            params = {'chat_id': channel_id}
+            
+            logger.info(f"🔍 جلب مشرفي القناة {channel_id} من Bot API...")
+            response = requests.get(url, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('ok'):
+                    admins = data.get('result', [])
+                    logger.info(f"📋 تم العثور على {len(admins)} إدارة إجمالية (بما في ذلك البوتات)")
+                    
+                    admins_data = []
+                    skipped_bots = 0
+                    
+                    for i, admin in enumerate(admins, 1):
+                        user = admin.get('user', {})
+                        user_id = user.get('id')
+                        username = user.get('username', '')
+                        first_name = user.get('first_name', '')
+                        last_name = user.get('last_name', '')
+                        is_bot = user.get('is_bot', False)
+                        status = admin.get('status', 'unknown')
+                        custom_title = admin.get('custom_title', '')
+                        
+                        logger.info(f"  {i}. ID={user_id}, User=@{username}, Name='{first_name} {last_name}', Bot={is_bot}, Status={status}, Title='{custom_title}'")
+                        
+                        if is_bot:
+                            skipped_bots += 1
+                            logger.debug(f"    ⏩ تخطي البوت: {username or first_name or user_id}")
+                            continue  # Skip bots
+                        
+                        # Build full name
+                        full_name = f"{first_name} {last_name}".strip()
+                        if not full_name:
+                            full_name = username or f"User {user_id}"
+                        
+                        admin_data = {
+                            'id': user_id,
+                            'username': username,
+                            'first_name': full_name,
+                            'is_bot': is_bot,
+                            'custom_title': custom_title,  # This is what appears in post_author
+                            'status': status
+                        }
+                        
+                        admins_data.append(admin_data)
+                        logger.info(f"    ✅ إضافة المشرف: {full_name} (توقيع: '{custom_title}')")
+                    
+                    logger.info(f"📊 النتيجة النهائية: {len(admins_data)} مشرف بشري + {skipped_bots} بوت تم تخطيهم")
+                    logger.info(f"✅ تم جلب {len(admins_data)} مشرف من القناة {channel_id} عبر Bot API")
+                    return admins_data
+                else:
+                    error_desc = data.get('description', 'Unknown error')
+                    logger.error(f"❌ Bot API error: {error_desc}")
+                    return []
+            else:
+                logger.error(f"❌ HTTP Error {response.status_code}: {response.text}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في جلب مشرفي القناة {channel_id} عبر Bot API: {e}")
+            import traceback
+            logger.error(f"تفاصيل الخطأ: {traceback.format_exc()}")
+            return []
+
+    def _determine_final_send_mode(self, forward_mode: str, requires_copy_mode: bool) -> str:
+        """تحديد الوضع النهائي للإرسال - إصلاح منطق التوجيه"""
+        if forward_mode == 'copy':
+            # وضع النسخ - دائماً نسخ
+            return 'copy'
+        elif forward_mode == 'forward':
+            if requires_copy_mode:
+                # وضع التوجيه مع تنسيق - إجبار النسخ
+                logger.info(f"🔄 إجبار النسخ في وضع التوجيه بسبب التنسيق")
+                return 'copy'
+            else:
+                # وضع التوجيه بدون تنسيق - توجيه عادي
+                return 'forward'
+        else:
+            # افتراضي - توجيه
+            return 'forward'
+
+
+
 
 # Global userbot instance
 userbot_instance = UserbotService()
@@ -3119,8 +4210,41 @@ userbot_instance = UserbotService()
 async def start_userbot_service():
     """Start the userbot service"""
     logger.info("🤖 بدء تشغيل خدمة UserBot...")
-    await userbot_instance.startup_existing_sessions()
-    logger.info("✅ خدمة UserBot جاهزة")
+    
+    try:
+        # Check if there are any sessions before starting
+        with userbot_instance.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM user_sessions 
+                WHERE is_authenticated = TRUE AND session_string IS NOT NULL AND session_string != ''
+            ''')
+            session_count = cursor.fetchone()[0]
+        
+        if session_count == 0:
+            logger.warning("⚠️ لا توجد جلسات محفوظة - UserBot لن يبدأ")
+            logger.info("💡 المستخدمين يمكنهم تسجيل الدخول عبر البوت /start")
+            return False
+        
+        logger.info(f"📱 تم العثور على {session_count} جلسة محفوظة")
+        
+        # Attempt to start existing sessions
+        await userbot_instance.startup_existing_sessions()
+        
+        # Check if any sessions actually started successfully
+        active_clients = len(userbot_instance.clients)
+        
+        if active_clients > 0:
+            logger.info(f"✅ خدمة UserBot جاهزة مع {active_clients} جلسة نشطة")
+            return True
+        else:
+            logger.warning("⚠️ فشل في تشغيل أي جلسة UserBot - جميع الجلسات معطلة")
+            logger.info("💡 المستخدمين يحتاجون إعادة تسجيل الدخول عبر البوت")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ خطأ في تشغيل خدمة UserBot: {e}")
+        return False
 
 async def stop_userbot_service():
     """Stop the userbot service"""

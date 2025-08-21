@@ -17,8 +17,18 @@ class Database:
 
     def get_connection(self):
         """Get SQLite database connection"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=120, check_same_thread=False, isolation_level=None)
         conn.row_factory = sqlite3.Row
+        try:
+            # Improve concurrency and reduce lock errors
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            conn.execute('PRAGMA busy_timeout=120000')
+            conn.execute('PRAGMA foreign_keys=ON')
+            conn.execute('PRAGMA wal_autocheckpoint=1000')
+        except Exception:
+            # Ignore pragma failures on some platforms
+            pass
         return conn
 
     def init_database(self):
@@ -85,10 +95,37 @@ class Database:
                     phone_number TEXT,
                     session_string TEXT,
                     is_authenticated BOOLEAN DEFAULT FALSE,
+                    is_healthy BOOLEAN DEFAULT TRUE,
+                    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    connection_errors INTEGER DEFAULT 0,
+                    last_error_time TIMESTAMP,
+                    last_error_message TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            
+            # Add new columns if they don't exist (for existing databases)
+            try:
+                cursor.execute('ALTER TABLE user_sessions ADD COLUMN is_healthy BOOLEAN DEFAULT TRUE')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute('ALTER TABLE user_sessions ADD COLUMN last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute('ALTER TABLE user_sessions ADD COLUMN connection_errors INTEGER DEFAULT 0')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute('ALTER TABLE user_sessions ADD COLUMN last_error_time TIMESTAMP')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute('ALTER TABLE user_sessions ADD COLUMN last_error_message TEXT')
+            except sqlite3.OperationalError:
+                pass
 
             # Conversation states table
             cursor.execute('''
@@ -528,6 +565,20 @@ class Database:
             except Exception:
                 pass  # Column already exists
 
+            # Add source_chat_id column to task_admin_filters if it doesn't exist
+            try:
+                cursor.execute("SELECT source_chat_id FROM task_admin_filters LIMIT 1")
+            except sqlite3.OperationalError:
+                logger.info("✅ إضافة عمود source_chat_id إلى جدول task_admin_filters")
+                cursor.execute("ALTER TABLE task_admin_filters ADD COLUMN source_chat_id TEXT")
+            
+            # Add admin_signature column for post_author filtering
+            try:
+                cursor.execute("SELECT admin_signature FROM task_admin_filters LIMIT 1")
+            except sqlite3.OperationalError:
+                logger.info("✅ إضافة عمود admin_signature إلى جدول task_admin_filters")
+                cursor.execute("ALTER TABLE task_admin_filters ADD COLUMN admin_signature TEXT")
+
             # Task translation settings table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_translation_settings (
@@ -560,6 +611,51 @@ class Database:
                     apply_to_videos BOOLEAN DEFAULT TRUE,
                     apply_to_documents BOOLEAN DEFAULT FALSE,
                     font_size INTEGER DEFAULT 24,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # ===== Task audio metadata settings table =====
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_metadata_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    template TEXT DEFAULT 'default',
+                    album_art_enabled BOOLEAN DEFAULT FALSE,
+                    album_art_path TEXT,
+                    apply_art_to_all BOOLEAN DEFAULT FALSE,
+                    audio_merge_enabled BOOLEAN DEFAULT FALSE,
+                    intro_audio_path TEXT,
+                    outro_audio_path TEXT,
+                    intro_position TEXT DEFAULT 'start' CHECK (intro_position IN ('start', 'end')),
+                    preserve_original BOOLEAN DEFAULT TRUE,
+                    convert_to_mp3 BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Task audio tag cleaning settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_tag_cleaning_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    clean_title BOOLEAN DEFAULT TRUE,
+                    clean_artist BOOLEAN DEFAULT TRUE,
+                    clean_album_artist BOOLEAN DEFAULT TRUE,
+                    clean_album BOOLEAN DEFAULT TRUE,
+                    clean_year BOOLEAN DEFAULT TRUE,
+                    clean_genre BOOLEAN DEFAULT TRUE,
+                    clean_composer BOOLEAN DEFAULT TRUE,
+                    clean_comment BOOLEAN DEFAULT TRUE,
+                    clean_track BOOLEAN DEFAULT TRUE,
+                    clean_length BOOLEAN DEFAULT FALSE,
+                    clean_lyrics BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
@@ -636,6 +732,43 @@ class Database:
                 )
             ''')
 
+            # Task text formatting settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_text_formatting_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    text_formatting_enabled BOOLEAN DEFAULT FALSE,
+                    format_type TEXT DEFAULT 'regular' CHECK (format_type IN ('regular', 'bold', 'italic', 'underline', 'strikethrough', 'code', 'monospace', 'quote', 'spoiler', 'hyperlink')),
+                    hyperlink_text TEXT,
+                    hyperlink_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Create audio template settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_template_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    title_template TEXT DEFAULT '$title',
+                    artist_template TEXT DEFAULT '$artist',
+                    album_artist_template TEXT DEFAULT '$album_artist',
+                    album_template TEXT DEFAULT '$album',
+                    year_template TEXT DEFAULT '$year',
+                    genre_template TEXT DEFAULT '$genre',
+                    composer_template TEXT DEFAULT '$composer',
+                    comment_template TEXT DEFAULT '$comment',
+                    track_template TEXT DEFAULT '$track',
+                    length_template TEXT DEFAULT '$length',
+                    lyrics_template TEXT DEFAULT '$lyrics',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
             conn.commit()
             logger.info("✅ تم تهيئة جداول SQLite بنجاح مع الفلاتر المتقدمة والميزات الجديدة")
             
@@ -647,6 +780,9 @@ class Database:
         
         # Add language filter mode support
         self.add_language_filter_mode_support()
+        
+        # Update character limit table structure
+        self.update_character_limit_table()
 
     # User Session Management
     def save_user_session(self, user_id: int, phone_number: str, session_string: str):
@@ -701,6 +837,127 @@ class Database:
                 WHERE is_authenticated = TRUE AND session_string IS NOT NULL
             ''')
             return cursor.fetchall()
+
+    def update_session_health(self, user_id: int, is_healthy: bool, error_message: str = None):
+        """Update session health status"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if is_healthy:
+                cursor.execute('''
+                    UPDATE user_sessions 
+                    SET is_healthy = ?, last_activity = CURRENT_TIMESTAMP, connection_errors = 0, updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ?
+                ''', (is_healthy, user_id))
+            else:
+                cursor.execute('''
+                    UPDATE user_sessions 
+                    SET is_healthy = ?, connection_errors = connection_errors + 1, 
+                        last_error_time = CURRENT_TIMESTAMP, last_error_message = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ?
+                ''', (is_healthy, error_message, user_id))
+            conn.commit()
+
+    def get_user_session_string(self, user_id: int) -> str:
+        """Get user session string"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT session_string 
+                FROM user_sessions 
+                WHERE user_id = ? AND is_authenticated = TRUE
+            ''', (user_id,))
+            result = cursor.fetchone()
+            return result['session_string'] if result else None
+
+    def get_session_health_status(self, user_id: int) -> dict:
+        """Get session health status for a user"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT is_healthy, last_activity, connection_errors, last_error_time, last_error_message
+                FROM user_sessions 
+                WHERE user_id = ?
+            ''', (user_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'is_healthy': bool(result['is_healthy']),
+                    'last_activity': result['last_activity'],
+                    'connection_errors': result['connection_errors'] or 0,
+                    'last_error_time': result['last_error_time'],
+                    'last_error_message': result['last_error_message']
+                }
+            return None
+
+    def get_all_session_health_status(self) -> dict:
+        """Get health status for all users"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT user_id, phone_number, is_healthy, last_activity, connection_errors, last_error_time, last_error_message
+                FROM user_sessions 
+                WHERE is_authenticated = TRUE
+            ''')
+            results = cursor.fetchall()
+            return {
+                row['user_id']: {
+                    'phone_number': row['phone_number'],
+                    'is_healthy': bool(row['is_healthy']),
+                    'last_activity': row['last_activity'],
+                    'connection_errors': row['connection_errors'] or 0,
+                    'last_error_time': row['last_error_time'],
+                    'last_error_message': row['last_error_message']
+                }
+                for row in results
+            }
+
+    def cleanup_broken_sessions(self):
+        """Clean up sessions with authorization key errors"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Delete sessions that have authorization key errors
+                cursor.execute('''
+                    DELETE FROM user_sessions 
+                    WHERE last_error_message LIKE '%authorization key%' 
+                    OR last_error_message LIKE '%different IP%'
+                    OR connection_errors >= 5
+                ''')
+                
+                deleted_count = cursor.rowcount
+                conn.commit()
+                
+                if deleted_count > 0:
+                    logger.info(f"🧹 تم حذف {deleted_count} جلسة معطلة من قاعدة البيانات")
+                else:
+                    logger.info("✅ لا توجد جلسات معطلة للحذف")
+                
+                return deleted_count
+                
+        except Exception as e:
+            logger.error(f"خطأ في تنظيف الجلسات المعطلة: {e}")
+            return 0
+
+    def get_user_session_health(self, user_id: int) -> dict:
+        """Get session health status for a specific user"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT is_healthy, last_activity, connection_errors, last_error_time, last_error_message
+                FROM user_sessions 
+                WHERE user_id = ? AND is_authenticated = TRUE
+            ''', (user_id,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'is_healthy': bool(row['is_healthy']),
+                    'last_activity': row['last_activity'],
+                    'connection_errors': row['connection_errors'] or 0,
+                    'last_error_time': row['last_error_time'],
+                    'last_error': row['last_error_message']
+                }
+            return None
 
     # Task Management
     def create_task(self, user_id: int, source_chat_id: str, source_chat_name: str,
@@ -807,15 +1064,15 @@ class Database:
             row = cursor.fetchone()
             if row:
                 return {
-                    'id': row['id'],
-                    'task_name': row['task_name'],
-                    'source_chat_id': row['source_chat_id'],
-                    'source_chat_name': row['source_chat_name'],
-                    'target_chat_id': row['target_chat_id'],
-                    'target_chat_name': row['target_chat_name'],
-                    'forward_mode': row['forward_mode'] or 'forward',
-                    'is_active': bool(row['is_active']),
-                    'created_at': str(row['created_at'])
+                    'id': row[0],
+                    'task_name': row[1],
+                    'source_chat_id': row[2],
+                    'source_chat_name': row[3],
+                    'target_chat_id': row[4],
+                    'target_chat_name': row[5],
+                    'forward_mode': row[6] or 'forward',
+                    'is_active': bool(row[7]),
+                    'created_at': str(row[8])
                 }
             return None
 
@@ -851,7 +1108,7 @@ class Database:
 
             tasks = []
             for row in cursor.fetchall():
-                task_id = row['id']
+                task_id = row[0]
 
                 # Get all sources for this task
                 sources = self.get_task_sources(task_id)
@@ -859,9 +1116,9 @@ class Database:
                     # Fallback to legacy data
                     sources = [{
                         'id': 0,
-                        'chat_id': row['source_chat_id'],
-                        'chat_name': row['source_chat_name']
-                    }] if row['source_chat_id'] else []
+                        'chat_id': row[2],
+                        'chat_name': row[3]
+                    }] if row[2] else []
 
                 # Get all targets for this task  
                 targets = self.get_task_targets(task_id)
@@ -869,23 +1126,27 @@ class Database:
                     # Fallback to legacy data
                     targets = [{
                         'id': 0,
-                        'chat_id': row['target_chat_id'],
-                        'chat_name': row['target_chat_name']
-                    }] if row['target_chat_id'] else []
+                        'chat_id': row[4],
+                        'chat_name': row[5]
+                    }] if row[4] else []
 
                 # Create individual task entries for each source-target combination
                 for source in sources:
                     for target in targets:
                         tasks.append({
-                            'id': row['id'],
-                            'task_name': row['task_name'],
+                            'id': row[0],
+                            'task_name': row[1],
                             'source_chat_id': source['chat_id'],
                             'source_chat_name': source['chat_name'],
                             'target_chat_id': target['chat_id'],
                             'target_chat_name': target['chat_name'],
-                            'forward_mode': row['forward_mode'] or 'forward'
+                            'forward_mode': row[6] or 'forward'
                         })
             return tasks
+    
+    def get_active_user_tasks(self, user_id):
+        """Get only active tasks for specific user - alias for get_active_tasks"""
+        return self.get_active_tasks(user_id)
 
     def get_all_active_tasks(self):
         """Get all active tasks for userbot"""
@@ -1424,7 +1685,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT admin_user_id, is_allowed 
+                SELECT admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature
                 FROM task_admin_filters 
                 WHERE task_id = ? AND admin_user_id = ?
             ''', (task_id, admin_user_id))
@@ -1433,7 +1694,11 @@ class Database:
             if result:
                 return {
                     'admin_user_id': result['admin_user_id'],
-                    'is_allowed': bool(result['is_allowed'])
+                    'admin_username': result['admin_username'] or '',
+                    'admin_first_name': result['admin_first_name'] or '',
+                    'is_allowed': bool(result['is_allowed']),
+                    'source_chat_id': result['source_chat_id'] or '',
+                    'admin_signature': result['admin_signature'] or ''
                 }
             return None
 
@@ -1443,7 +1708,7 @@ class Database:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT admin_user_id, admin_username, admin_first_name, is_allowed
+                    SELECT admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature
                     FROM task_admin_filters 
                     WHERE task_id = ?
                     ORDER BY admin_first_name, admin_username
@@ -1454,7 +1719,9 @@ class Database:
                     'admin_user_id': row['admin_user_id'],
                     'admin_username': row['admin_username'] or '',
                     'admin_first_name': row['admin_first_name'] or '',
-                    'is_allowed': bool(row['is_allowed'])
+                    'is_allowed': bool(row['is_allowed']),
+                    'source_chat_id': row['source_chat_id'],
+                    'admin_signature': row['admin_signature'] or ''
                 } for row in results]
                 
         except Exception as e:
@@ -1677,13 +1944,13 @@ class Database:
                     conn.commit()
                     inline_buttons_enabled = False
                 else:
-                    inline_buttons_enabled = bool(settings_result['inline_buttons_enabled'])
+                    inline_buttons_enabled = bool(settings_result[0])
 
                 return {
-                    'header_enabled': header_result['enabled'] if header_result else False,
-                    'header_text': header_result['header_text'] if header_result else None,
-                    'footer_enabled': footer_result['enabled'] if footer_result else False,
-                    'footer_text': footer_result['footer_text'] if footer_result else None,
+                    'header_enabled': header_result[0] if header_result else False,
+                    'header_text': header_result[1] if header_result else None,
+                    'footer_enabled': footer_result[0] if footer_result else False,
+                    'footer_text': footer_result[1] if footer_result else None,
                     'inline_buttons_enabled': inline_buttons_enabled
                 }
         except Exception as e:
@@ -2329,8 +2596,8 @@ class Database:
             return result
 
     def set_day_filter(self, task_id: int, day_number: int, is_allowed: bool):
-        """Set day filter for a specific day"""
-        if day_number < 1 or day_number > 7:
+        """Set day filter for a specific day (0=Monday, 6=Sunday)"""
+        if day_number < 0 or day_number > 6:
             logger.error(f"رقم يوم غير صالح: {day_number}")
             return False
 
@@ -2342,6 +2609,7 @@ class Database:
                 VALUES (?, ?, ?)
             ''', (task_id, day_number, is_allowed))
             conn.commit()
+            logger.info(f"✅ تم تحديث فلتر اليوم {day_number} للمهمة {task_id}: {is_allowed}")
             return True
 
     def set_all_day_filters(self, task_id: int, is_allowed: bool):
@@ -2456,7 +2724,7 @@ class Database:
             result = cursor.fetchone()
             
             if result:
-                new_state = not bool(result['enabled'])
+                new_state = not bool(result[0])
             else:
                 new_state = True
             
@@ -2659,6 +2927,21 @@ class Database:
             result = cursor.fetchone()
             return result['language_filter_mode'] if result else 'allow'
 
+    def clear_language_filters(self, task_id: int):
+        """Clear all language filters for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM task_language_filters 
+                    WHERE task_id = ?
+                ''', (task_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في مسح فلاتر اللغات: {e}")
+            return False
+
     # ===== Admin Filters Management =====
 
     def get_admin_filters(self, task_id: int) -> List[Dict]:
@@ -2666,7 +2949,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT admin_user_id, admin_username, admin_first_name, is_allowed
+                SELECT admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature
                 FROM task_admin_filters WHERE task_id = ?
                 ORDER BY admin_first_name, admin_username
             ''', (task_id,))
@@ -2677,32 +2960,184 @@ class Database:
                     'admin_user_id': row['admin_user_id'],
                     'admin_username': row['admin_username'],
                     'admin_first_name': row['admin_first_name'],
-                    'is_allowed': bool(row['is_allowed'])
+                    'is_allowed': bool(row['is_allowed']),
+                    'source_chat_id': row['source_chat_id'],
+                    'admin_signature': row['admin_signature']
                 })
             return filters
 
     def add_admin_filter(self, task_id: int, admin_user_id: int, admin_username: str = None, 
-                        admin_first_name: str = None, is_allowed: bool = True):
+                        admin_first_name: str = None, is_allowed: bool = True, source_chat_id: str = None,
+                        admin_signature: str = None):
         """Add admin filter"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO task_admin_filters 
-                (task_id, admin_user_id, admin_username, admin_first_name, is_allowed)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (task_id, admin_user_id, admin_username, admin_first_name, is_allowed))
+                (task_id, admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (task_id, admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature))
             conn.commit()
             return True
+            
+    def get_admin_filters_by_source(self, task_id: int, source_chat_id: str) -> List[Dict]:
+        """Get admin filters for a specific source"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature
+                    FROM task_admin_filters 
+                    WHERE task_id = ? AND source_chat_id = ?
+                    ORDER BY admin_first_name, admin_username
+                ''', (task_id, source_chat_id))
+                
+                results = cursor.fetchall()
+                return [{
+                    'admin_user_id': row['admin_user_id'],
+                    'admin_username': row['admin_username'] or '',
+                    'admin_first_name': row['admin_first_name'] or '',
+                    'is_allowed': bool(row['is_allowed']),
+                    'source_chat_id': row['source_chat_id'],
+                    'admin_signature': row['admin_signature'] or ''
+                } for row in results]
+                
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على فلاتر مشرفين المصدر: {e}")
+            return []
 
-    def toggle_admin_filter(self, task_id: int, admin_user_id: int):
+    def get_admin_filters_by_source_with_stats(self, task_id: int, source_chat_id: str) -> Dict:
+        """Get admin filters for a specific source with statistics"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get admins with their status
+                cursor.execute('''
+                    SELECT admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature
+                    FROM task_admin_filters 
+                    WHERE task_id = ? AND source_chat_id = ?
+                    ORDER BY admin_first_name, admin_username
+                ''', (task_id, source_chat_id))
+                
+                admins = []
+                for row in cursor.fetchall():
+                    admins.append({
+                        'admin_user_id': row['admin_user_id'],
+                        'admin_username': row['admin_username'] or '',
+                        'admin_first_name': row['admin_first_name'] or '',
+                        'is_allowed': bool(row['is_allowed']),
+                        'source_chat_id': row['source_chat_id'],
+                        'admin_signature': row['admin_signature'] or ''
+                    })
+                
+                # Get statistics
+                cursor.execute('''
+                    SELECT 
+                        COUNT(*) as total_count,
+                        SUM(CASE WHEN is_allowed = 1 THEN 1 ELSE 0 END) as allowed_count,
+                        SUM(CASE WHEN is_allowed = 0 THEN 1 ELSE 0 END) as blocked_count
+                    FROM task_admin_filters 
+                    WHERE task_id = ? AND source_chat_id = ?
+                ''', (task_id, source_chat_id))
+                
+                stats = cursor.fetchone()
+                
+                return {
+                    'admins': admins,
+                    'stats': {
+                        'total': stats['total_count'] if stats else 0,
+                        'allowed': stats['allowed_count'] if stats else 0,
+                        'blocked': stats['blocked_count'] if stats else 0
+                    }
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على فلاتر مشرفين المصدر مع الإحصائيات: {e}")
+            return {'admins': [], 'stats': {'total': 0, 'allowed': 0, 'blocked': 0}}
+
+    def update_admin_signature(self, task_id: int, admin_user_id: int, source_chat_id: str, admin_signature: str):
+        """Update admin signature for a specific admin in a source"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE task_admin_filters 
+                    SET admin_signature = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ? AND admin_user_id = ? AND source_chat_id = ?
+                ''', (admin_signature, task_id, admin_user_id, source_chat_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث توقيع المشرف: {e}")
+            return False
+
+    def bulk_update_admin_permissions(self, task_id: int, source_chat_id: str, admin_permissions: Dict[int, bool]):
+        """Bulk update admin permissions for a specific source"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                updated_count = 0
+                
+                for admin_user_id, is_allowed in admin_permissions.items():
+                    cursor.execute('''
+                        UPDATE task_admin_filters 
+                        SET is_allowed = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE task_id = ? AND admin_user_id = ? AND source_chat_id = ?
+                    ''', (is_allowed, task_id, admin_user_id, source_chat_id))
+                    updated_count += cursor.rowcount
+                
+                conn.commit()
+                return updated_count
+        except Exception as e:
+            logger.error(f"خطأ في تحديث صلاحيات المشرفين: {e}")
+            return 0
+
+    def get_admin_by_signature(self, task_id: int, source_chat_id: str, admin_signature: str) -> Optional[Dict]:
+        """Get admin by signature for a specific source"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature
+                    FROM task_admin_filters 
+                    WHERE task_id = ? AND source_chat_id = ? AND admin_signature = ?
+                ''', (task_id, source_chat_id, admin_signature))
+                
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'admin_user_id': result['admin_user_id'],
+                        'admin_username': result['admin_username'] or '',
+                        'admin_first_name': result['admin_first_name'] or '',
+                        'is_allowed': bool(result['is_allowed']),
+                        'source_chat_id': result['source_chat_id'],
+                        'admin_signature': result['admin_signature'] or ''
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"خطأ في البحث عن المشرف بالتوقيع: {e}")
+            return None
+
+    def toggle_admin_filter(self, task_id: int, admin_user_id: int, source_chat_id: str = None):
         """Toggle admin filter status"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE task_admin_filters 
-                SET is_allowed = NOT is_allowed, updated_at = CURRENT_TIMESTAMP
-                WHERE task_id = ? AND admin_user_id = ?
-            ''', (task_id, admin_user_id))
+            
+            if source_chat_id:
+                cursor.execute('''
+                    UPDATE task_admin_filters 
+                    SET is_allowed = NOT is_allowed, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ? AND admin_user_id = ? AND source_chat_id = ?
+                ''', (task_id, admin_user_id, source_chat_id))
+            else:
+                cursor.execute('''
+                    UPDATE task_admin_filters 
+                    SET is_allowed = NOT is_allowed, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ? AND admin_user_id = ?
+                ''', (task_id, admin_user_id))
+            
             conn.commit()
             return cursor.rowcount > 0
 
@@ -2719,19 +3154,17 @@ class Database:
 
     def get_admin_filters_for_source(self, task_id: int, source_chat_id: str) -> List[Dict]:
         """Get admin filters for a specific source channel"""
-        # For now, return all admin filters for the task since we don't track source-specific admins yet
-        # In the future, we can enhance the schema to track which source each admin belongs to
-        return self.get_admin_filters(task_id)
+        # Use the source-specific admin filter function
+        return self.get_admin_filters_by_source(task_id, source_chat_id)
 
     def clear_admin_filters_for_source(self, task_id: int, source_chat_id: str):
-        """Clear admin filters for a specific source (for now clears all for the task)"""
-        # For now, we'll clear all admins for the task when refreshing any source
-        # In the future, we can enhance to track source-specific admins
+        """Clear admin filters for a specific source"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                DELETE FROM task_admin_filters WHERE task_id = ?
-            ''', (task_id,))
+                DELETE FROM task_admin_filters 
+                WHERE task_id = ? AND source_chat_id = ?
+            ''', (task_id, source_chat_id))
             conn.commit()
             return cursor.rowcount
 
@@ -2750,7 +3183,8 @@ class Database:
 
     def add_admin_filter_with_previous_permission(self, task_id: int, admin_user_id: int, 
                                                  admin_username: str = None, admin_first_name: str = None, 
-                                                 previous_permissions: Dict[int, bool] = None):
+                                                 previous_permissions: Dict[int, bool] = None, source_chat_id: str = None,
+                                                 admin_signature: str = None):
         """Add admin filter while preserving previous permissions if they exist"""
         # Check if this admin had previous permissions
         if previous_permissions and admin_user_id in previous_permissions:
@@ -2760,7 +3194,7 @@ class Database:
             is_allowed = True  # Default for new admins
             logger.info(f"✅ مشرف جديد {admin_user_id}: إذن افتراضي = True")
 
-        return self.add_admin_filter(task_id, admin_user_id, admin_username, admin_first_name, is_allowed)
+        return self.add_admin_filter(task_id, admin_user_id, admin_username, admin_first_name, is_allowed, source_chat_id, admin_signature)
 
     def is_advanced_filter_enabled(self, task_id: int, filter_type: str) -> bool:
         """Check if an advanced filter is enabled for a task"""
@@ -2972,6 +3406,18 @@ class Database:
         """Get duplicate detection settings"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            
+            # First get the actual enabled status from advanced filters
+            cursor.execute('''
+                SELECT duplicate_filter_enabled 
+                FROM task_advanced_filters 
+                WHERE task_id = ?
+            ''', (task_id,))
+            
+            filter_enabled_result = cursor.fetchone()
+            is_filter_enabled = bool(filter_enabled_result['duplicate_filter_enabled']) if filter_enabled_result else False
+            
+            # Then get the duplicate settings
             cursor.execute('''
                 SELECT check_text_similarity, check_media_similarity, 
                        similarity_threshold, time_window_hours
@@ -2981,7 +3427,7 @@ class Database:
 
             if result:
                 return {
-                    'enabled': True,  # Add enabled field for consistency
+                    'enabled': is_filter_enabled,  # Use actual enabled status from advanced filters
                     'check_text': bool(result['check_text_similarity']),
                     'check_media': bool(result['check_media_similarity']),
                     'similarity_threshold': int(result['similarity_threshold'] * 100),  # Convert to percentage
@@ -2991,7 +3437,7 @@ class Database:
                 # Create default settings
                 self.create_default_duplicate_settings(task_id)
                 return {
-                    'enabled': False,  # Default to disabled
+                    'enabled': is_filter_enabled,  # Use actual enabled status from advanced filters
                     'check_text': True,
                     'check_media': True,
                     'similarity_threshold': 80,  # Percentage
@@ -3130,6 +3576,23 @@ class Database:
 
             return False
 
+    def get_button_filter_settings(self, task_id: int) -> dict:
+        """Get button filter settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT action_mode, block_messages_with_buttons 
+                FROM task_inline_button_filters 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'action_mode': result['action_mode'] or 'remove_buttons',
+                    'block_messages_with_buttons': bool(result['block_messages_with_buttons'])
+                }
+            return {'action_mode': 'remove_buttons', 'block_messages_with_buttons': False}
+
     def set_button_filter_mode(self, task_id: int, mode: str):
         """Set button filter mode (remove_buttons or block_message)"""
         with self.get_connection() as conn:
@@ -3197,6 +3660,36 @@ class Database:
             ''', (task_id,))
             result = cursor.fetchone()
             return bool(result['block_forwarded_messages']) if result else False
+
+    def get_forwarded_filter_settings(self, task_id: int) -> dict:
+        """Get forwarded message filter settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT block_forwarded_messages 
+                FROM task_forwarded_message_filters 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'mode': 'block' if bool(result['block_forwarded_messages']) else 'allow',
+                    'block_forwarded_messages': bool(result['block_forwarded_messages'])
+                }
+            return {'mode': 'allow', 'block_forwarded_messages': False}
+
+    def set_forwarded_filter_mode(self, task_id: int, mode: str):
+        """Set forwarded message filter mode (allow or block)"""
+        block_forwarded = (mode == 'block')
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_forwarded_message_filters 
+                (task_id, block_forwarded_messages)
+                VALUES (?, ?)
+            ''', (task_id, block_forwarded))
+            conn.commit()
+            return True
 
     def set_forwarded_message_filter(self, task_id: int, block_forwarded: bool):
         """Set forwarded message filter"""
@@ -3309,40 +3802,24 @@ class Database:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-
-                # Build update query dynamically
-                updates = []
-                params = []
-
-                if format_type is not None:
-                    updates.append("format_type = ?")
-                    params.append(format_type)
-
-                if text_formatting_enabled is not None:
-                    updates.append("text_formatting_enabled = ?")
-                    params.append(text_formatting_enabled)
-
-                if hyperlink_text is not None:
-                    updates.append("hyperlink_text = ?")
-                    params.append(hyperlink_text)
-
-                if hyperlink_url is not None:
-                    updates.append("hyperlink_url = ?")
-                    params.append(hyperlink_url)
-
-                if not updates:
-                    return False
-
-                params.append(task_id)
-
-                cursor.execute(f'''
-                    UPDATE task_text_formatting_settings 
-                    SET {', '.join(updates)}
-                    WHERE task_id = ?
-                ''', params)
-
+                
+                # Get current settings
+                current = self.get_text_formatting_settings(task_id)
+                
+                # Use current values if new ones not provided
+                enabled = text_formatting_enabled if text_formatting_enabled is not None else current['text_formatting_enabled']
+                fmt_type = format_type if format_type is not None else current['format_type']
+                link_text = hyperlink_text if hyperlink_text is not None else current['hyperlink_text']
+                link_url = hyperlink_url if hyperlink_url is not None else current['hyperlink_url']
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_text_formatting_settings 
+                    (task_id, text_formatting_enabled, format_type, hyperlink_text, hyperlink_url, updated_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled, fmt_type, link_text, link_url))
+                
                 conn.commit()
-                return cursor.rowcount > 0
+                return True
 
         except Exception as e:
             logger.error(f"خطأ في تحديث إعدادات تنسيق النص: {e}")
@@ -3402,11 +3879,11 @@ class Database:
             result = cursor.fetchone()
             if result:
                 return {
-                    'enabled': bool(result['enabled']),
-                    'mode': result['mode'],
-                    'min_chars': result['min_chars'],
-                    'max_chars': result['max_chars'],
-                    'use_range': bool(result['use_range'])
+                    'enabled': bool(result[0]),
+                    'mode': result[1],
+                    'min_chars': result[2],
+                    'max_chars': result[3],
+                    'use_range': bool(result[4])
                 }
             return {
                 'enabled': False,
@@ -3486,9 +3963,9 @@ class Database:
             result = cursor.fetchone()
             if result:
                 return {
-                    'enabled': bool(result['enabled']),
-                    'message_count': result['message_count'],
-                    'time_period_seconds': result['time_period_seconds']
+                    'enabled': bool(result[0]),
+                    'message_count': result[1],
+                    'time_period_seconds': result[2]
                 }
             return {
                 'enabled': False,
@@ -3620,8 +4097,8 @@ class Database:
             result = cursor.fetchone()
             if result:
                 return {
-                    'enabled': bool(result['enabled']),
-                    'delay_seconds': result['delay_seconds']
+                    'enabled': bool(result[0]),
+                    'delay_seconds': result[1]
                 }
             return {
                 'enabled': False,
@@ -3697,8 +4174,8 @@ class Database:
             result = cursor.fetchone()
             if result:
                 return {
-                    'enabled': bool(result['enabled']),
-                    'interval_seconds': result['interval_seconds']
+                    'enabled': bool(result[0]),
+                    'interval_seconds': result[1]
                 }
             return {
                 'enabled': False,
@@ -3913,6 +4390,41 @@ class Database:
             logger.error(f"خطأ في تبديل الترجمة: {e}")
             return False
 
+    def cycle_character_limit_mode(self, task_id: int) -> str:
+        """Cycle character limit mode between allow and block"""
+        try:
+            settings = self.get_character_limit_settings(task_id)
+            current_mode = settings['mode']
+            
+            # Cycle through modes
+            if current_mode == 'allow':
+                new_mode = 'block'
+            else:  # block
+                new_mode = 'allow'
+            
+            self.update_character_limit_settings(task_id, mode=new_mode)
+            return new_mode
+        except Exception as e:
+            logger.error(f"خطأ في تدوير وضع حد الأحرف: {e}")
+            return 'allow'
+
+    def update_character_limit_values(self, task_id: int, min_chars: int = None, max_chars: int = None) -> bool:
+        """Update character limit min/max values"""
+        try:
+            # Update the values
+            updates = {}
+            if min_chars is not None:
+                updates['min_chars'] = min_chars
+            if max_chars is not None:
+                updates['max_chars'] = max_chars
+            
+            if updates:
+                return self.update_character_limit_settings(task_id, **updates)
+            return False
+        except Exception as e:
+            logger.error(f"خطأ في تحديث قيم حد الأحرف: {e}")
+            return False
+
     # ===== Advanced Features Toggle Functions =====
     
     def toggle_character_limit(self, task_id: int) -> bool:
@@ -3937,8 +4449,8 @@ class Database:
                     new_enabled = True
                     cursor.execute('''
                         INSERT INTO task_character_limit_settings 
-                        (task_id, enabled, mode, min_chars, max_chars)
-                        VALUES (?, ?, 'allow', 10, 1000)
+                        (task_id, enabled, mode, min_chars, max_chars, use_range)
+                        VALUES (?, ?, 'allow', 0, 4000, TRUE)
                     ''', (task_id, new_enabled))
                 
                 conn.commit()
@@ -4139,6 +4651,21 @@ class Database:
             logger.error(f"خطأ في الحصول على الرسائل الحديثة لفحص التكرار: {e}")
             return []
 
+    def track_message_for_duplicate_check(self, task_id: int, message_text: str, media_hash: str, media_type: str, timestamp: int):
+        """Track message for duplicate checking"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO message_duplicates (task_id, message_text, media_hash, media_type, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (task_id, message_text, media_hash, media_type, timestamp))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"خطأ في تتبع الرسالة لفحص التكرار: {e}")
+            return None
+
     def store_message_for_duplicate_check(self, task_id: int, message_text: str, media_hash: str, media_type: str, timestamp: int):
         """Store message for future duplicate checking"""
         try:
@@ -4219,36 +4746,69 @@ class Database:
             return None
 
     def add_duplicate_filter_columns(self):
-        """Add missing duplicate filter columns to task_advanced_filters table"""
+        """Add missing duplicate filter columns if they don't exist"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Check if columns exist first
-                cursor.execute("PRAGMA table_info(task_advanced_filters)")
-                columns = [row[1] for row in cursor.fetchall()]
+                # Check if columns exist and add them if they don't
+                columns_to_add = [
+                    ('task_duplicate_settings', 'check_media_duplicates', 'BOOLEAN DEFAULT FALSE'),
+                    ('task_duplicate_settings', 'check_text_duplicates', 'BOOLEAN DEFAULT FALSE'),
+                    ('task_duplicate_settings', 'check_forward_duplicates', 'BOOLEAN DEFAULT FALSE'),
+                    ('task_duplicate_settings', 'duplicate_time_window', 'INTEGER DEFAULT 3600'),
+                    ('task_duplicate_settings', 'ignore_case', 'BOOLEAN DEFAULT TRUE'),
+                    ('task_duplicate_settings', 'ignore_whitespace', 'BOOLEAN DEFAULT TRUE'),
+                    ('task_duplicate_settings', 'check_similarity', 'BOOLEAN DEFAULT FALSE'),
+                    ('task_duplicate_settings', 'similarity_threshold', 'REAL DEFAULT 0.8')
+                ]
                 
-                # Add duplicate_filter_similarity_threshold if not exists
-                if 'duplicate_filter_similarity_threshold' not in columns:
-                    cursor.execute('''
-                        ALTER TABLE task_advanced_filters 
-                        ADD COLUMN duplicate_filter_similarity_threshold REAL DEFAULT 0.85
-                    ''')
-                    logger.info("✅ تم إضافة عمود duplicate_filter_similarity_threshold")
-                
-                # Add duplicate_filter_time_window_hours if not exists
-                if 'duplicate_filter_time_window_hours' not in columns:
-                    cursor.execute('''
-                        ALTER TABLE task_advanced_filters 
-                        ADD COLUMN duplicate_filter_time_window_hours INTEGER DEFAULT 24
-                    ''')
-                    logger.info("✅ تم إضافة عمود duplicate_filter_time_window_hours")
+                for table, column, definition in columns_to_add:
+                    try:
+                        cursor.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+                        logger.info(f"✅ تم إضافة العمود {column} إلى الجدول {table}")
+                    except Exception as e:
+                        if "duplicate column name" in str(e).lower():
+                            logger.debug(f"العمود {column} موجود بالفعل في الجدول {table}")
+                        else:
+                            logger.warning(f"⚠️ خطأ في إضافة العمود {column}: {e}")
                 
                 conn.commit()
-                logger.info("✅ تم التحقق من وإضافة أعمدة فلتر التكرار")
                 
         except Exception as e:
-            logger.error(f"خطأ في إضافة أعمدة فلتر التكرار: {e}")
+            logger.error(f"خطأ في إضافة أعمدة الفلاتر المكررة: {e}")
+
+    def update_character_limit_table(self):
+        """Update character limit table structure if needed"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if mode column exists
+                cursor.execute("PRAGMA table_info(task_character_limit_settings)")
+                columns = [column[1] for column in cursor.fetchall()]
+                
+                # Add missing columns
+                if 'mode' not in columns:
+                    cursor.execute('ALTER TABLE task_character_limit_settings ADD COLUMN mode TEXT DEFAULT "allow" CHECK (mode IN ("allow", "block"))')
+                    logger.info("✅ تم إضافة عمود mode إلى جدول task_character_limit_settings")
+                
+                if 'use_range' not in columns:
+                    cursor.execute('ALTER TABLE task_character_limit_settings ADD COLUMN use_range BOOLEAN DEFAULT TRUE')
+                    logger.info("✅ تم إضافة عمود use_range إلى جدول task_character_limit_settings")
+                
+                # Update existing records to use new structure
+                cursor.execute('''
+                    UPDATE task_character_limit_settings 
+                    SET mode = 'allow', use_range = TRUE 
+                    WHERE mode IS NULL OR use_range IS NULL
+                ''')
+                
+                conn.commit()
+                logger.info("✅ تم تحديث بنية جدول حد الأحرف بنجاح")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تحديث بنية جدول حد الأحرف: {e}")
 
     def add_language_filter_mode_support(self):
         """Add language filter mode support to task_advanced_filters table"""
@@ -4699,6 +5259,521 @@ class Database:
                     SET status = ?
                     WHERE id = ?
                 ''', (status, pending_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # ===== Audio Metadata Settings Management =====
+    def get_audio_metadata_settings(self, task_id: int) -> dict:
+        """Get audio metadata settings for a task (returns defaults if missing)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT enabled, template, album_art_enabled, album_art_path, apply_art_to_all,
+                       audio_merge_enabled, intro_audio_path, outro_audio_path, intro_position,
+                       preserve_original, convert_to_mp3
+                FROM task_audio_metadata_settings
+                WHERE task_id = ?
+            ''', (task_id,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'enabled': bool(row['enabled']),
+                    'template': row['template'] or 'default',
+                    'album_art_enabled': bool(row['album_art_enabled']),
+                    'album_art_path': row['album_art_path'] or '',
+                    'apply_art_to_all': bool(row['apply_art_to_all']),
+                    'audio_merge_enabled': bool(row['audio_merge_enabled']),
+                    'intro_audio_path': row['intro_audio_path'] or '',
+                    'outro_audio_path': row['outro_audio_path'] or '',
+                    'intro_position': row['intro_position'] or 'start',
+                    'preserve_original': bool(row['preserve_original']),
+                    'convert_to_mp3': bool(row['convert_to_mp3'])
+                }
+            else:
+                return {
+                    'enabled': False,
+                    'template': 'default',
+                    'album_art_enabled': False,
+                    'album_art_path': '',
+                    'apply_art_to_all': False,
+                    'audio_merge_enabled': False,
+                    'intro_audio_path': '',
+                    'outro_audio_path': '',
+                    'intro_position': 'start',
+                    'preserve_original': True,
+                    'convert_to_mp3': True
+                }
+
+    def update_audio_metadata_enabled(self, task_id: int, enabled: bool) -> bool:
+        """Enable/disable audio metadata processing for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_audio_metadata_settings (
+                    task_id, enabled, template, album_art_enabled, album_art_path, apply_art_to_all,
+                    audio_merge_enabled, intro_audio_path, outro_audio_path, intro_position,
+                    preserve_original, convert_to_mp3, updated_at
+                )
+                SELECT ?, ?, COALESCE(template, 'default'), COALESCE(album_art_enabled, FALSE), COALESCE(album_art_path, NULL),
+                       COALESCE(apply_art_to_all, FALSE), COALESCE(audio_merge_enabled, FALSE), COALESCE(intro_audio_path, NULL),
+                       COALESCE(outro_audio_path, NULL), COALESCE(intro_position, 'start'), COALESCE(preserve_original, TRUE),
+                       COALESCE(convert_to_mp3, TRUE), CURRENT_TIMESTAMP
+                FROM task_audio_metadata_settings WHERE task_id = ?
+                UNION SELECT ?, ?, 'default', FALSE, NULL, FALSE, FALSE, NULL, NULL, 'start', TRUE, TRUE, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (SELECT 1 FROM task_audio_metadata_settings WHERE task_id = ?)
+            ''', (task_id, enabled, task_id, task_id, enabled, task_id))
+            conn.commit()
+            return True
+
+    def update_audio_metadata_template(self, task_id: int, template_name: str) -> bool:
+        """Set audio metadata template for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_audio_metadata_settings (
+                    task_id, enabled, template, album_art_enabled, album_art_path, apply_art_to_all,
+                    audio_merge_enabled, intro_audio_path, outro_audio_path, intro_position,
+                    preserve_original, convert_to_mp3, updated_at
+                )
+                SELECT ?, COALESCE(enabled, FALSE), ?, COALESCE(album_art_enabled, FALSE), COALESCE(album_art_path, NULL),
+                       COALESCE(apply_art_to_all, FALSE), COALESCE(audio_merge_enabled, FALSE), COALESCE(intro_audio_path, NULL),
+                       COALESCE(outro_audio_path, NULL), COALESCE(intro_position, 'start'), COALESCE(preserve_original, TRUE),
+                       COALESCE(convert_to_mp3, TRUE), CURRENT_TIMESTAMP
+                FROM task_audio_metadata_settings WHERE task_id = ?
+                UNION SELECT ?, FALSE, ?, FALSE, NULL, FALSE, FALSE, NULL, NULL, 'start', TRUE, TRUE, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (SELECT 1 FROM task_audio_metadata_settings WHERE task_id = ?)
+            ''', (task_id, template_name, task_id, task_id, template_name, task_id))
+            conn.commit()
+            return True
+
+    def set_album_art_settings(self, task_id: int, enabled: Optional[bool] = None, path: Optional[str] = None, apply_to_all: Optional[bool] = None) -> bool:
+        """Update album art settings for a task"""
+        current = self.get_audio_metadata_settings(task_id)
+        new_values = {
+            'enabled': current['enabled'],
+            'template': current['template'],
+            'album_art_enabled': current['album_art_enabled'] if enabled is None else bool(enabled),
+            'album_art_path': current['album_art_path'] if path is None else path,
+            'apply_art_to_all': current['apply_art_to_all'] if apply_to_all is None else bool(apply_to_all),
+            'audio_merge_enabled': current['audio_merge_enabled'],
+            'intro_audio_path': current['intro_audio_path'],
+            'outro_audio_path': current['outro_audio_path'],
+            'intro_position': current['intro_position'],
+            'preserve_original': current['preserve_original'],
+            'convert_to_mp3': current['convert_to_mp3']
+        }
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_audio_metadata_settings (
+                    task_id, enabled, template, album_art_enabled, album_art_path, apply_art_to_all,
+                    audio_merge_enabled, intro_audio_path, outro_audio_path, intro_position,
+                    preserve_original, convert_to_mp3, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (task_id, new_values['enabled'], new_values['template'], new_values['album_art_enabled'],
+                  new_values['album_art_path'], new_values['apply_art_to_all'], new_values['audio_merge_enabled'],
+                  new_values['intro_audio_path'], new_values['outro_audio_path'], new_values['intro_position'],
+                  new_values['preserve_original'], new_values['convert_to_mp3']))
+            conn.commit()
+            return True
+
+    def set_audio_merge_settings(self, task_id: int, enabled: Optional[bool] = None, intro_path: Optional[str] = None, outro_path: Optional[str] = None, intro_position: Optional[str] = None) -> bool:
+        """Update audio merge settings for a task"""
+        current = self.get_audio_metadata_settings(task_id)
+        new_values = {
+            'enabled': current['enabled'],
+            'template': current['template'],
+            'album_art_enabled': current['album_art_enabled'],
+            'album_art_path': current['album_art_path'],
+            'apply_art_to_all': current['apply_art_to_all'],
+            'audio_merge_enabled': current['audio_merge_enabled'] if enabled is None else bool(enabled),
+            'intro_audio_path': current['intro_audio_path'] if intro_path is None else intro_path,
+            'outro_audio_path': current['outro_audio_path'] if outro_path is None else outro_path,
+            'intro_position': current['intro_position'] if intro_position is None else intro_position,
+            'preserve_original': current['preserve_original'],
+            'convert_to_mp3': current['convert_to_mp3']
+        }
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_audio_metadata_settings (
+                    task_id, enabled, template, album_art_enabled, album_art_path, apply_art_to_all,
+                    audio_merge_enabled, intro_audio_path, outro_audio_path, intro_position,
+                    preserve_original, convert_to_mp3, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (task_id, new_values['enabled'], new_values['template'], new_values['album_art_enabled'],
+                  new_values['album_art_path'], new_values['apply_art_to_all'], new_values['audio_merge_enabled'],
+                  new_values['intro_audio_path'], new_values['outro_audio_path'], new_values['intro_position'],
+                  new_values['preserve_original'], new_values['convert_to_mp3']))
+            conn.commit()
+            return True
+
+    def set_audio_quality_settings(self, task_id: int, preserve_original: Optional[bool] = None, convert_to_mp3: Optional[bool] = None) -> bool:
+        """Update audio quality/format settings for a task"""
+        current = self.get_audio_metadata_settings(task_id)
+        new_values = {
+            'enabled': current['enabled'],
+            'template': current['template'],
+            'album_art_enabled': current['album_art_enabled'],
+            'album_art_path': current['album_art_path'],
+            'apply_art_to_all': current['apply_art_to_all'],
+            'audio_merge_enabled': current['audio_merge_enabled'],
+            'intro_audio_path': current['intro_audio_path'],
+            'outro_audio_path': current['outro_audio_path'],
+            'intro_position': current['intro_position'],
+            'preserve_original': current['preserve_original'] if preserve_original is None else bool(preserve_original),
+            'convert_to_mp3': current['convert_to_mp3'] if convert_to_mp3 is None else bool(convert_to_mp3)
+        }
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_audio_metadata_settings (
+                    task_id, enabled, template, album_art_enabled, album_art_path, apply_art_to_all,
+                    audio_merge_enabled, intro_audio_path, outro_audio_path, intro_position,
+                    preserve_original, convert_to_mp3, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (task_id, new_values['enabled'], new_values['template'], new_values['album_art_enabled'],
+                  new_values['album_art_path'], new_values['apply_art_to_all'], new_values['audio_merge_enabled'],
+                  new_values['intro_audio_path'], new_values['outro_audio_path'], new_values['intro_position'],
+                  new_values['preserve_original'], new_values['convert_to_mp3']))
+            conn.commit()
+            return True
+
+    def update_audio_metadata_setting(self, task_id: int, setting_name: str, value) -> bool:
+        """Update a specific audio metadata setting for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current settings
+                current = self.get_audio_metadata_settings(task_id)
+                
+                # Update the specific setting
+                current[setting_name] = value
+                
+                # Insert or replace with updated values
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_audio_metadata_settings (
+                        task_id, enabled, template, album_art_enabled, album_art_path, apply_art_to_all,
+                        audio_merge_enabled, intro_audio_path, outro_audio_path, intro_position,
+                        preserve_original, convert_to_mp3, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (
+                    task_id, 
+                    current.get('enabled', False),
+                    current.get('template', 'default'),
+                    current.get('album_art_enabled', False),
+                    current.get('album_art_path', ''),
+                    current.get('apply_art_to_all', False),
+                    current.get('audio_merge_enabled', False),
+                    current.get('intro_audio_path', ''),
+                    current.get('outro_audio_path', ''),
+                    current.get('intro_position', 'start'),
+                    current.get('preserve_original', True),
+                    current.get('convert_to_mp3', False)
+                ))
+                
+                conn.commit()
+                logger.info(f"✅ تم تحديث إعداد الوسوم الصوتية '{setting_name}' للمهمة {task_id}: {value}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث إعداد الوسوم الصوتية '{setting_name}' للمهمة {task_id}: {e}")
+            return False
+
+    # Audio Template Settings Management
+    def get_audio_template_settings(self, task_id: int) -> Dict:
+        """Get audio template settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT title_template, artist_template, album_artist_template, album_template,
+                           year_template, genre_template, composer_template, comment_template,
+                           track_template, length_template, lyrics_template
+                    FROM task_audio_template_settings
+                    WHERE task_id = ?
+                ''', (task_id,))
+                
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'title_template': result[0] or '$title',
+                        'artist_template': result[1] or '$artist',
+                        'album_artist_template': result[2] or '$album_artist',
+                        'album_template': result[3] or '$album',
+                        'year_template': result[4] or '$year',
+                        'genre_template': result[5] or '$genre',
+                        'composer_template': result[6] or '$composer',
+                        'comment_template': result[7] or '$comment',
+                        'track_template': result[8] or '$track',
+                        'length_template': result[9] or '$length',
+                        'lyrics_template': result[10] or '$lyrics'
+                    }
+                else:
+                    # Return default values if no settings exist
+                    return {
+                        'title_template': '$title',
+                        'artist_template': '$artist',
+                        'album_artist_template': '$album_artist',
+                        'album_template': '$album',
+                        'year_template': '$year',
+                        'genre_template': '$genre',
+                        'composer_template': '$composer',
+                        'comment_template': '$comment',
+                        'track_template': '$track',
+                        'length_template': '$length',
+                        'lyrics_template': '$lyrics'
+                    }
+                    
+        except Exception as e:
+            logger.error(f"❌ خطأ في جلب إعدادات قالب الوسوم الصوتية للمهمة {task_id}: {e}")
+            return {
+                'title_template': '$title',
+                'artist_template': '$artist',
+                'album_artist_template': '$album_artist',
+                'album_template': '$album',
+                'year_template': '$year',
+                'genre_template': '$genre',
+                'composer_template': '$composer',
+                'comment_template': '$comment',
+                'track_template': '$track',
+                'length_template': '$length',
+                'lyrics_template': '$lyrics'
+            }
+
+    def update_audio_template_setting(self, task_id: int, tag_name: str, template_value: str) -> bool:
+        """Update a specific audio template setting for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Whitelist of valid template columns
+                valid_columns = {
+                    'title': 'title_template',
+                    'artist': 'artist_template',
+                    'album_artist': 'album_artist_template',
+                    'album': 'album_template',
+                    'year': 'year_template',
+                    'genre': 'genre_template',
+                    'composer': 'composer_template',
+                    'comment': 'comment_template',
+                    'track': 'track_template',
+                    'length': 'length_template',
+                    'lyrics': 'lyrics_template',
+                }
+
+                column_name = valid_columns.get(tag_name)
+                if not column_name:
+                    logger.error(f"❌ وسم غير مدعوم للتحديث: '{tag_name}'")
+                    return False
+                
+                # Check if record exists
+                cursor.execute('SELECT 1 FROM task_audio_template_settings WHERE task_id = ?', (task_id,))
+                exists = cursor.fetchone()
+                
+                if exists:
+                    # Update existing record
+                    cursor.execute(
+                        f"UPDATE task_audio_template_settings SET {column_name} = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?",
+                        (template_value, task_id)
+                    )
+                else:
+                    # Create new record with default values
+                    cursor.execute('''
+                        INSERT INTO task_audio_template_settings (
+                            task_id, title_template, artist_template, album_artist_template, album_template,
+                            year_template, genre_template, composer_template, comment_template,
+                            track_template, length_template, lyrics_template, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ''', (
+                        task_id,
+                        template_value if column_name == 'title_template' else '$title',
+                        template_value if column_name == 'artist_template' else '$artist',
+                        template_value if column_name == 'album_artist_template' else '$album_artist',
+                        template_value if column_name == 'album_template' else '$album',
+                        template_value if column_name == 'year_template' else '$year',
+                        template_value if column_name == 'genre_template' else '$genre',
+                        template_value if column_name == 'composer_template' else '$composer',
+                        template_value if column_name == 'comment_template' else '$comment',
+                        template_value if column_name == 'track_template' else '$track',
+                        template_value if column_name == 'length_template' else '$length',
+                        template_value if column_name == 'lyrics_template' else '$lyrics'
+                    ))
+                
+                conn.commit()
+                logger.info(f"✅ تم تحديث قالب الوسم '{tag_name}' للمهمة {task_id}: {template_value}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث قالب الوسم '{tag_name}' للمهمة {task_id}: {e}")
+            return False
+
+    def reset_audio_template_settings(self, task_id: int) -> bool:
+        """Reset audio template settings to default values"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_audio_template_settings (
+                        task_id, title_template, artist_template, album_artist_template, album_template,
+                        year_template, genre_template, composer_template, comment_template,
+                        track_template, length_template, lyrics_template, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (
+                    task_id, '$title', '$artist', '$album_artist', '$album', '$year', '$genre',
+                    '$composer', '$comment', '$track', '$length', '$lyrics'
+                ))
+                
+                conn.commit()
+                logger.info(f"✅ تم إعادة تعيين إعدادات قالب الوسوم الصوتية للمهمة {task_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في إعادة تعيين إعدادات قالب الوسوم الصوتية للمهمة {task_id}: {e}")
+            return False
+
+    def set_audio_quality_settings(self, task_id: int, preserve_original: Optional[bool] = None, convert_to_mp3: Optional[bool] = None) -> bool:
+        """Update audio quality/format settings for a task"""
+        current = self.get_audio_metadata_settings(task_id)
+        new_values = {
+            'enabled': current['enabled'],
+            'template': current['template'],
+            'album_art_enabled': current['album_art_enabled'],
+            'album_art_path': current['album_art_path'],
+            'apply_art_to_all': current['apply_art_to_all'],
+            'audio_merge_enabled': current['audio_merge_enabled'],
+            'intro_audio_path': current['intro_audio_path'],
+            'outro_audio_path': current['outro_audio_path'],
+            'intro_position': current['intro_position'],
+            'preserve_original': current['preserve_original'] if preserve_original is None else bool(preserve_original),
+            'convert_to_mp3': current['convert_to_mp3'] if convert_to_mp3 is None else bool(convert_to_mp3)
+        }
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_audio_metadata_settings (
+                    task_id, enabled, template, album_art_enabled, album_art_path, apply_art_to_all,
+                    audio_merge_enabled, intro_audio_path, outro_audio_path, intro_position,
+                    preserve_original, convert_to_mp3, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (task_id, new_values['enabled'], new_values['template'], new_values['album_art_enabled'],
+                  new_values['album_art_path'], new_values['apply_art_to_all'], new_values['audio_merge_enabled'],
+                  new_values['intro_audio_path'], new_values['outro_audio_path'], new_values['intro_position'],
+                  new_values['preserve_original'], new_values['convert_to_mp3']))
+            conn.commit()
+            return True
+
+    def create_pending_message(self, task_id: int, user_id: int, source_chat_id: str, 
+                              source_message_id: int, message_data: str, message_type: str) -> bool:
+        """Create a new pending message"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO pending_messages (
+                    task_id, user_id, source_chat_id, source_message_id, 
+                    message_data, message_type, status, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, datetime('now', '+24 hours'))
+            ''', (task_id, user_id, source_chat_id, source_message_id, message_data, message_type))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_pending_message(self, pending_id: int) -> Optional[Dict]:
+        """Get a specific pending message"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM pending_messages WHERE id = ?
+            ''', (pending_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return dict(result)
+            return None
+
+    # ===== Audio Tag Cleaning (apply text cleaning to tags) =====
+    def get_audio_tag_cleaning_settings(self, task_id: int) -> Dict:
+        """Get audio tag cleaning settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT enabled, clean_title, clean_artist, clean_album_artist, clean_album,
+                       clean_year, clean_genre, clean_composer, clean_comment,
+                       clean_track, clean_length, clean_lyrics
+                FROM task_audio_tag_cleaning_settings WHERE task_id = ?
+            ''', (task_id,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'enabled': bool(row['enabled']),
+                    'clean_title': bool(row['clean_title']),
+                    'clean_artist': bool(row['clean_artist']),
+                    'clean_album_artist': bool(row['clean_album_artist']),
+                    'clean_album': bool(row['clean_album']),
+                    'clean_year': bool(row['clean_year']),
+                    'clean_genre': bool(row['clean_genre']),
+                    'clean_composer': bool(row['clean_composer']),
+                    'clean_comment': bool(row['clean_comment']),
+                    'clean_track': bool(row['clean_track']),
+                    'clean_length': bool(row['clean_length']),
+                    'clean_lyrics': bool(row['clean_lyrics'])
+                }
+            else:
+                # Create default record
+                self.create_default_audio_tag_cleaning_settings(task_id)
+                return {
+                    'enabled': False,
+                    'clean_title': True,
+                    'clean_artist': True,
+                    'clean_album_artist': True,
+                    'clean_album': True,
+                    'clean_year': True,
+                    'clean_genre': True,
+                    'clean_composer': True,
+                    'clean_comment': True,
+                    'clean_track': True,
+                    'clean_length': False,
+                    'clean_lyrics': True
+                }
+
+    def create_default_audio_tag_cleaning_settings(self, task_id: int):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_cleaning_settings (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            conn.commit()
+
+    def update_audio_tag_cleaning_toggle(self, task_id: int, enabled: bool) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_cleaning_settings (task_id) VALUES (?)
+            ''', (task_id,))
+            cursor.execute('''
+                UPDATE task_audio_tag_cleaning_settings
+                SET enabled = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = ?
+            ''', (enabled, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_audio_tag_cleaning_field(self, task_id: int, field_name: str, enabled: bool) -> bool:
+        valid_fields = {
+            'clean_title', 'clean_artist', 'clean_album_artist', 'clean_album',
+            'clean_year', 'clean_genre', 'clean_composer', 'clean_comment',
+            'clean_track', 'clean_length', 'clean_lyrics'
+        }
+        if field_name not in valid_fields:
+            logger.error(f"Invalid audio tag cleaning field: {field_name}")
+            return False
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_cleaning_settings (task_id) VALUES (?)
+            ''', (task_id,))
+            cursor.execute(f'''UPDATE task_audio_tag_cleaning_settings SET {field_name} = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?''', (enabled, task_id))
             conn.commit()
             return cursor.rowcount > 0
 

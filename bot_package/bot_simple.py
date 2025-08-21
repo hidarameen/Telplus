@@ -6,14 +6,18 @@ import logging
 import asyncio
 from telethon import TelegramClient, events
 from telethon.tl.custom import Button
+from telethon.tl import types as tl_types
+from telethon.utils import get_peer_id
+from database.channels_db import ChannelsDatabase
 from telethon.sessions import StringSession
-from database.database import Database
+from database import get_database
 from userbot_service.userbot import userbot_instance
 from bot_package.config import BOT_TOKEN, API_ID, API_HASH
 import json
 import time
 import os
 from datetime import datetime
+from channels_management import ChannelsManagement
 
 # Set up logging
 logging.basicConfig(
@@ -24,10 +28,26 @@ logger = logging.getLogger(__name__)
 
 class SimpleTelegramBot:
     def __init__(self):
-        self.db = Database()
+        # استخدام مصنع قاعدة البيانات
+        self.db = get_database()
+        
+        # معلومات قاعدة البيانات
+        from database import DatabaseFactory
+        self.db_info = DatabaseFactory.get_database_info()
+        
+        logger.info(f"🗄️ تم تهيئة قاعدة البيانات: {self.db_info['name']}")
+        
         self.bot = None
         self.conversation_states = {}
         self.user_states = {}  # For handling user input states
+        self.user_messages = {}  # Track user messages for editing: {user_id: {message_id, chat_id, timestamp}}
+        
+        # تهيئة مدير وضع النشر
+        from .publishing_mode_manager import PublishingModeManager
+        self.publishing_manager = PublishingModeManager(self)
+        
+        # Initialize Channels Management
+        self.channels_management = ChannelsManagement(self)
 
     def set_user_state(self, user_id, state, data=None):
         """Set user conversation state"""
@@ -36,10 +56,113 @@ class SimpleTelegramBot:
     def get_user_state(self, user_id):
         """Get user conversation state"""
         return self.user_states.get(user_id, {}).get('state', None)
+        
+    def get_user_data(self, user_id):
+        """Get user conversation data"""
+        return self.user_states.get(user_id, {}).get('data', {})
     
     def clear_user_state(self, user_id):
         """Clear user conversation state"""
         self.user_states.pop(user_id, None)
+
+    def track_user_message(self, user_id, message_id, chat_id):
+        """Track a message sent to user for potential editing"""
+        self.user_messages[user_id] = {
+            'message_id': message_id,
+            'chat_id': chat_id,
+            'timestamp': time.time()
+        }
+
+    def get_user_message(self, user_id):
+        """Get the last message sent to user"""
+        return self.user_messages.get(user_id)
+
+    def clear_user_message(self, user_id):
+        """Clear tracked message for user"""
+        self.user_messages.pop(user_id, None)
+
+    async def delete_previous_message(self, user_id):
+        """Delete the previous tracked message for user"""
+        if user_id in self.user_messages:
+            try:
+                tracked_msg = self.user_messages[user_id]
+                if hasattr(self, 'bot') and self.bot:
+                    await self.bot.delete_messages(tracked_msg['chat_id'], tracked_msg['message_id'])
+                    logger.debug(f"🗑️ تم حذف الرسالة السابقة للمستخدم {user_id}")
+            except Exception as e:
+                logger.warning(f"فشل في حذف الرسالة السابقة للمستخدم {user_id}: {e}")
+            finally:
+                self.user_messages.pop(user_id, None)
+
+    async def force_new_message(self, event, text, buttons=None):
+        """Force send a new message and delete the previous one"""
+        user_id = event.sender_id
+        
+        # Delete previous message if exists
+        await self.delete_previous_message(user_id)
+        
+        # Send new message
+        return await self.edit_or_send_message(event, text, buttons, force_new=True)
+
+    # ===== Channels Management Delegates =====
+    async def show_channels_menu(self, event):
+        return await self.channels_management.show_channels_menu(event)
+
+    async def start_add_channel(self, event):
+        return await self.channels_management.start_add_channel(event)
+
+    async def start_add_multiple_channels(self, event):
+        return await self.channels_management.start_add_multiple_channels(event)
+
+    async def finish_add_channels(self, event):
+        return await self.channels_management.finish_add_channels(event)
+
+    async def list_channels(self, event):
+        return await self.channels_management.list_channels(event)
+
+    async def delete_channel(self, event, channel_id: int):
+        return await self.channels_management.delete_channel(event, channel_id)
+
+    async def edit_channel(self, event, channel_id: int):
+        return await self.channels_management.edit_channel(event, channel_id)
+
+    async def refresh_channel_info(self, event, channel_id: int):
+        return await self.channels_management.refresh_channel_info(event, channel_id)
+
+    async def edit_or_send_message(self, event, text, buttons=None, force_new=False):
+        """Edit existing message or send new one with improved logic"""
+        user_id = event.sender_id
+        
+        # Always try to edit first unless force_new is True
+        if not force_new and user_id in self.user_messages:
+            try:
+                tracked_msg = self.user_messages[user_id]
+                # Check if message is not too old (10 minutes instead of 5)
+                if time.time() - tracked_msg['timestamp'] < 600 and hasattr(self, 'bot') and self.bot:
+                    await self.bot.edit_message(
+                        tracked_msg['chat_id'],
+                        tracked_msg['message_id'],
+                        text,
+                        buttons=buttons
+                    )
+                    # Update timestamp
+                    tracked_msg['timestamp'] = time.time()
+                    logger.debug(f"✅ تم تعديل الرسالة للمستخدم {user_id}")
+                    return None  # No new message object returned for edits
+                else:
+                    logger.debug(f"📝 الرسالة قديمة جداً، إرسال رسالة جديدة للمستخدم {user_id}")
+            except Exception as e:
+                logger.warning(f"فشل في تعديل الرسالة للمستخدم {user_id}: {e}")
+        
+        # Send new message if edit fails or force_new is True
+        try:
+            message = await event.respond(text, buttons=buttons)
+            self.track_user_message(user_id, message.id, event.chat_id)
+            logger.debug(f"📤 تم إرسال رسالة جديدة للمستخدم {user_id}")
+            return message
+        except Exception as e:
+            logger.error(f"فشل في إرسال رسالة جديدة للمستخدم {user_id}: {e}")
+            return None
 
     async def start(self):
         """Start the bot"""
@@ -48,11 +171,12 @@ class SimpleTelegramBot:
             return False
 
         # Create bot client with unique session name
-        self.bot = TelegramClient('simple_bot_session', int(API_ID), API_HASH)
+        self.bot = TelegramClient('simple_bot_session', API_ID, API_HASH)
         await self.bot.start(bot_token=BOT_TOKEN)
 
         # Add event handlers
         self.bot.add_event_handler(self.handle_start, events.NewMessage(pattern='/start'))
+        self.bot.add_event_handler(self.handle_login, events.NewMessage(pattern='/login'))
         self.bot.add_event_handler(self.handle_callback, events.CallbackQuery())
         self.bot.add_event_handler(self.handle_message, events.NewMessage())
 
@@ -61,6 +185,346 @@ class SimpleTelegramBot:
 
         logger.info("✅ Bot started successfully!")
         return True
+
+    # ===== Audio Metadata method wrappers (inside class) =====
+    async def audio_metadata_settings(self, event, task_id):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        status_text = "🟢 مفعل" if audio_settings['enabled'] else "🔴 معطل"
+        template_text = audio_settings.get('template', 'default').title()
+        art_status = "🟢 مفعل" if audio_settings.get('album_art_enabled') else "🔴 معطل"
+        merge_status = "🟢 مفعل" if audio_settings.get('audio_merge_enabled') else "🔴 معطل"
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_metadata_{task_id}")],
+            [Button.inline(f"⚙️ إعدادات القالب ({template_text})", f"audio_template_settings_{task_id}")],
+            [Button.inline(f"🖼️ صورة الغلاف ({art_status})", f"album_art_settings_{task_id}")],
+            [Button.inline(f"🔗 دمج المقاطع ({merge_status})", f"audio_merge_settings_{task_id}")],
+            [Button.inline("⚙️ إعدادات متقدمة", f"advanced_audio_settings_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات المهمة", f"task_settings_{task_id}")]
+        ]
+        message_text = (
+            f"🎵 إعدادات الوسوم الصوتية للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"📋 القالب: {template_text}\n"
+            f"🖼️ صورة الغلاف: {art_status}\n"
+            f"🔗 دمج المقاطع: {merge_status}\n\n"
+            f"📝 الوصف:\n"
+            f"تعديل الوسوم الصوتية (ID3v2) للملفات الصوتية قبل إعادة التوجيه\n"
+            f"• دعم جميع أنواع الوسوم (Title, Artist, Album, Year, Genre, etc.)\n"
+            f"• قوالب جاهزة للاستخدام\n"
+            f"• صورة غلاف مخصصة\n"
+            f"• دمج مقاطع صوتية إضافية\n"
+            f"• الحفاظ على الجودة 100%"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def toggle_audio_metadata(self, event, task_id):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        current = self.db.get_audio_metadata_settings(task_id)
+        new_status = not bool(current.get('enabled', False))
+        self.db.update_audio_metadata_enabled(task_id, new_status)
+        await event.answer(f"✅ تم {'تفعيل' if new_status else 'تعطيل'} الوسوم الصوتية")
+        await self.audio_metadata_settings(event, task_id)
+
+    async def audio_template_settings(self, event, task_id):
+        """Show audio template settings with individual tag configuration"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        template_settings = self.db.get_audio_template_settings(task_id)
+        
+        # Create buttons for each tag
+        buttons = [
+            [Button.inline("🔹 العنوان (Title)", f"edit_audio_tag_{task_id}_title")],
+            [Button.inline("🔹 الفنان (Artist)", f"edit_audio_tag_{task_id}_artist")],
+            [Button.inline("🔹 فنان الألبوم (Album Artist)", f"edit_audio_tag_{task_id}_album_artist")],
+            [Button.inline("🔹 الألبوم (Album)", f"edit_audio_tag_{task_id}_album")],
+            [Button.inline("🔹 السنة (Year)", f"edit_audio_tag_{task_id}_year")],
+            [Button.inline("🔹 النوع (Genre)", f"edit_audio_tag_{task_id}_genre")],
+            [Button.inline("🔹 الملحن (Composer)", f"edit_audio_tag_{task_id}_composer")],
+            [Button.inline("🔹 تعليق (Comment)", f"edit_audio_tag_{task_id}_comment")],
+            [Button.inline("🔹 رقم المسار (Track)", f"edit_audio_tag_{task_id}_track")],
+            [Button.inline("🔹 المدة (Length)", f"edit_audio_tag_{task_id}_length")],
+            [Button.inline("🔹 كلمات الأغنية (Lyrics)", f"edit_audio_tag_{task_id}_lyrics")],
+            [Button.inline("🔄 إعادة تعيين للافتراضي", f"reset_audio_template_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        # Show current template values
+        message_text = (
+            f"⚙️ إعدادات قالب الوسوم الصوتية للمهمة: {task_name}\n\n"
+            f"📋 القوالب الحالية:\n\n"
+            f"🔹 **العنوان**: `{template_settings['title_template']}`\n"
+            f"🔹 **الفنان**: `{template_settings['artist_template']}`\n"
+            f"🔹 **فنان الألبوم**: `{template_settings['album_artist_template']}`\n"
+            f"🔹 **الألبوم**: `{template_settings['album_template']}`\n"
+            f"🔹 **السنة**: `{template_settings['year_template']}`\n"
+            f"🔹 **النوع**: `{template_settings['genre_template']}`\n"
+            f"🔹 **الملحن**: `{template_settings['composer_template']}`\n"
+            f"🔹 **التعليق**: `{template_settings['comment_template']}`\n"
+            f"🔹 **رقم المسار**: `{template_settings['track_template']}`\n"
+            f"🔹 **المدة**: `{template_settings['length_template']}`\n"
+            f"🔹 **كلمات الأغنية**: `{template_settings['lyrics_template']}`\n\n"
+            f"💡 **المتغيرات المتاحة**:\n"
+            f"• `$title` - العنوان الأصلي\n"
+            f"• `$artist` - الفنان الأصلي\n"
+            f"• `$album` - الألبوم الأصلي\n"
+            f"• `$year` - السنة الأصلية\n"
+            f"• `$genre` - النوع الأصلي\n"
+            f"• `$track` - رقم المسار الأصلي\n"
+            f"• `$length` - المدة الأصلية\n"
+            f"• `$lyrics` - كلمات الأغنية الأصلية\n\n"
+            f"📝 **مثال على الاستخدام**:\n"
+            f"• `$title - Official` لإضافة نص للعنوان\n"
+            f"• `$artist ft. Guest` لإضافة فنان ضيف\n"
+            f"• `$album (Remastered)` لإضافة وصف للألبوم\n\n"
+            f"اختر الوسم الذي تريد تعديله:"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_edit_audio_tag(self, event, task_id, tag_name):
+        """Start editing a specific audio tag template"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        template_settings = self.db.get_audio_template_settings(task_id)
+        current_value = template_settings.get(f'{tag_name}_template', f'${tag_name}')
+        
+        # Set user state for editing this tag
+        self.set_user_state(user_id, f'editing_audio_tag_{tag_name}', {
+            'task_id': task_id,
+            'tag_name': tag_name,
+            'current_value': current_value
+        })
+        
+        # Tag display names
+        tag_display_names = {
+            'title': 'العنوان (Title)',
+            'artist': 'الفنان (Artist)',
+            'album_artist': 'فنان الألبوم (Album Artist)',
+            'album': 'الألبوم (Album)',
+            'year': 'السنة (Year)',
+            'genre': 'النوع (Genre)',
+            'composer': 'الملحن (Composer)',
+            'comment': 'التعليق (Comment)',
+            'track': 'رقم المسار (Track)',
+            'length': 'المدة (Length)',
+            'lyrics': 'كلمات الأغنية (Lyrics)'
+        }
+        
+        tag_display_name = tag_display_names.get(tag_name, tag_name)
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"audio_template_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✏️ تحرير قالب {tag_display_name}\n\n"
+            f"📋 القيمة الحالية:\n"
+            f"`{current_value}`\n\n"
+            f"💡 **المتغيرات المتاحة**:\n"
+            f"• `$title` - العنوان الأصلي\n"
+            f"• `$artist` - الفنان الأصلي\n"
+            f"• `$album` - الألبوم الأصلي\n"
+            f"• `$year` - السنة الأصلية\n"
+            f"• `$genre` - النوع الأصلي\n"
+            f"• `$track` - رقم المسار الأصلي\n"
+            f"• `$length` - المدة الأصلية\n"
+            f"• `$lyrics` - كلمات الأغنية الأصلية\n\n"
+            f"📝 **أمثلة على الاستخدام**:\n"
+            f"• `$title - Official`\n"
+            f"• `$artist ft. Guest`\n"
+            f"• `$album (Remastered)`\n"
+            f"• `$title\\n$artist` (متعدد الأسطر)\n\n"
+            f"🔤 أرسل القالب الجديد الآن:"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
+    async def reset_audio_template(self, event, task_id):
+        """Reset audio template settings to default values"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        success = self.db.reset_audio_template_settings(task_id)
+        if success:
+            await event.answer("✅ تم إعادة تعيين قالب الوسوم للقيم الافتراضية")
+            await self.audio_template_settings(event, task_id)
+        else:
+            await event.answer("❌ فشل في إعادة تعيين القالب")
+
+    async def set_audio_template(self, event, task_id, template_name):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        self.db.update_audio_metadata_template(task_id, template_name)
+        template_display_name = {
+            'default': 'الافتراضي',
+            'enhanced': 'محسن',
+            'minimal': 'بسيط',
+            'professional': 'احترافي',
+            'custom': 'مخصص'
+        }.get(template_name, template_name)
+        await event.answer(f"✅ تم اختيار قالب '{template_display_name}'")
+        await self.audio_metadata_settings(event, task_id)
+
+    async def album_art_settings(self, event, task_id):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        art_status = "🟢 مفعل" if audio_settings.get('album_art_enabled') else "🔴 معطل"
+        apply_all_status = "🟢 نعم" if audio_settings.get('apply_art_to_all') else "🔴 لا"
+        art_path = audio_settings.get('album_art_path') or 'غير محدد'
+        buttons = [
+            [Button.inline("🖼️ رفع صورة غلاف", f"upload_album_art_{task_id}")],
+            [Button.inline("⚙️ خيارات التطبيق", f"album_art_options_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        message_text = (
+            f"🖼️ إعدادات صورة الغلاف للمهمة: {task_name}\n\n"
+            f"📝 الوصف:\n"
+            f"• رفع صورة غلاف مخصصة للملفات الصوتية\n"
+            f"• خيار تطبيقها على جميع الملفات\n"
+            f"• خيار تطبيقها فقط على الملفات بدون صورة\n"
+            f"• الحفاظ على الجودة 100%\n"
+            f"• دعم الصيغ: JPG, PNG, BMP, TIFF\n\n"
+            f"الحالة: {art_status}\n"
+            f"تطبيق على الجميع: {apply_all_status}\n"
+            f"المسار الحالي: {art_path}\n\n"
+            f"اختر الإعداد الذي تريد تعديله أو ارفع صورة جديدة:"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def audio_merge_settings(self, event, task_id):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        merge_status = "🟢 مفعل" if audio_settings.get('audio_merge_enabled') else "🔴 معطل"
+        intro_path = audio_settings.get('intro_audio_path') or 'غير محدد'
+        outro_path = audio_settings.get('outro_audio_path') or 'غير محدد'
+        intro_position = 'البداية' if audio_settings.get('intro_position') == 'start' else 'النهاية'
+        buttons = [
+            [Button.inline("🎚️ تبديل حالة الدمج", f"toggle_audio_merge_{task_id}")],
+            [Button.inline("🎵 مقطع مقدمة", f"intro_audio_settings_{task_id}")],
+            [Button.inline("🎵 مقطع خاتمة", f"outro_audio_settings_{task_id}")],
+            [Button.inline("⚙️ خيارات الدمج", f"merge_options_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        message_text = (
+            f"🔗 إعدادات دمج المقاطع الصوتية للمهمة: {task_name}\n\n"
+            f"📝 الوصف:\n"
+            f"• إضافة مقطع مقدمة في البداية\n"
+            f"• إضافة مقطع خاتمة في النهاية\n"
+            f"• اختيار موضع المقدمة (بداية أو نهاية)\n"
+            f"• دعم جميع الصيغ الصوتية\n"
+            f"• جودة عالية 320k MP3\n\n"
+            f"حالة الدمج: {merge_status}\n"
+            f"مقدمة: {intro_path}\n"
+            f"خاتمة: {outro_path}\n"
+            f"موضع المقدمة: {intro_position}\n\n"
+            f"اختر الإعداد الذي تريد تعديله:"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def advanced_audio_settings(self, event, task_id):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        preserve_status = "🟢" if audio_settings.get('preserve_original') else "🔴"
+        convert_status = "🟢" if audio_settings.get('convert_to_mp3') else "🔴"
+        buttons = [
+            [Button.inline(f"{preserve_status} الحفاظ على الجودة", f"toggle_preserve_quality_{task_id}")],
+            [Button.inline(f"{convert_status} التحويل إلى MP3", f"toggle_convert_to_mp3_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        message_text = (
+            f"⚙️ الإعدادات المتقدمة للوسوم الصوتية للمهمة: {task_name}\n\n"
+            f"📝 الوصف:\n"
+            f"• الحفاظ على الجودة الأصلية 100%\n"
+            f"• تحويل إلى MP3 مع الحفاظ على الدقة\n"
+            f"• معالجة مرة واحدة وإعادة الاستخدام\n"
+            f"• Cache ذكي للملفات المعالجة\n"
+            f"• إعدادات الأداء والسرعة\n\n"
+            f"اختر الإعداد الذي تريد تعديله:"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def show_album_art_options(self, event, task_id: int):
+        settings = self.db.get_audio_metadata_settings(task_id)
+        art_status = "🟢 مفعل" if settings.get('album_art_enabled') else "🔴 معطل"
+        apply_all_status = "🟢 نعم" if settings.get('apply_art_to_all') else "🔴 لا"
+        buttons = [
+            [Button.inline(f"🔄 تبديل صورة الغلاف ({art_status})", f"toggle_album_art_enabled_{task_id}")],
+            [Button.inline(f"📦 تطبيق على جميع الملفات ({apply_all_status})", f"toggle_apply_art_to_all_{task_id}")],
+            [Button.inline("🔙 رجوع", f"album_art_settings_{task_id}")]
+        ]
+        await self.edit_or_send_message(event, "⚙️ خيارات صورة الغلاف:", buttons=buttons)
+
+    async def show_intro_audio_settings(self, event, task_id: int):
+        settings = self.db.get_audio_metadata_settings(task_id)
+        intro_path = settings.get('intro_audio_path') or 'غير محدد'
+        buttons = [
+            [Button.inline("⬆️ رفع مقدمة", f"upload_intro_audio_{task_id}")],
+            [Button.inline("🗑️ حذف المقدمة", f"remove_intro_audio_{task_id}")],
+            [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
+        ]
+        await self.edit_or_send_message(event, f"🎵 مقدمة حالية: {intro_path}", buttons=buttons)
+
+    async def show_outro_audio_settings(self, event, task_id: int):
+        settings = self.db.get_audio_metadata_settings(task_id)
+        outro_path = settings.get('outro_audio_path') or 'غير محدد'
+        buttons = [
+            [Button.inline("⬆️ رفع خاتمة", f"upload_outro_audio_{task_id}")],
+            [Button.inline("🗑️ حذف الخاتمة", f"remove_outro_audio_{task_id}")],
+            [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
+        ]
+        await self.edit_or_send_message(event, f"🎵 خاتمة حالية: {outro_path}", buttons=buttons)
+
+    async def show_merge_options(self, event, task_id: int):
+        settings = self.db.get_audio_metadata_settings(task_id)
+        pos = settings.get('intro_position', 'start')
+        pos_text = 'البداية' if pos == 'start' else 'النهاية'
+        buttons = [
+            [Button.inline("⬆️ المقدمة في البداية", f"set_intro_position_start_{task_id}")],
+            [Button.inline("⬇️ المقدمة في النهاية", f"set_intro_position_end_{task_id}")],
+            [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
+        ]
+        await self.edit_or_send_message(event, f"⚙️ موضع المقدمة الحالي: {pos_text}", buttons=buttons)
 
     async def handle_start(self, event):
         """Handle /start command"""
@@ -79,39 +543,102 @@ class SimpleTelegramBot:
         logger.info(f"🔐 حالة المصادقة للمستخدم {user_id}: {'مُصادق عليه' if is_authenticated else 'غير مُصادق عليه'}")
         
         if is_authenticated:
+            # Check UserBot status for better welcome message
+            from userbot_service.userbot import userbot_instance
+            is_userbot_running = user_id in userbot_instance.clients
+            
             # Show main menu
             buttons = [
                 [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
+                [Button.inline("🔍 فحص حالة UserBot", b"check_userbot")],
                 [Button.inline("⚙️ الإعدادات", b"settings")],
                 [Button.inline("ℹ️ حول البوت", b"about")]
             ]
 
+            # Enhanced welcome message with system status
+            system_status = "🟢 نشط" if is_userbot_running else "🟡 مطلوب فحص"
+            
             logger.info(f"📤 إرسال قائمة رئيسية للمستخدم المُصادق عليه: {user_id}")
-            await event.respond(
+            message_text = (
                 f"🎉 أهلاً بك في بوت التوجيه التلقائي!\n\n"
                 f"👋 مرحباً {event.sender.first_name}\n"
-                f"🔑 أنت مسجل دخولك بالفعل\n\n"
-                f"اختر ما تريد فعله:",
-                buttons=buttons
+                f"🔑 حالة تسجيل الدخول: نشطة\n"
+                f"🤖 UserBot: {system_status}\n\n"
+                f"💡 النظام الجديد:\n"
+                f"• بوت التحكم منفصل عن UserBot\n"
+                f"• يمكنك إدارة المهام دائماً\n"
+                f"• إذا تعطل UserBot، أعد تسجيل الدخول\n\n"
+                f"اختر ما تريد فعله:"
             )
+            await self.force_new_message(event, message_text, buttons=buttons)
             logger.info(f"✅ تم إرسال الرد بنجاح للمستخدم: {user_id}")
         else:
             # Show authentication menu
             buttons = [
-                [Button.inline("📱 تسجيل الدخول برقم الهاتف", b"auth_phone")]
+                [Button.inline("📱 تسجيل الدخول برقم الهاتف", b"auth_phone")],
+                [Button.inline("🔑 تسجيل الدخول بجلسة جاهزة", b"login_session")]
             ]
 
             logger.info(f"📤 إرسال قائمة تسجيل الدخول للمستخدم غير المُصادق عليه: {user_id}")
-            await event.respond(
+            message_text = (
                 f"🤖 مرحباً بك في بوت التوجيه التلقائي!\n\n"
                 f"📋 هذا البوت يساعدك في:\n"
                 f"• توجيه الرسائل تلقائياً\n"
                 f"• إدارة مهام التوجيه\n"
                 f"• مراقبة المحادثات\n\n"
-                f"🔐 يجب تسجيل الدخول أولاً:",
-                buttons=buttons
+                f"🔐 يجب تسجيل الدخول أولاً:"
             )
+            await self.force_new_message(event, message_text, buttons=buttons)
             logger.info(f"✅ تم إرسال رد التسجيل بنجاح للمستخدم: {user_id}")
+
+    async def handle_login(self, event):
+        """Handle /login command"""
+        logger.info(f"📥 تم استلام أمر /login من المستخدم: {event.sender_id}")
+        
+        # Only respond to /login in private chats
+        if not event.is_private:
+            logger.info(f"🚫 تجاهل أمر /login في محادثة غير خاصة: {event.chat_id}")
+            return
+
+        user_id = event.sender_id
+        
+        # Check if user is already authenticated
+        if self.db.is_user_authenticated(user_id):
+            buttons = [
+                [Button.inline("🔄 إعادة تسجيل الدخول", b"relogin")],
+                [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
+            ]
+            
+            message_text = (
+                "🔄 أنت مسجل دخولك بالفعل!\n\n"
+                "هل تريد:\n"
+                "• إعادة تسجيل الدخول بجلسة جديدة؟\n"
+                "• العودة للقائمة الرئيسية؟"
+            )
+            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            return
+        
+        # Show login options
+        buttons = [
+            [Button.inline("📱 تسجيل الدخول برقم الهاتف", b"auth_phone")],
+            [Button.inline("🔑 تسجيل الدخول بجلسة جاهزة", b"login_session")]
+        ]
+        
+        message_text = (
+            "🔐 تسجيل الدخول - بوت التوجيه التلقائي\n\n"
+            "اختر طريقة تسجيل الدخول:\n\n"
+            "📱 **تسجيل الدخول برقم الهاتف**:\n"
+            "• إرسال رمز التحقق\n"
+            "• إدخال كلمة المرور (إذا كانت مفعلة)\n\n"
+            "🔑 **تسجيل الدخول بجلسة جاهزة**:\n"
+            "• استخدام جلسة تليثون موجودة\n"
+            "• أسرع وأسهل\n\n"
+            "💡 **كيفية الحصول على الجلسة**:\n"
+            "• استخدم @SessionStringBot\n"
+            "• أو استخدم @StringSessionBot\n"
+            "• أو استخدم @UseTGXBot"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
 
     async def handle_callback(self, event):
@@ -122,8 +649,24 @@ class SimpleTelegramBot:
 
             if data == "auth_phone":
                 await self.start_auth(event)
+            elif data == "login_session":
+                await self.start_session_login(event)
+            elif data == "relogin":
+                await self.handle_relogin(event)
+            elif data == "back_main":
+                await self.handle_start(event)
             elif data == "manage_tasks":
                 await self.show_tasks_menu(event)
+            elif data == "manage_channels":
+                await self.show_channels_menu(event)
+            elif data == "add_channel":
+                await self.start_add_channel(event)
+            elif data == "list_channels":
+                await self.list_channels(event)
+            elif data == "add_multiple_channels":
+                await self.start_add_multiple_channels(event)
+            elif data == "finish_add_channels":
+                await self.finish_add_channels(event)
             elif data == "create_task":
                 await self.start_create_task(event)
             elif data == "list_tasks":
@@ -182,6 +725,36 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة المصادر: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data == "choose_sources":
+                await self.start_choose_sources(event)
+            elif data == "choose_targets":
+                await self.start_choose_targets(event)
+            elif data.startswith("choose_add_sources_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_choose_sources_for_task(event, task_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("choose_add_targets_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_choose_targets_for_task(event, task_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("toggle_sel_source_"):
+                chat_id = data.replace("toggle_sel_source_", "", 1)
+                await self.toggle_channel_selection(event, "source", chat_id)
+            elif data.startswith("toggle_sel_target_"):
+                chat_id = data.replace("toggle_sel_target_", "", 1)
+                await self.toggle_channel_selection(event, "target", chat_id)
+            elif data == "finish_sel_source":
+                await self.finish_channel_selection(event, "source")
+            elif data == "finish_sel_target":
+                await self.finish_channel_selection(event, "target")
             elif data.startswith("manage_targets_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -263,14 +836,13 @@ class SimpleTelegramBot:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة للفلاتر المتقدمة: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("advanced_features_"): # Handler for advanced features
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_advanced_features(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة للميزات المتقدمة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "advanced_features_123"
+                    task_id = int(data.replace("advanced_features_", ""))
+                    await self.show_advanced_features(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة للميزات المتقدمة: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("character_limit_"): # Handler for character limit settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -307,6 +879,225 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات فاصل الإرسال: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            # ===== Audio Metadata Event Handlers =====
+            elif data.startswith("audio_metadata_settings_"):
+                try:
+                    task_id = int(data.replace("audio_metadata_settings_", ""))
+                    await self.audio_metadata_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الوسوم الصوتية: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_metadata_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_metadata_", ""))
+                    await self.toggle_audio_metadata(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الوسوم الصوتية: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_template_settings_"):
+                try:
+                    task_id = int(data.replace("audio_template_settings_", ""))
+                    await self.audio_template_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات قالب الوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_audio_tag_"):
+                try:
+                    # Extract task_id and tag_name from "edit_audio_tag_7_title"
+                    remaining = data.replace("edit_audio_tag_", "")
+                    parts = remaining.split("_", 1)
+                    if len(parts) >= 2:
+                        task_id = int(parts[0])
+                        tag_name = parts[1]
+                        await self.start_edit_audio_tag(event, task_id, tag_name)
+                    else:
+                        await event.answer("❌ خطأ في تحليل البيانات")
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتحرير وسم الصوت: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("reset_audio_template_"):
+                try:
+                    task_id = int(data.replace("reset_audio_template_", ""))
+                    await self.reset_audio_template(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعادة تعيين قالب الوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_audio_template_"):
+                try:
+                    # Extract task_id and template_name from "set_audio_template_7_default"
+                    remaining = data.replace("set_audio_template_", "")
+                    parts = remaining.split("_", 1)
+                    if len(parts) >= 2:
+                        task_id = int(parts[0])
+                        template_name = parts[1]
+                        await self.set_audio_template(event, task_id, template_name)
+                    else:
+                        await event.answer("❌ خطأ في تحليل البيانات")
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتعيين قالب الوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("album_art_settings_"):
+                try:
+                    task_id = int(data.replace("album_art_settings_", ""))
+                    await self.album_art_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات صورة الغلاف: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("album_art_options_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.show_album_art_options(event, task_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("upload_album_art_"):
+                try:
+                    task_id = int(data.replace("upload_album_art_", ""))
+                    self.set_user_state(user_id, 'awaiting_album_art_upload', {'task_id': task_id})
+                    await self.force_new_message(event, "🖼️ أرسل الآن صورة الغلاف كصورة أو ملف.")
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_album_art_enabled_"):
+                try:
+                    task_id = int(data.replace("toggle_album_art_enabled_", ""))
+                    settings = self.db.get_audio_metadata_settings(task_id)
+                    self.db.set_album_art_settings(task_id, enabled=not bool(settings.get('album_art_enabled')))
+                    await event.answer("✅ تم التبديل")
+                    await self.album_art_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_apply_art_to_all_"):
+                try:
+                    task_id = int(data.replace("toggle_apply_art_to_all_", ""))
+                    settings = self.db.get_audio_metadata_settings(task_id)
+                    self.db.set_album_art_settings(task_id, apply_to_all=not bool(settings.get('apply_art_to_all')))
+                    await event.answer("✅ تم التبديل")
+                    await self.album_art_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_preserve_quality_"):
+                try:
+                    task_id = int(data.replace("toggle_preserve_quality_", ""))
+                    settings = self.db.get_audio_metadata_settings(task_id)
+                    current_state = settings.get('preserve_quality', True)
+                    self.db.update_audio_metadata_setting(task_id, 'preserve_quality', not current_state)
+                    await event.answer("✅ تم التبديل")
+                    await self.advanced_audio_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_convert_to_mp3_"):
+                try:
+                    task_id = int(data.replace("toggle_convert_to_mp3_", ""))
+                    settings = self.db.get_audio_metadata_settings(task_id)
+                    current_state = settings.get('convert_to_mp3', False)
+                    self.db.update_audio_metadata_setting(task_id, 'convert_to_mp3', not current_state)
+                    await event.answer("✅ تم التبديل")
+                    await self.advanced_audio_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("delete_channel_"):
+                try:
+                    channel_id = int(data.replace("delete_channel_", ""))
+                    await self.delete_channel(event, channel_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_channel_"):
+                try:
+                    channel_id = int(data.replace("edit_channel_", ""))
+                    await self.edit_channel(event, channel_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("refresh_channel_"):
+                try:
+                    channel_id = int(data.replace("refresh_channel_", ""))
+                    await self.refresh_channel_info(event, channel_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_merge_settings_"):
+                try:
+                    task_id = int(data.replace("audio_merge_settings_", ""))
+                    await self.audio_merge_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات دمج المقاطع: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_merge_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_merge_", ""))
+                    settings = self.db.get_audio_metadata_settings(task_id)
+                    self.db.set_audio_merge_settings(task_id, enabled=not bool(settings.get('audio_merge_enabled')))
+                    await event.answer("✅ تم التبديل")
+                    await self.audio_merge_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("intro_audio_settings_"):
+                try:
+                    task_id = int(data.replace("intro_audio_settings_", ""))
+                    await self.show_intro_audio_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("outro_audio_settings_"):
+                try:
+                    task_id = int(data.replace("outro_audio_settings_", ""))
+                    await self.show_outro_audio_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("upload_intro_audio_"):
+                try:
+                    task_id = int(data.replace("upload_intro_audio_", ""))
+                    self.set_user_state(user_id, 'awaiting_intro_audio_upload', {'task_id': task_id})
+                    await self.force_new_message(event, "🎵 أرسل الآن ملف المقدمة (Audio)")
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("remove_intro_audio_"):
+                try:
+                    task_id = int(data.replace("remove_intro_audio_", ""))
+                    self.db.set_audio_merge_settings(task_id, intro_path='')
+                    await event.answer("✅ تم حذف مقطع المقدمة")
+                    await self.audio_merge_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("upload_outro_audio_"):
+                try:
+                    task_id = int(data.replace("upload_outro_audio_", ""))
+                    self.set_user_state(user_id, 'awaiting_outro_audio_upload', {'task_id': task_id})
+                    await self.force_new_message(event, "🎵 أرسل الآن ملف الخاتمة (Audio)")
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("remove_outro_audio_"):
+                try:
+                    task_id = int(data.replace("remove_outro_audio_", ""))
+                    self.db.set_audio_merge_settings(task_id, outro_path='')
+                    await event.answer("✅ تم حذف مقطع الخاتمة")
+                    await self.audio_merge_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("merge_options_"):
+                try:
+                    task_id = int(data.replace("merge_options_", ""))
+                    await self.show_merge_options(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_intro_position_"):
+                try:
+                    remaining = data.replace("set_intro_position_", "")
+                    pos, task_id_str = remaining.rsplit("_", 1)
+                    task_id = int(task_id_str)
+                    if pos in ['start', 'end']:
+                        self.db.set_audio_merge_settings(task_id, intro_position=pos)
+                        await event.answer("✅ تم تحديث موضع المقدمة")
+                        await self.audio_merge_settings(event, task_id)
+                    else:
+                        await event.answer("❌ موقع غير صحيح")
+                except Exception:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("advanced_audio_settings_"):
+                try:
+                    task_id = int(data.replace("advanced_audio_settings_", ""))
+                    await self.advanced_audio_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة للإعدادات المتقدمة للوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_char_limit_"): # Toggle character limit
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -316,14 +1107,32 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حد الأحرف: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("toggle_char_mode_"): # Toggle character limit mode
+            elif data.startswith("cycle_char_mode_"): # Cycle character limit mode
                 parts = data.split("_")
                 if len(parts) >= 4:
                     try:
                         task_id = int(parts[3])
-                        await self.toggle_character_limit_mode(event, task_id)
+                        await self.cycle_character_limit_mode(event, task_id)
                     except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع حد الأحرف: {e}")
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتدوير وضع حد الأحرف: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_char_min_"): # Edit character minimum limit
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_edit_char_min(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الحد الأدنى: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_char_max_"): # Edit character maximum limit
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_edit_char_max(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الحد الأقصى: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_rate_limit_"): # Toggle rate limit
                 parts = data.split("_")
@@ -344,205 +1153,215 @@ class SimpleTelegramBot:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تأخير التوجيه: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_settings_"): # Handler for watermark settings
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_watermark_settings(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_settings_123"
+                    task_id = int(data.replace("watermark_settings_", ""))
+                    await self.show_watermark_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_"): # Toggle watermark
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.toggle_watermark(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "toggle_watermark_123"
+                    task_id = int(data.replace("toggle_watermark_", ""))
+                    await self.toggle_watermark(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_appearance_"): # Watermark appearance settings
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_watermark_appearance(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات مظهر العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_appearance_123"
+                    task_id = int(data.replace("watermark_appearance_", ""))
+                    await self.show_watermark_appearance(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات مظهر العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_type_"): # Watermark type settings
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_watermark_type(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات نوع العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_type_123"
+                    task_id = int(data.replace("watermark_type_", ""))
+                    await self.show_watermark_type(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات نوع العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_media_"): # Watermark media types
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_watermark_media_types(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لأنواع الوسائط للعلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_media_123"
+                    task_id = int(data.replace("watermark_media_", ""))
+                    await self.show_watermark_media_types(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لأنواع الوسائط للعلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_size_up_"): # Increase watermark size
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_size(event, task_id, increase=True)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة حجم العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_size_up_123"
+                    task_id = int(data.replace("watermark_size_up_", ""))
+                    await self.adjust_watermark_size(event, task_id, increase=True)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة حجم العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_size_down_"): # Decrease watermark size
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_size(event, task_id, increase=False)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل حجم العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_size_down_123"
+                    task_id = int(data.replace("watermark_size_down_", ""))
+                    await self.adjust_watermark_size(event, task_id, increase=False)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل حجم العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_opacity_up_"): # Increase watermark opacity
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_opacity(event, task_id, increase=True)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة شفافية العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_opacity_up_123"
+                    task_id = int(data.replace("watermark_opacity_up_", ""))
+                    await self.adjust_watermark_opacity(event, task_id, increase=True)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة شفافية العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_opacity_down_"): # Decrease watermark opacity
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_opacity(event, task_id, increase=False)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل شفافية العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_opacity_down_123"
+                    task_id = int(data.replace("watermark_opacity_down_", ""))
+                    await self.adjust_watermark_opacity(event, task_id, increase=False)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل شفافية العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_font_up_"): # Increase watermark font size
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_font_size(event, task_id, increase=True)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة حجم خط العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_font_up_123"
+                    task_id = int(data.replace("watermark_font_up_", ""))
+                    await self.adjust_watermark_font_size(event, task_id, increase=True)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة حجم خط العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_font_down_"): # Decrease watermark font size
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_font_size(event, task_id, increase=False)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل حجم خط العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_font_down_123"
+                    task_id = int(data.replace("watermark_font_down_", ""))
+                    await self.adjust_watermark_font_size(event, task_id, increase=False)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل حجم خط العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_default_up_"): # Increase default watermark size
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_default_size(event, task_id, increase=True)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة الحجم الافتراضي: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_default_up_123"
+                    task_id = int(data.replace("watermark_default_up_", ""))
+                    await self.adjust_watermark_default_size(event, task_id, increase=True)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة الحجم الافتراضي: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_default_down_"): # Decrease default watermark size
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_default_size(event, task_id, increase=False)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل الحجم الافتراضي: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_default_down_123"
+                    task_id = int(data.replace("watermark_default_down_", ""))
+                    await self.adjust_watermark_default_size(event, task_id, increase=False)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل الحجم الافتراضي: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_apply_default_"): # Apply default size
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.apply_default_watermark_size(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتطبيق الحجم الافتراضي: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_apply_default_123"
+                    task_id = int(data.replace("watermark_apply_default_", ""))
+                    await self.apply_default_watermark_size(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتطبيق الحجم الافتراضي: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_offset_left_"): # Move watermark left
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_offset(event, task_id, axis='x', increase=False)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة يساراً: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_offset_left_123"
+                    task_id = int(data.replace("watermark_offset_left_", ""))
+                    await self.adjust_watermark_offset(event, task_id, axis='x', increase=False)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة يساراً: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_offset_right_"): # Move watermark right
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_offset(event, task_id, axis='x', increase=True)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة يميناً: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_offset_right_123"
+                    task_id = int(data.replace("watermark_offset_right_", ""))
+                    await self.adjust_watermark_offset(event, task_id, axis='x', increase=True)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة يميناً: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_offset_up_"): # Move watermark up
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_offset(event, task_id, axis='y', increase=False)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة أعلى: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_offset_up_123"
+                    task_id = int(data.replace("watermark_offset_up_", ""))
+                    await self.adjust_watermark_offset(event, task_id, axis='y', increase=False)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة أعلى: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_offset_down_"): # Move watermark down
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.adjust_watermark_offset(event, task_id, axis='y', increase=True)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة أسفل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_offset_down_123"
+                    task_id = int(data.replace("watermark_offset_down_", ""))
+                    await self.adjust_watermark_offset(event, task_id, axis='y', increase=True)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة أسفل: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_reset_offset_"): # Reset watermark offset
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.reset_watermark_offset(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعادة تعيين الإزاحة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_reset_offset_123"
+                    task_id = int(data.replace("watermark_reset_offset_", ""))
+                    await self.reset_watermark_offset(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعادة تعيين الإزاحة: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_position_selector_"): # Show watermark position selector
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.show_watermark_position_selector(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض أختيار موضع العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_position_selector_123"
+                    task_id = int(data.replace("watermark_position_selector_", ""))
+                    await self.show_watermark_position_selector(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض أختيار موضع العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("set_watermark_position_"): # Set watermark position
-                parts = data.split("_")
-                if len(parts) >= 5:
-                    try:
-                        position = parts[3]
-                        task_id = int(parts[4])
-                        await self.set_watermark_position(event, task_id, position)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعيين موضع العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id and position from data like "set_watermark_position_top_left_123"
+                    # Remove "set_watermark_position_" prefix
+                    remaining = data.replace("set_watermark_position_", "")
+                    
+                    # Find the last underscore to separate position from task_id
+                    last_underscore = remaining.rfind("_")
+                    if last_underscore != -1:
+                        position = remaining[:last_underscore]
+                        task_id = int(remaining[last_underscore + 1:])
+                        
+                        # Validate position
+                        valid_positions = ['top_left', 'top', 'top_right', 'bottom_left', 'bottom', 'bottom_right', 'center']
+                        if position in valid_positions:
+                            await self.set_watermark_position(event, task_id, position)
+                        else:
+                            logger.error(f"❌ موقع غير صحيح: {position}")
+                            await event.answer("❌ موقع غير صحيح")
+                    else:
+                        logger.error(f"❌ تنسيق بيانات غير صحيح: {data}")
+                        await event.answer("❌ خطأ في تنسيق البيانات")
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتعيين موضع العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("set_watermark_type_"): # Set watermark type
-                parts = data.split("_")
-                if len(parts) >= 5:
-                    try:
-                        watermark_type = parts[3]  # text or image
-                        task_id = int(parts[4])
-                        await self.set_watermark_type(event, task_id, watermark_type)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل نوع العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract watermark_type and task_id from data like "set_watermark_type_text_123"
+                    # Remove "set_watermark_type_" prefix
+                    remaining = data.replace("set_watermark_type_", "")
+                    
+                    # Find the last underscore to separate watermark_type from task_id
+                    last_underscore = remaining.rfind("_")
+                    if last_underscore != -1:
+                        watermark_type = remaining[:last_underscore]
+                        task_id = int(remaining[last_underscore + 1:])
+                        
+                        # Validate watermark_type
+                        valid_types = ['text', 'image']
+                        if watermark_type in valid_types:
+                            await self.set_watermark_type(event, task_id, watermark_type)
+                        else:
+                            logger.error(f"❌ نوع علامة مائية غير صحيح: {watermark_type}")
+                            await event.answer("❌ نوع علامة مائية غير صحيح")
+                    else:
+                        logger.error(f"❌ تنسيق بيانات غير صحيح: {data}")
+                        await event.answer("❌ خطأ في تنسيق البيانات")
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل نوع العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
 
             elif data.startswith("toggle_sending_interval_"): # Toggle sending interval
                 parts = data.split("_")
@@ -576,6 +1395,24 @@ class SimpleTelegramBot:
                 if len(parts) >= 4:
                     try:
                         task_id = int(parts[3])
+                        await self.start_edit_rate_period(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل فترة الرسائل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_rate_limit_count_"): # Handler for editing rate limit count
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
+                        await self.start_edit_rate_count(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل عدد الرسائل: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_rate_limit_period_"): # Handler for editing rate limit period
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
                         await self.start_edit_rate_period(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل فترة الرسائل: {e}")
@@ -625,6 +1462,15 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر اللغات: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("manage_languages_"): # Handler for managing languages
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_language_management(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة اللغات: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("admin_filters_"): # Handler for admin filters
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -662,106 +1508,127 @@ class SimpleTelegramBot:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_config_"): # Handler for watermark config
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_watermark_config(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتكوين العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_config_123"
+                    task_id = int(data.replace("watermark_config_", ""))
+                    await self.show_watermark_config(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتكوين العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_media_"): # Handler for watermark media settings
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_watermark_media_settings(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وسائط العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_media_123"
+                    task_id = int(data.replace("watermark_media_", ""))
+                    await self.show_watermark_media_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وسائط العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_text_"): # Handler for watermark text setting
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.start_set_watermark_text(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل نص العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_text_123"
+                    task_id = int(data.replace("watermark_text_", ""))
+                    await self.start_set_watermark_text(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل نص العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_image_"): # Handler for watermark image setting
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.start_set_watermark_image(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل صورة العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_image_123"
+                    task_id = int(data.replace("watermark_image_", ""))
+                    await self.start_set_watermark_image(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل صورة العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_position_"): # Handler for watermark position setting
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_watermark_position_settings(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل موقع العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_position_123"
+                    task_id = int(data.replace("watermark_position_", ""))
+                    await self.show_watermark_position_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل موقع العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_appearance_"): # Handler for watermark appearance setting
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    try:
-                        task_id = int(parts[2])
-                        await self.show_watermark_appearance_settings(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل مظهر العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "watermark_appearance_123"
+                    task_id = int(data.replace("watermark_appearance_", ""))
+                    await self.show_watermark_appearance_settings(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل مظهر العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_photos_"): # Handler for toggle watermark photos
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.toggle_watermark_media_type(event, task_id, 'photos')
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للصور: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "toggle_watermark_photos_123"
+                    task_id = int(data.replace("toggle_watermark_photos_", ""))
+                    await self.toggle_watermark_media_type(event, task_id, 'photos')
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للصور: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_videos_"): # Handler for toggle watermark videos
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.toggle_watermark_media_type(event, task_id, 'videos')
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للفيديوهات: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "toggle_watermark_videos_123"
+                    task_id = int(data.replace("toggle_watermark_videos_", ""))
+                    await self.toggle_watermark_media_type(event, task_id, 'videos')
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للفيديوهات: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_documents_"): # Handler for toggle watermark documents
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.toggle_watermark_media_type(event, task_id, 'documents')
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للمستندات: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id from data like "toggle_watermark_documents_123"
+                    task_id = int(data.replace("toggle_watermark_documents_", ""))
+                    await self.toggle_watermark_media_type(event, task_id, 'documents')
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للمستندات: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("set_watermark_position_"): # Handler for set watermark position
-                parts = data.split("_")
-                if len(parts) >= 5:
-                    try:
-                        task_id = int(parts[3])
-                        position = parts[4]
-                        await self.set_watermark_position(event, task_id, position)
-                    except (ValueError, IndexError) as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد موقع العلامة المائية: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract task_id and position from data like "set_watermark_position_top_left_123"
+                    # Remove "set_watermark_position_" prefix
+                    remaining = data.replace("set_watermark_position_", "")
+                    
+                    # Find the last underscore to separate position from task_id
+                    last_underscore = remaining.rfind("_")
+                    if last_underscore != -1:
+                        position = remaining[:last_underscore]
+                        task_id = int(remaining[last_underscore + 1:])
+                        
+                        # Validate position
+                        valid_positions = ['top_left', 'top', 'top_right', 'bottom_left', 'bottom', 'bottom_right', 'center']
+                        if position in valid_positions:
+                            await self.set_watermark_position(event, task_id, position)
+                        else:
+                            logger.error(f"❌ موقع غير صحيح: {position}")
+                            await event.answer("❌ موقع غير صحيح")
+                    else:
+                        logger.error(f"❌ تنسيق بيانات غير صحيح: {data}")
+                        await event.answer("❌ خطأ في تنسيق البيانات")
+                except (ValueError, IndexError) as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد موقع العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_watermark_"): # Handler for editing watermark appearance
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        setting_type = parts[2]  # size, opacity, font_size, color
-                        task_id = int(parts[3])
-                        await self.start_edit_watermark_setting(event, task_id, setting_type)
-                    except (ValueError, IndexError) as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتحرير العلامة المائية: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                try:
+                    # Extract setting_type and task_id from data like "edit_watermark_size_123"
+                    # Remove "edit_watermark_" prefix
+                    remaining = data.replace("edit_watermark_", "")
+                    
+                    # Find the last underscore to separate setting_type from task_id
+                    last_underscore = remaining.rfind("_")
+                    if last_underscore != -1:
+                        setting_type = remaining[:last_underscore]
+                        task_id = int(remaining[last_underscore + 1:])
+                        
+                        # Validate setting_type
+                        valid_settings = ['size', 'opacity', 'font_size', 'color']
+                        if setting_type in valid_settings:
+                            await self.start_edit_watermark_setting(event, task_id, setting_type)
+                        else:
+                            logger.error(f"❌ نوع إعداد غير صحيح: {setting_type}")
+                            await event.answer("❌ نوع إعداد غير صحيح")
+                    else:
+                        logger.error(f"❌ تنسيق بيانات غير صحيح: {data}")
+                        await event.answer("❌ خطأ في تنسيق البيانات")
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتحرير العلامة المائية: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("source_admins_"): # Handler for source admins
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1166,6 +2033,25 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لمسح الفلتر: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("confirm_clear_replacements_"): # Handler for confirming clear replacements
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.clear_replacements_execute(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الاستبدالات: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("confirm_clear_inline_buttons_"): # Handler for confirming clear inline buttons
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        # Get the last part which should be the task_id
+                        task_id = int(parts[-1])
+                        await self.clear_inline_buttons_execute(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الأزرار: {e}, data='{data}', parts={parts}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("confirm_clear_"): # Handler for confirming filter clear
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1301,15 +2187,6 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لحذف الاستبدالات: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("confirm_clear_replacements_"): # Handler for confirming clear replacements
-                parts = data.split("_")
-                if len(parts) >= 4:
-                    try:
-                        task_id = int(parts[3])
-                        await self.clear_replacements_execute(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الاستبدالات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("header_settings_"): # Handler for header settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1409,16 +2286,6 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لحذف الأزرار: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("confirm_clear_inline_buttons_"): # Handler for confirming clear inline buttons
-                parts = data.split("_")
-                if len(parts) >= 5:
-                    try:
-                        # Get the last part which should be the task_id
-                        task_id = int(parts[-1])
-                        await self.clear_inline_buttons_execute(event, task_id)
-                    except ValueError as e:
-                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الأزرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("forwarding_settings_"): # Handler for forwarding settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1458,7 +2325,7 @@ class SimpleTelegramBot:
                 if len(parts) >= 3:
                     try:
                         task_id = int(parts[2])
-                        await self.show_publishing_mode_settings(event, task_id)
+                        await self.publishing_manager.show_publishing_mode_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وضع النشر: {e}")
                         await event.answer("❌ خطأ في معالجة الطلب")
@@ -1468,9 +2335,49 @@ class SimpleTelegramBot:
                 if len(parts) >= 4:
                     try:
                         task_id = int(parts[3])
-                        await self.toggle_publishing_mode(event, task_id)
+                        await self.publishing_manager.toggle_publishing_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع النشر: {e}")
+                        await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("show_pending_messages_"):
+                # Handle showing pending messages
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.publishing_manager.show_pending_messages(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض الرسائل المعلقة: {e}")
+                        await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("show_pending_details_"):
+                # Handle showing pending message details
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        pending_id = int(parts[3])
+                        await self.publishing_manager.show_pending_message_details(event, pending_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف الرسالة المعلقة: {e}")
+                        await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("approve_message_"):
+                # Handle message approval
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        pending_id = int(parts[2])
+                        await self.publishing_manager.handle_message_approval(event, pending_id, True)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف الرسالة للموافقة: {e}")
+                        await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("reject_message_"):
+                # Handle message rejection
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        pending_id = int(parts[2])
+                        await self.publishing_manager.handle_message_approval(event, pending_id, False)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف الرسالة للرفض: {e}")
                         await event.answer("❌ خطأ في معالجة الطلب")
             elif data.startswith("toggle_split_album_"): # Handler for toggling split album
                 parts = data.split("_")
@@ -1669,6 +2576,17 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في إضافة اللغة السريعة: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("quick_remove_lang_"): # Handler for quick language removal
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[3])
+                        language_code = parts[4]
+                        language_name = "_".join(parts[5:]) if len(parts) > 5 else parts[4]
+                        await self.quick_remove_language(event, task_id, language_code, language_name)
+                    except ValueError as e:
+                        logger.error(f"خطأ في حذف اللغة السريعة: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_lang_selection_"): # Handler for toggling language selection
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -1696,6 +2614,15 @@ class SimpleTelegramBot:
                         await self.clear_all_languages(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في مسح اللغات: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("quick_add_languages_"): # Handler for quick add languages
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.show_quick_add_languages(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في الإضافة السريعة للغات: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("duplicate_filter_") and not data.startswith("duplicate_filter_enabled"): # Handler for duplicate filter main page
                 parts = data.split("_")
@@ -1779,6 +2706,56 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لمشرفي المصدر: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_source_admin_"): # Handler for toggling specific source admin
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[3])
+                        admin_user_id = int(parts[4])
+                        source_chat_id = parts[5]
+                        await self.toggle_source_admin_filter(event, task_id, admin_user_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المشرف: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("refresh_source_admins_"): # Handler for refreshing source admins
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[3])
+                        source_chat_id = parts[4]
+                        await self.refresh_source_admins(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحديث مشرفي المصدر: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("refresh_all_admins_"): # Handler for refreshing all admins
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.refresh_all_admins(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحديث جميع المشرفين: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("enable_all_source_admins_"): # Handler for enabling all source admins
+                parts = data.split("_")
+                if len(parts) >= 6:
+                    try:
+                        task_id = int(parts[4])
+                        source_chat_id = parts[5]
+                        await self.enable_all_source_admins(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تفعيل جميع المشرفين: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("disable_all_source_admins_"): # Handler for disabling all source admins
+                parts = data.split("_")
+                if len(parts) >= 6:
+                    try:
+                        task_id = int(parts[4])
+                        source_chat_id = parts[5]
+                        await self.disable_all_source_admins(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تعطيل جميع المشرفين: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_admin_"): # Handler for toggling individual admin
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1796,6 +2773,37 @@ class SimpleTelegramBot:
                         task_id = int(parts[3])
                         source_chat_id = parts[4]
                         await self.refresh_source_admin_list(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("manage_signatures_"): # Handler for managing admin signatures
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[2])
+                        source_chat_id = parts[3]
+                        await self.manage_admin_signatures(event, task_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_admin_signature_"): # Handler for editing admin signature
+                parts = data.split("_")
+                if len(parts) >= 6:
+                    try:
+                        task_id = int(parts[3])
+                        admin_user_id = int(parts[4])
+                        source_chat_id = parts[5]
+                        await self.edit_admin_signature(event, task_id, admin_user_id, source_chat_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/المشرف/المصدر: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("manage_signatures_"): # Handler for managing admin signatures
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[2])
+                        source_chat_id = parts[3]
+                        await self.manage_admin_signatures(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
@@ -1840,29 +2848,83 @@ class SimpleTelegramBot:
                 except Exception as e:
                     logger.error(f"خطأ في تحديث مهام UserBot: {e}")
                 
-                # Return to the appropriate filter menu based on filter type
-                if filter_type == 'duplicate_filter_enabled':
-                    await self.show_duplicate_filter(event, task_id)
-                elif filter_type == 'inline_button_filter_enabled':
-                    await self.show_inline_button_filter(event, task_id)
-                elif filter_type == 'forwarded_message_filter_enabled':
-                    await self.show_forwarded_message_filter(event, task_id)
-                elif filter_type == 'language_filter_enabled':
-                    await self.show_language_filters(event, task_id)
-                elif filter_type == 'admin_filter_enabled':
-                    await self.show_admin_filters(event, task_id)
-                elif filter_type == 'day_filter_enabled':
-                    await self.show_day_filters(event, task_id)
-                elif filter_type == 'working_hours_enabled':
-                    await self.show_working_hours_filter(event, task_id)
-                else:
-                    await self.show_advanced_filters(event, task_id)
+                # Return to the appropriate filter menu based on filter type with error handling
+                try:
+                    if filter_type == 'duplicate_filter_enabled':
+                        await self.show_duplicate_filter(event, task_id)
+                    elif filter_type == 'inline_button_filter_enabled':
+                        await self.show_inline_button_filter(event, task_id)
+                    elif filter_type == 'forwarded_message_filter_enabled':
+                        await self.show_forwarded_message_filter(event, task_id)
+                    elif filter_type == 'language_filter_enabled':
+                        await self.show_language_filters(event, task_id)
+                    elif filter_type == 'admin_filter_enabled':
+                        await self.show_admin_filters(event, task_id)
+                    elif filter_type == 'day_filter_enabled':
+                        await self.show_day_filters(event, task_id)
+                    elif filter_type == 'working_hours_enabled':
+                        await self.show_working_hours_filter(event, task_id)
+                    else:
+                        await self.show_advanced_filters(event, task_id)
+                except Exception as e:
+                    if "Content of the message was not modified" in str(e):
+                        logger.debug(f"المحتوى لم يتغير، الفلتر {filter_type} محدث بنجاح")
+                        # Add timestamp to force refresh
+                        import time
+                        timestamp = int(time.time()) % 100
+                        try:
+                            if filter_type == 'duplicate_filter_enabled':
+                                await self.force_refresh_duplicate_filter(event, task_id, timestamp)
+                        except:
+                            pass  # If still fails, at least the setting was updated
+                    else:
+                        raise e
             else:
                 await event.answer("❌ فشل في تحديث الإعداد")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل الفلتر المتقدم: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
+            
+    async def force_refresh_duplicate_filter(self, event, task_id, timestamp):
+        """Force refresh duplicate filter display with timestamp"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            return
+            
+        # Get current settings
+        advanced_settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = advanced_settings.get('duplicate_filter_enabled', False)
+        
+        # Get duplicate specific settings
+        settings = self.db.get_duplicate_settings(task_id)
+        threshold = settings.get('similarity_threshold', 80)
+        time_window = settings.get('time_window_hours', 24)
+        check_text = settings.get('check_text', True)
+        check_media = settings.get('check_media', True)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_duplicate_filter_enabled_{task_id}")],
+            [Button.inline("⚙️ إعدادات التكرار", f"duplicate_settings_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🔄 فلتر التكرار - المهمة #{task_id}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"📏 نسبة التشابه: {threshold}%\n"
+            f"⏱️ النافذة الزمنية: {time_window} ساعة\n"
+            f"📝 فحص النص: {'✅' if check_text else '❌'}\n"
+            f"🎬 فحص الوسائط: {'✅' if check_media else '❌'}\n\n"
+            f"💡 هذا الفلتر يمنع توجيه الرسائل المتكررة\n"
+            f"⏰ محدث: {timestamp}"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_day_filters(self, event, task_id):
         """Show day filters settings"""
@@ -1885,7 +2947,7 @@ class SimpleTelegramBot:
         day_buttons = []
         
         for i, day in enumerate(days):  # Use 0-based indexing (Monday=0, Sunday=6)
-            is_selected = any(df['day_number'] == i for df in day_filters)
+            is_selected = any(df['day_number'] == i and df['is_allowed'] for df in day_filters)
             icon = "✅" if is_selected else "❌"
             day_buttons.append(Button.inline(f"{icon} {day}", f"toggle_day_{task_id}_{i}"))
         
@@ -1905,18 +2967,23 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
-        # Add timestamp to force UI refresh
+        # Add unique timestamp to force UI refresh
         import time
-        timestamp = int(time.time()) % 100
+        import random
+        timestamp = int(time.time() * 1000) % 10000 + random.randint(1, 999)
         
-        await event.edit(
+        # Count selected days
+        selected_days_count = sum(1 for df in day_filters if df['is_allowed'])
+        
+        message_text = (
             f"📅 فلتر الأيام - المهمة #{task_id}\n\n"
             f"📊 الحالة: {status_text}\n"
-            f"📋 الأيام المحددة: {len(day_filters)}/7\n\n"
+            f"📋 الأيام المحددة: {selected_days_count}/7\n\n"
             f"اختر الأيام المسموح بالتوجيه فيها:\n"
-            f"⏰ آخر تحديث: {timestamp}",
-            buttons=buttons
+            f"⏰ آخر تحديث: {timestamp}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_day_filter(self, event, task_id, day_number):
         """Toggle specific day filter"""
@@ -1925,7 +2992,7 @@ class SimpleTelegramBot:
         try:
             # Get current day filters
             day_filters = self.db.get_day_filters(task_id)
-            is_selected = any(df['day_number'] == day_number for df in day_filters)
+            is_selected = any(df['day_number'] == day_number and df['is_allowed'] for df in day_filters)
             
             if is_selected:
                 # Remove the day by setting to False
@@ -1949,12 +3016,15 @@ class SimpleTelegramBot:
                 except Exception as e:
                     logger.error(f"خطأ في تحديث مهام UserBot: {e}")
                 
-                # Force refresh with timestamp to avoid "Content not modified" error
-                import time
-                timestamp = int(time.time() * 1000) % 10000
-                
-                # Simple refresh - the timestamp in show_day_filters should handle it
-                await self.show_day_filters(event, task_id)
+                # Refresh with error handling for "Content not modified"
+                try:
+                    await self.show_day_filters(event, task_id)
+                except Exception as refresh_error:
+                    if "Content of the message was not modified" in str(refresh_error):
+                        logger.debug("المحتوى لم يتغير، تجاهل الخطأ")
+                    else:
+                        logger.error(f"خطأ في تحديث واجهة فلتر الأيام: {refresh_error}")
+                        raise refresh_error
             else:
                 await event.answer("❌ فشل في التحديث")
                 
@@ -2031,7 +3101,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"🔍 الفلاتر المتقدمة - المهمة #{task_id}\n\n"
             f"📊 حالة الفلاتر:\n"
             f"• {day_status} فلتر الأيام\n"
@@ -2041,14 +3111,17 @@ class SimpleTelegramBot:
             f"• {duplicate_status} فلتر التكرار\n"
             f"• {inline_status} الأزرار الإنلاين\n"
             f"• {forwarded_status} الرسائل المُوجهة\n\n"
-            f"اختر الفلتر الذي تريد إدارته:",
-            buttons=buttons
+            f"اختر الفلتر الذي تريد إدارته:"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_advanced_features(self, event, task_id):
         """Show advanced features menu"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
+        user_id = event.sender_id if hasattr(event, 'sender_id') else None
+        
+        # Try to get task with user_id first, then without if user_id is None
+        task = self.db.get_task(task_id, user_id) if user_id else self.db.get_task(task_id)
         
         if not task:
             await event.answer("❌ المهمة غير موجودة")
@@ -2074,16 +3147,17 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"⚡ الميزات المتقدمة - المهمة #{task_id}\n\n"
             f"📊 حالة الميزات:\n"
             f"• {char_status} حدود الأحرف\n"
             f"• {rate_status} حد المعدل\n"
             f"• {delay_status} تأخير التوجيه\n"
             f"• {interval_status} فاصل الإرسال\n\n"
-            f"اختر الميزة التي تريد إدارتها:",
-            buttons=buttons
+            f"اختر الميزة التي تريد إدارتها:"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_message(self, event):
         """Handle text messages"""
@@ -2092,6 +3166,46 @@ class SimpleTelegramBot:
             return
 
         user_id = event.sender_id
+        message_text = event.text
+
+        # If user forwarded a message and is in add-channel state, try to extract channel
+        try:
+            state_tuple = self.db.get_conversation_state(user_id)
+            if state_tuple and state_tuple[0] in ['waiting_channel_link', 'waiting_multiple_channels']:
+                fwd = event.message.fwd_from
+                if fwd and getattr(fwd, 'from_id', None):
+                    try:
+                        # Resolve original chat from the forwarded message
+                        orig_peer_id = get_peer_id(fwd.from_id)
+                        from userbot_service.userbot import userbot_instance
+                        client = userbot_instance.clients.get(user_id)
+                        if client:
+                            orig = await client.get_entity(orig_peer_id)
+                            link = getattr(orig, 'username', None) and f"@{orig.username}" or str(getattr(orig, 'id', ''))
+                            if link:
+                                # Reuse existing channel processing
+                                added = await self.channels_management.process_channel_link(event, link)
+                                if state_tuple[0] == 'waiting_multiple_channels' and added:
+                                    # Append into current list
+                                    refreshed = self.db.get_conversation_state(user_id)
+                                    try:
+                                        data_json = json.loads(refreshed[1]) if refreshed and refreshed[1] else {}
+                                    except Exception:
+                                        data_json = {}
+                                    lst = data_json.get('channels', [])
+                                    lst.append(added)
+                                    data_json['channels'] = lst
+                                    self.db.set_conversation_state(user_id, 'waiting_multiple_channels', json.dumps(data_json))
+                                    await event.answer("✅ تم إضافة القناة عبر الرسالة المحولة. أرسل أخرى أو اضغط إنهاء.")
+                                else:
+                                    # Single add: clear and show list
+                                    self.db.clear_conversation_state(user_id)
+                                    await self.list_channels(event)
+                                return
+                    except Exception as e:
+                        logger.debug(f"تعذر استخراج القناة من الرسالة المحولة: {e}")
+        except Exception:
+            pass
 
         # Check user state from both systems (user_states and database)
         user_state_data = self.user_states.get(user_id, {})
@@ -2108,7 +3222,7 @@ class SimpleTelegramBot:
                         return
                 except Exception as e:
                     logger.error(f"خطأ في معالجة إدخال نص العلامة المائية: {e}")
-                    await event.respond("❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ، يرجى المحاولة مرة أخرى")
                     self.clear_user_state(user_id)
                     return
                     
@@ -2120,9 +3234,208 @@ class SimpleTelegramBot:
                         return
                 except Exception as e:
                     logger.error(f"خطأ في معالجة إدخال صورة العلامة المائية: {e}")
-                    await event.respond("❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ، يرجى المحاولة مرة أخرى")
                     self.clear_user_state(user_id)
                     return
+
+            elif current_user_state == 'awaiting_album_art_upload':
+                task_id = current_user_data.get('task_id')
+                try:
+                    import os
+                    os.makedirs('album_art', exist_ok=True)
+                    file_path = None
+                    if event.message.photo or (event.message.document and 'image' in (event.message.document.mime_type or '')):
+                        file_path = f"album_art/album_art_{task_id}.jpg"
+                        await self.bot.download_media(event.message, file=file_path)
+                    else:
+                        await self.edit_or_send_message(event, "❌ يرجى إرسال صورة كصورة أو ملف.")
+                        return
+                    if file_path and os.path.exists(file_path):
+                        self.db.set_album_art_settings(task_id, path=file_path, enabled=True)
+                        await self.edit_or_send_message(event, "✅ تم حفظ صورة الغلاف")
+                        await self.album_art_settings(event, task_id)
+                    else:
+                        await self.edit_or_send_message(event, "❌ فشل في حفظ الصورة")
+                except Exception as e:
+                    logger.error(f"خطأ في حفظ صورة الغلاف: {e}")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء رفع الصورة")
+                finally:
+                    self.clear_user_state(user_id)
+                return
+
+            elif current_user_state == 'awaiting_intro_audio_upload':
+                task_id = current_user_data.get('task_id')
+                try:
+                    import os
+                    os.makedirs('audio_segments', exist_ok=True)
+                    file_path = f"audio_segments/intro_{task_id}.mp3"
+                    if event.message.document and (event.message.document.mime_type or '').startswith('audio/'):
+                        await self.bot.download_media(event.message, file=file_path)
+                        self.db.set_audio_merge_settings(task_id, intro_path=file_path)
+                        await self.edit_or_send_message(event, "✅ تم حفظ مقطع المقدمة")
+                        await self.audio_merge_settings(event, task_id)
+                    else:
+                        await self.edit_or_send_message(event, "❌ يرجى إرسال ملف صوتي.")
+                        return
+                except Exception as e:
+                    logger.error(f"خطأ في حفظ مقطع المقدمة: {e}")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء رفع المقطع")
+                finally:
+                    self.clear_user_state(user_id)
+                return
+
+            elif current_user_state == 'awaiting_outro_audio_upload':
+                task_id = current_user_data.get('task_id')
+                try:
+                    import os
+                    os.makedirs('audio_segments', exist_ok=True)
+                    file_path = f"audio_segments/outro_{task_id}.mp3"
+                    if event.message.document and (event.message.document.mime_type or '').startswith('audio/'):
+                        await self.bot.download_media(event.message, file=file_path)
+                        self.db.set_audio_merge_settings(task_id, outro_path=file_path)
+                        await self.edit_or_send_message(event, "✅ تم حفظ مقطع الخاتمة")
+                        await self.audio_merge_settings(event, task_id)
+                    else:
+                        await self.edit_or_send_message(event, "❌ يرجى إرسال ملف صوتي.")
+                        return
+                except Exception as e:
+                    logger.error(f"خطأ في حفظ مقطع الخاتمة: {e}")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء رفع المقطع")
+                finally:
+                    self.clear_user_state(user_id)
+                return
+            elif current_user_state.startswith('editing_audio_tag_'):
+                try:
+                    tag_name = current_user_state.replace('editing_audio_tag_', '')
+                    task_id = current_user_data.get('task_id')
+                    new_template = message_text.strip()
+                    
+                    # Validate template (basic validation)
+                    if not new_template:
+                        await self.edit_or_send_message(event, "❌ لا يمكن أن يكون القالب فارغاً")
+                        return
+                    
+                    # Update the template
+                    success = self.db.update_audio_template_setting(task_id, tag_name, new_template)
+                    if success:
+                        await self.edit_or_send_message(event, f"✅ تم تحديث قالب {tag_name} بنجاح")
+                        await self.audio_template_settings(event, task_id)
+                    else:
+                        await self.edit_or_send_message(event, "❌ فشل في تحديث القالب")
+                except Exception as e:
+                    logger.error(f"خطأ في تحديث قالب الوسم الصوتي: {e}")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                finally:
+                    self.clear_user_state(user_id)
+                return
+                    
+            elif current_user_state == 'editing_char_min': # Handle editing character minimum
+                task_id = current_user_data.get('task_id')
+                if task_id:
+                    try:
+                        min_chars = int(message_text.strip())
+                        if 1 <= min_chars <= 10000:
+                            success = self.db.update_character_limit_values(task_id, min_chars=min_chars)
+                            if success:
+                                await self.edit_or_send_message(event, f"✅ تم تحديث الحد الأدنى إلى {min_chars} حرف")
+                                # Force refresh UserBot tasks
+                                await self._refresh_userbot_tasks(user_id)
+                            else:
+                                await self.edit_or_send_message(event, "❌ فشل في تحديث الحد الأدنى")
+                        else:
+                            await self.edit_or_send_message(event, "❌ يجب أن يكون الرقم بين 1 و 10000")
+                            return
+                    except ValueError:
+                        await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
+                        return
+                    
+                    self.clear_user_state(user_id)
+                    await self.show_character_limit_settings(event, task_id)
+                return
+                
+            elif current_user_state == 'editing_char_max': # Handle editing character maximum
+                task_id = current_user_data.get('task_id')
+                if task_id:
+                    try:
+                        max_chars = int(message_text.strip())
+                        if 1 <= max_chars <= 10000:
+                            success = self.db.update_character_limit_values(task_id, max_chars=max_chars)
+                            if success:
+                                await self.edit_or_send_message(event, f"✅ تم تحديث الحد الأقصى إلى {max_chars} حرف")
+                                # Force refresh UserBot tasks
+                                await self._refresh_userbot_tasks(user_id)
+                            else:
+                                await self.edit_or_send_message(event, "❌ فشل في تحديث الحد الأقصى")
+                        else:
+                            await self.edit_or_send_message(event, "❌ يجب أن يكون الرقم بين 1 و 10000")
+                            return
+                    except ValueError:
+                        await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
+                        return
+                    
+                    self.clear_user_state(user_id)
+                    await self.show_character_limit_settings(event, task_id)
+                return
+                
+            elif current_user_state == 'editing_forwarding_delay': # Handle editing forwarding delay
+                task_id = current_user_data.get('task_id')
+                if task_id:
+                    await self.handle_edit_forwarding_delay(event, task_id, message_text)
+                    self.clear_user_state(user_id)
+                    # Send new message instead of editing
+                    await self.send_forwarding_delay_settings(event, task_id)
+                return
+                
+            elif current_user_state == 'editing_sending_interval': # Handle editing sending interval
+                task_id = current_user_data.get('task_id')
+                if task_id:
+                    await self.handle_edit_sending_interval(event, task_id, message_text)
+                    self.clear_user_state(user_id)
+                    # Send new message instead of editing
+                    await self.send_sending_interval_settings(event, task_id)
+                return
+            elif current_user_state.startswith('edit_signature_'): # Handle editing admin signature
+                try:
+                    parts = current_user_state.split('_')
+                    if len(parts) >= 4:
+                        task_id = int(parts[2])
+                        admin_user_id = int(parts[3])
+                        source_chat_id = current_user_data.get('source_chat_id', '')
+                        if not source_chat_id:
+                            # Try to extract from state if not in data
+                            source_chat_id = parts[4] if len(parts) > 4 else ''
+                        
+                        if source_chat_id:
+                            await self.handle_signature_input(event, task_id, admin_user_id, source_chat_id)
+                        else:
+                            await self.edit_or_send_message(event, "❌ خطأ في تحديد المصدر")
+                            self.clear_user_state(user_id)
+                    else:
+                        await self.edit_or_send_message(event, "❌ خطأ في تحليل البيانات")
+                        self.clear_user_state(user_id)
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة إدخال توقيع المشرف: {e}")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    self.clear_user_state(user_id)
+                return
+                
+            elif current_user_state == 'editing_rate_count': # Handle editing rate count
+                task_id = current_user_data.get('task_id')
+                if task_id:
+                    await self.handle_edit_rate_count(event, task_id, message_text)
+                    self.clear_user_state(user_id)
+                    # Send new message instead of editing
+                    await self.send_rate_limit_settings(event, task_id)
+                return
+                
+            elif current_user_state == 'editing_rate_period': # Handle editing rate period
+                task_id = current_user_data.get('task_id')
+                if task_id:
+                    await self.handle_edit_rate_period(event, task_id, message_text)
+                    self.clear_user_state(user_id)
+                    # Send new message instead of editing
+                    await self.send_rate_limit_settings(event, task_id)
+                return
 
         # Check if user is in authentication or task creation process (old system)
         state_data = self.db.get_conversation_state(user_id)
@@ -2140,7 +3453,7 @@ class SimpleTelegramBot:
             state_data = (state, data)
 
             # Handle authentication states
-            if state in ['waiting_phone', 'waiting_code', 'waiting_password']:
+            if state in ['waiting_phone', 'waiting_code', 'waiting_password', 'waiting_session']:
                 await self.handle_auth_message(event, state_data)
                 return
 
@@ -2153,12 +3466,49 @@ class SimpleTelegramBot:
                     await self.handle_add_source_target(event, state_data)
                 except Exception as e:
                     logger.error(f"خطأ في معالجة إضافة مصدر/هدف للمستخدم {user_id}: {e}")
-                    await event.respond(
+                    message_text = (
                         "❌ حدث خطأ أثناء إضافة المصدر/الهدف\n\n"
                         "حاول مرة أخرى أو اضغط /start للعودة للقائمة الرئيسية"
                     )
+                    await self.edit_or_send_message(event, message_text)
                     self.db.clear_conversation_state(user_id)
                 return
+            # Handle channels management states (single/multiple add)
+            elif state == 'waiting_channel_link':
+                try:
+                    # Process a single channel link/id/user name
+                    added = await self.channels_management.process_channel_link(event, message_text.strip())
+                    # Clear state regardless to avoid being stuck
+                    self.db.clear_conversation_state(user_id)
+                    if added:
+                        # Show updated channels list
+                        await self.list_channels(event)
+                    return
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة رابط القناة للمستخدم {user_id}: {e}")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء إضافة القناة. حاول مرة أخرى.")
+                    self.db.clear_conversation_state(user_id)
+                    return
+            elif state == 'waiting_multiple_channels':
+                try:
+                    added = await self.channels_management.process_channel_link(event, message_text.strip())
+                    # Reload current state data from DB to ensure consistency
+                    refreshed = self.db.get_conversation_state(user_id)
+                    try:
+                        refreshed_data = json.loads(refreshed[1]) if refreshed and refreshed[1] else {}
+                    except Exception:
+                        refreshed_data = {}
+                    if added:
+                        channels_list = refreshed_data.get('channels', [])
+                        channels_list.append(added)
+                        refreshed_data['channels'] = channels_list
+                        self.db.set_conversation_state(user_id, 'waiting_multiple_channels', json.dumps(refreshed_data))
+                        await event.answer("✅ تم إضافة القناة. أرسل رابطاً آخر أو اضغط 'إنهاء الإضافة'.")
+                    return
+                except Exception as e:
+                    logger.error(f"خطأ في إضافة قنوات متعددة للمستخدم {user_id}: {e}")
+                    await event.answer("❌ حدث خطأ أثناء إضافة القناة.")
+                    return
             elif state == 'adding_multiple_words': # Handle adding multiple words state
                 await self.handle_adding_multiple_words(event, state_data)
                 return
@@ -2176,7 +3526,7 @@ class SimpleTelegramBot:
                         await self.handle_watermark_text_input(event, task_id)
                 except Exception as e:
                     logger.error(f"خطأ في معالجة إدخال نص العلامة المائية: {e}")
-                    await event.respond("❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ، يرجى المحاولة مرة أخرى")
                     self.clear_user_state(user_id)
                 return
             elif state.startswith('watermark_image_input_'): # Handle watermark image input
@@ -2190,7 +3540,7 @@ class SimpleTelegramBot:
                         await self.handle_watermark_image_input(event, task_id)
                 except Exception as e:
                     logger.error(f"خطأ في معالجة إدخال صورة العلامة المائية: {e}")
-                    await event.respond("❌ حدث خطأ، يرجى المحاولة مرة أخرى")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ، يرجى المحاولة مرة أخرى")
                     self.clear_user_state(user_id)
                 return
             elif state == 'waiting_watermark_size': # Handle setting watermark size
@@ -2209,6 +3559,7 @@ class SimpleTelegramBot:
                 task_id = int(data)
                 await self.handle_watermark_setting_input(event, task_id, 'color', event.text)
                 return
+
             elif state == 'waiting_text_replacements': # Handle adding text replacements
                 task_id = int(data)
                 await self.handle_add_replacements(event, task_id, event.text)
@@ -2229,14 +3580,7 @@ class SimpleTelegramBot:
                 task_id = int(data)
                 await self.handle_edit_character_range(event, task_id, event.text)
                 return
-            elif state == 'editing_rate_count': # Handle rate count editing
-                task_id = int(data)
-                await self.handle_edit_rate_count(event, task_id, event.text)
-                return
-            elif state == 'editing_rate_period': # Handle rate period editing
-                task_id = int(data)
-                await self.handle_edit_rate_period(event, task_id, event.text)
-                return
+
             elif state == 'editing_forwarding_delay': # Handle forwarding delay editing
                 task_id = int(data)
                 await self.handle_edit_forwarding_delay(event, task_id, event.text)
@@ -2255,7 +3599,11 @@ class SimpleTelegramBot:
                 return
             elif state == 'add_language': # Handle adding language filter
                 task_id = data.get('task_id')
-                await self.handle_add_language_filter(event, task_id, event.text)
+                await self.handle_add_language_filter(event, task_id, message_text)
+                return
+            elif state == 'waiting_language_filter': # Handle adding language filter
+                task_id = int(data)
+                await self.handle_add_language_filter(event, task_id, message_text)
                 return
             elif state == 'waiting_hyperlink_settings': # Handle editing hyperlink settings
                 task_id = data.get('task_id')
@@ -2277,14 +3625,20 @@ class SimpleTelegramBot:
                         if success:
                             # Clear conversation state
                             del self.conversation_states[user_id]
-                            await event.respond(f"✅ تم تحديد نسبة التشابه إلى {threshold}%")
+                            # Force refresh UserBot tasks
+                            await self._refresh_userbot_tasks(user_id)
+                            # Send success message and then show settings
+                            await self.edit_or_send_message(event, f"✅ تم تحديد نسبة التشابه إلى {threshold}%")
+                            # Show settings after brief delay
+                            import asyncio
+                            await asyncio.sleep(1.5)
                             await self.show_duplicate_settings(event, task_id)
                         else:
-                            await event.respond("❌ فشل في تحديث نسبة التشابه")
+                            await self.edit_or_send_message(event, "❌ فشل في تحديث نسبة التشابه")
                     else:
-                        await event.respond("❌ يرجى إدخال نسبة من 1 إلى 100")
+                        await self.edit_or_send_message(event, "❌ يرجى إدخال نسبة من 1 إلى 100")
                 except ValueError:
-                    await event.respond("❌ يرجى إدخال رقم صحيح للنسبة")
+                    await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح للنسبة")
                 return
                 
             elif state == 'set_duplicate_time':
@@ -2296,14 +3650,20 @@ class SimpleTelegramBot:
                         if success:
                             # Clear conversation state
                             del self.conversation_states[user_id]
-                            await event.respond(f"✅ تم تحديد النافذة الزمنية إلى {hours} ساعة")
+                            # Force refresh UserBot tasks
+                            await self._refresh_userbot_tasks(user_id)
+                            # Send success message and then show settings
+                            await self.edit_or_send_message(event, f"✅ تم تحديد النافذة الزمنية إلى {hours} ساعة")
+                            # Show settings after brief delay
+                            import asyncio
+                            await asyncio.sleep(1.5)
                             await self.show_duplicate_settings(event, task_id)
                         else:
-                            await event.respond("❌ فشل في تحديث النافذة الزمنية")
+                            await self.edit_or_send_message(event, "❌ فشل في تحديث النافذة الزمنية")
                     else:
-                        await event.respond("❌ يرجى إدخال عدد ساعات من 1 إلى 168 (أسبوع)")
+                        await self.edit_or_send_message(event, "❌ يرجى إدخال عدد ساعات من 1 إلى 168 (أسبوع)")
                 except ValueError:
-                    await event.respond("❌ يرجى إدخال رقم صحيح للساعات")
+                    await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح للساعات")
                 return
 
         # Check if this chat is a target chat for any active forwarding task
@@ -2347,7 +3707,8 @@ class SimpleTelegramBot:
 
         # Default response only if not a target chat and not forwarded and in private chat
         if event.is_private:
-            await event.respond("👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
+            # Use force_new_message to ensure we always show the main menu
+            await self.force_new_message(event, "👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
         else:
             logger.info(f"🚫 تجاهل الرد التلقائي في محادثة غير خاصة: {event.chat_id}")
 
@@ -2414,8 +3775,9 @@ class SimpleTelegramBot:
             [Button.inline(f"📄 رأس الرسالة {header_status}", f"header_settings_{task_id}"),
              Button.inline(f"📝 ذيل الرسالة {footer_status}", f"footer_settings_{task_id}")],
             
-            # الصف الثامن - العلامة المائية
-            [Button.inline(f"🏷️ العلامة المائية {watermark_status}", f"watermark_settings_{task_id}")],
+            # الصف الثامن - العلامة المائية والوسوم الصوتية
+            [Button.inline(f"🏷️ العلامة المائية {watermark_status}", f"watermark_settings_{task_id}"),
+             Button.inline("🎵 الوسوم الصوتية", f"audio_metadata_settings_{task_id}")],
             
             # الصف التاسع - الفلاتر والميزات المتقدمة
             [Button.inline("🔍 الفلاتر المتقدمة", f"advanced_filters_{task_id}"),
@@ -2425,16 +3787,17 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع لتفاصيل المهمة", f"task_manage_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"⚙️ إعدادات المهمة: {task_name}\n\n"
             f"📋 الإعدادات الحالية:\n"
             f"• وضع التوجيه: {forward_mode_text}\n"
             f"• عدد المصادر: {sources_count}\n"
             f"• عدد الأهداف: {targets_count}\n"
             f"• فلاتر الوسائط: متاحة\n\n"
-            f"اختر الإعداد الذي تريد تعديله:",
-            buttons=buttons
+            f"اختر الإعداد الذي تريد تعديله:"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_forward_mode(self, event, task_id):
         """Toggle forward mode between copy and forward"""
@@ -2507,7 +3870,8 @@ class SimpleTelegramBot:
                         message += f"{i}. {chat_name}\n\n"
 
         buttons = [
-            [Button.inline("➕ إضافة مصدر", f"add_source_{task_id}")]
+            [Button.inline("➕ إضافة مصدر", f"add_source_{task_id}"),
+             Button.inline("🧭 اختيار من القنوات", f"choose_add_sources_{task_id}")]
         ]
 
         # Add remove buttons for each source (max 8 buttons per row due to Telegram limits)
@@ -2521,7 +3885,7 @@ class SimpleTelegramBot:
 
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
-        await event.edit(message, buttons=buttons, parse_mode='Markdown')
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def manage_task_targets(self, event, task_id):
         """Manage task targets"""
@@ -2563,7 +3927,8 @@ class SimpleTelegramBot:
                         message += f"{i}. {chat_name}\n\n"
 
         buttons = [
-            [Button.inline("➕ إضافة هدف", f"add_target_{task_id}")]
+            [Button.inline("➕ إضافة هدف", f"add_target_{task_id}"),
+             Button.inline("🧭 اختيار من القنوات", f"choose_add_targets_{task_id}")]
         ]
 
         # Add remove buttons for each target (max 8 buttons per row due to Telegram limits)
@@ -2577,7 +3942,7 @@ class SimpleTelegramBot:
 
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def start_add_source(self, event, task_id):
         """Start adding source to task"""
@@ -2600,16 +3965,17 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"manage_sources_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             "➕ إضافة مصدر جديد\n\n"
             "أرسل معرف أو رابط المجموعة/القناة المراد إضافتها كمصدر:\n\n"
             "أمثلة:\n"
             "• @channelname\n"
             "• https://t.me/channelname\n"
             "• -1001234567890\n\n"
-            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات قراءة الرسائل",
-            buttons=buttons
+            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات قراءة الرسائل"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def start_add_target(self, event, task_id):
         """Start adding target to task"""
@@ -2632,16 +3998,17 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"manage_targets_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             "➕ إضافة هدف جديد\n\n"
             "أرسل معرف أو رابط المجموعة/القناة المراد إضافتها كهدف:\n\n"
             "أمثلة:\n"
             "• @channelname\n"
             "• https://t.me/channelname\n"
             "• -1001234567890\n\n"
-            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات إرسال الرسائل",
-            buttons=buttons
+            "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات إرسال الرسائل"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def remove_source(self, event, source_id, task_id):
         """Remove source from task"""
@@ -2733,14 +4100,15 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"⏰ **فلتر ساعات العمل** - المهمة #{task_id}\n\n"
             f"📊 **الحالة:** {status_text}\n"
             f"⚙️ **الوضع:** {mode_text}\n"
             f"🕐 **الساعات النشطة:** {active_hours}/24\n\n"
-            f"💡 **الوصف:** {mode_description}",
-            buttons=buttons
+            f"💡 **الوصف:** {mode_description}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_working_hours(self, event, task_id):
         """Show working hours schedule interface"""
@@ -2798,14 +4166,15 @@ class SimpleTelegramBot:
         import time
         timestamp = int(time.time()) % 100
         
-        await event.edit(
+        message_text = (
             f"🕐 **جدولة ساعات العمل** - المهمة #{task_id}\n\n"
             f"⚙️ **الوضع:** {'🏢 ساعات العمل' if mode == 'work_hours' else '😴 ساعات النوم'}\n\n"
             f"{description}\n\n"
             f"اضغط على الساعة لتبديل حالتها:\n"
-            f"⏰ آخر تحديث: {timestamp}",
-            buttons=buttons
+            f"⏰ آخر تحديث: {timestamp}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
 
 
@@ -2950,15 +4319,18 @@ class SimpleTelegramBot:
         current_settings = self.db.get_duplicate_settings(task_id)
         current_threshold = current_settings.get('similarity_threshold', 80)
         
-        await event.edit(
+        message_text = (
             f"📏 تحديد نسبة التشابه - المهمة #{task_id}\n\n"
             f"📊 النسبة الحالية: {current_threshold}%\n\n"
             f"💡 أدخل نسبة التشابه المطلوبة (من 1 إلى 100):\n"
             f"• نسبة عالية (90-100%) = تطابق شبه تام\n"
             f"• نسبة متوسطة (60-89%) = تشابه كبير\n"
-            f"• نسبة منخفضة (1-59%) = تشابه بسيط",
-            buttons=[[Button.inline("❌ إلغاء", f"duplicate_settings_{task_id}")]]
+            f"• نسبة منخفضة (1-59%) = تشابه بسيط"
         )
+        
+        buttons = [[Button.inline("❌ إلغاء", f"duplicate_settings_{task_id}")]]
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def start_set_duplicate_time(self, event, task_id):
         """Start setting duplicate time window conversation"""
@@ -2979,15 +4351,18 @@ class SimpleTelegramBot:
         current_settings = self.db.get_duplicate_settings(task_id)
         current_time = current_settings.get('time_window_hours', 24)
         
-        await event.edit(
+        message_text = (
             f"⏱️ تحديد النافذة الزمنية - المهمة #{task_id}\n\n"
             f"📊 النافذة الحالية: {current_time} ساعة\n\n"
             f"💡 أدخل النافذة الزمنية بالساعات (من 1 إلى 168):\n"
             f"• 1-6 ساعات = مراقبة قصيرة المدى\n"
             f"• 24 ساعة = مراقبة يومية (افتراضي)\n"
-            f"• 168 ساعة = مراقبة أسبوعية",
-            buttons=[[Button.inline("❌ إلغاء", f"duplicate_settings_{task_id}")]]
+            f"• 168 ساعة = مراقبة أسبوعية"
         )
+        
+        buttons = [[Button.inline("❌ إلغاء", f"duplicate_settings_{task_id}")]]
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_language_filters(self, event, task_id):
         """Show language filter settings"""
@@ -3019,15 +4394,336 @@ class SimpleTelegramBot:
         import time
         timestamp = int(time.time()) % 100
         
-        await event.edit(
+        message_text = (
             f"🌍 فلتر اللغات - المهمة #{task_id}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"🗣️ عدد اللغات: {len(languages)}\n"
             f"⚙️ الوضع: {mode_text}\n\n"
             f"💡 هذا الفلتر يتحكم في الرسائل حسب لغة النص\n"
-            f"⏰ آخر تحديث: {timestamp}",
-            buttons=buttons
+            f"⏰ آخر تحديث: {timestamp}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def show_language_management(self, event, task_id):
+        """Show language management interface"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
+            return
+            
+        # Get current language filters
+        filter_settings = self.db.get_language_filters(task_id)
+        languages = filter_settings.get('languages', [])
+        mode = filter_settings.get('mode', 'allow')
+        
+        # Add timestamp to force UI refresh
+        import time
+        import random
+        timestamp = int(time.time() * 1000) % 10000 + random.randint(1, 999)
+        
+        if not languages:
+            message = (
+                f"🌍 إدارة اللغات - المهمة #{task_id}\n\n"
+                f"❌ لم يتم إضافة أي لغات بعد\n\n"
+                f"💡 استخدم الأزرار أدناه لإضافة اللغات المطلوبة\n"
+                f"⏰ آخر تحديث: {timestamp}"
+            )
+        else:
+            # Build language list with status
+            language_list = ""
+            selected_count = 0
+            for lang in languages:
+                is_selected = lang['is_allowed']
+                if is_selected:
+                    selected_count += 1
+                status_icon = "✅" if is_selected else "❌"
+                language_list += f"{status_icon} {lang['language_name']} ({lang['language_code']})\n"
+            
+            mode_text = "حظر المحددة" if mode == 'block' else "السماح للمحددة فقط"
+            
+            message = (
+                f"🌍 إدارة اللغات - المهمة #{task_id}\n\n"
+                f"📊 الوضع: {mode_text}\n"
+                f"🗂️ إجمالي اللغات: {len(languages)}\n"
+                f"✅ المفعلة: {selected_count}\n"
+                f"❌ المعطلة: {len(languages) - selected_count}\n\n"
+                f"📋 قائمة اللغات:\n"
+                f"{language_list}\n"
+                f"⏰ آخر تحديث: {timestamp}"
+            )
+        
+        # Create buttons
+        buttons = []
+        
+        # Language selection buttons (max 5 per row for readability)
+        if languages:
+            lang_buttons = []
+            for i, lang in enumerate(languages):
+                status_icon = "✅" if lang['is_allowed'] else "❌"
+                button_text = f"{status_icon} {lang['language_code'].upper()}"
+                callback_data = f"toggle_lang_selection_{task_id}_{lang['language_code']}"
+                lang_buttons.append(Button.inline(button_text, callback_data))
+                
+                # Add row every 5 buttons
+                if (i + 1) % 5 == 0 or i == len(languages) - 1:
+                    buttons.append(lang_buttons)
+                    lang_buttons = []
+        
+        # Management buttons
+        buttons.extend([
+            [Button.inline("➕ إضافة لغة جديدة", f"add_language_{task_id}")],
+            [Button.inline("🚀 إضافة سريعة", f"quick_add_languages_{task_id}")],
+        ])
+        
+        if languages:
+            buttons.append([
+                Button.inline("🗑️ حذف جميع اللغات", f"clear_all_languages_{task_id}")
+            ])
+        
+        buttons.append([
+            Button.inline("🔙 رجوع لفلتر اللغات", f"language_filters_{task_id}")
+        ])
+        
+        try:
+            await self.edit_or_send_message(event, message, buttons=buttons)
+        except Exception as refresh_error:
+            if "Content of the message was not modified" in str(refresh_error):
+                logger.debug("المحتوى لم يتغير، تجاهل الخطأ")
+            else:
+                logger.error(f"خطأ في تحديث واجهة إدارة اللغات: {refresh_error}")
+                raise refresh_error
+
+    async def show_quick_add_languages(self, event, task_id):
+        """Show quick language addition interface"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
+            return
+            
+        # Add timestamp to force UI refresh
+        import time
+        import random
+        timestamp = int(time.time() * 1000) % 10000 + random.randint(1, 999)
+        
+        # Get current languages
+        filter_settings = self.db.get_language_filters(task_id)
+        existing_languages = [lang['language_code'] for lang in filter_settings.get('languages', [])]
+        
+        message = (
+            f"🚀 إضافة سريعة للغات - المهمة #{task_id}\n\n"
+            f"📋 اختر اللغات المطلوبة من القائمة السريعة:\n\n"
+            f"⏰ آخر تحديث: {timestamp}"
+        )
+        
+        # Common languages list
+        common_languages = [
+            ('ar', 'العربية', '🇸🇦'),
+            ('en', 'English', '🇺🇸'),
+            ('es', 'Español', '🇪🇸'),
+            ('fr', 'Français', '🇫🇷'),
+            ('de', 'Deutsch', '🇩🇪'),
+            ('ru', 'Русский', '🇷🇺'),
+            ('zh', '中文', '🇨🇳'),
+            ('ja', '日本語', '🇯🇵'),
+            ('ko', '한국어', '🇰🇷'),
+            ('it', 'Italiano', '🇮🇹'),
+            ('pt', 'Português', '🇵🇹'),
+            ('hi', 'हिन्दी', '🇮🇳'),
+            ('tr', 'Türkçe', '🇹🇷'),
+            ('fa', 'فارسی', '🇮🇷'),
+            ('ur', 'اردو', '🇵🇰')
+        ]
+        
+        # Create buttons for languages
+        buttons = []
+        lang_buttons = []
+        
+        for i, (code, name, flag) in enumerate(common_languages):
+            # Check if language already exists
+            if code in existing_languages:
+                button_text = f"✅ {flag} {name}"
+                callback_data = f"quick_remove_lang_{task_id}_{code}_{name}"
+            else:
+                button_text = f"➕ {flag} {name}"
+                callback_data = f"quick_add_lang_{task_id}_{code}_{name}"
+            
+            lang_buttons.append(Button.inline(button_text, callback_data))
+            
+            # Add row every 2 buttons for better readability
+            if (i + 1) % 2 == 0 or i == len(common_languages) - 1:
+                buttons.append(lang_buttons)
+                lang_buttons = []
+        
+        # Add action buttons
+        buttons.extend([
+            [Button.inline("✨ إضافة لغة مخصصة", f"add_language_{task_id}")],
+            [Button.inline("🔙 رجوع لإدارة اللغات", f"manage_languages_{task_id}")]
+        ])
+        
+        try:
+            await self.edit_or_send_message(event, message, buttons=buttons)
+        except Exception as refresh_error:
+            if "Content of the message was not modified" in str(refresh_error):
+                logger.debug("المحتوى لم يتغير، تجاهل الخطأ")
+            else:
+                logger.error(f"خطأ في تحديث واجهة الإضافة السريعة للغات: {refresh_error}")
+                raise refresh_error
+
+    async def start_add_language(self, event, task_id):
+        """Start adding custom language"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
+            return
+        
+        # Set conversation state for adding language
+        self.db.set_conversation_state(user_id, 'waiting_language_filter', str(task_id))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"manage_languages_{task_id}")]
+        ]
+
+        message_text = (
+            f"➕ إضافة لغة جديدة - المهمة #{task_id}\n\n"
+            f"📝 أرسل كود اللغة واسمها بالشكل التالي:\n\n"
+            f"**أمثلة:**\n"
+            f"• `en English`\n"
+            f"• `ar العربية`\n"
+            f"• `fr Français`\n"
+            f"• `de Deutsch`\n\n"
+            f"💡 **تنسيق الإدخال:**\n"
+            f"`[كود اللغة] [اسم اللغة]`\n\n"
+            f"⚠️ **ملاحظة**: كود اللغة يجب أن يكون من 2-3 أحرف"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def quick_add_language(self, event, task_id, language_code, language_name):
+        """Quick add language from predefined list"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Add language with default allowed status
+            success = self.db.add_language_filter(task_id, language_code, language_name, True)
+            
+            if success:
+                await event.answer(f"✅ تم إضافة {language_name} ({language_code})")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the quick add languages display
+                await self.show_quick_add_languages(event, task_id)
+            else:
+                await event.answer(f"❌ فشل في إضافة {language_name}")
+                
+        except Exception as e:
+            logger.error(f"خطأ في الإضافة السريعة للغة: {e}")
+            await event.answer("❌ حدث خطأ أثناء إضافة اللغة")
+
+    async def quick_remove_language(self, event, task_id, language_code, language_name):
+        """Quick remove language from predefined list"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Remove language filter
+            success = self.db.remove_language_filter(task_id, language_code)
+            
+            if success:
+                await event.answer(f"✅ تم حذف {language_name} ({language_code})")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the quick add languages display
+                await self.show_quick_add_languages(event, task_id)
+            else:
+                await event.answer(f"❌ فشل في حذف {language_name}")
+                
+        except Exception as e:
+            logger.error(f"خطأ في حذف اللغة السريعة: {e}")
+            await event.answer("❌ حدث خطأ أثناء حذف اللغة")
+
+    async def toggle_language_selection(self, event, task_id, language_code):
+        """Toggle language selection status"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        try:
+            # Toggle language filter status
+            success = self.db.toggle_language_filter(task_id, language_code)
+            
+            if success:
+                await event.answer(f"✅ تم تحديث فلتر اللغة {language_code}")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the language management display
+                await self.show_language_management(event, task_id)
+            else:
+                await event.answer(f"❌ فشل في تحديث فلتر اللغة {language_code}")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل اللغة: {e}")
+            await event.answer("❌ حدث خطأ أثناء تحديث اللغة")
+
+    async def clear_all_languages(self, event, task_id):
+        """Clear all languages for a task"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current languages count
+            filter_settings = self.db.get_language_filters(task_id)
+            languages_count = len(filter_settings.get('languages', []))
+            
+            if languages_count == 0:
+                await event.answer("❌ لا توجد لغات لحذفها")
+                return
+                
+            # Clear all languages
+            success = self.db.clear_language_filters(task_id)
+            
+            if success:
+                await event.answer(f"✅ تم حذف {languages_count} لغة")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the language management display
+                await self.show_language_management(event, task_id)
+            else:
+                await event.answer("❌ فشل في حذف اللغات")
+                
+        except Exception as e:
+            logger.error(f"خطأ في حذف جميع اللغات: {e}")
+            await event.answer("❌ حدث خطأ أثناء حذف اللغات")
 
     async def show_admin_filters(self, event, task_id):
         """Show admin filter settings"""
@@ -3052,13 +4748,14 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"👥 فلتر المشرفين - المهمة #{task_id}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"👤 عدد المشرفين: {len(admins)}\n\n"
-            f"💡 هذا الفلتر يتحكم في الرسائل حسب صلاحيات المرسل",
-            buttons=buttons
+            f"💡 هذا الفلتر يتحكم في الرسائل حسب صلاحيات المرسل"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_duplicate_filter(self, event, task_id):
         """Show duplicate filter settings"""
@@ -3069,9 +4766,12 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
             
-        # Get current settings
+        # Get current settings from advanced filters
+        advanced_settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = advanced_settings.get('duplicate_filter_enabled', False)
+        
+        # Get duplicate specific settings
         settings = self.db.get_duplicate_settings(task_id)
-        is_enabled = settings.get('enabled', False)
         threshold = settings.get('similarity_threshold', 80)
         time_window = settings.get('time_window_hours', 24)
         check_text = settings.get('check_text', True)
@@ -3085,43 +4785,38 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"🔄 فلتر التكرار - المهمة #{task_id}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"📏 نسبة التشابه: {threshold}%\n"
             f"⏱️ النافذة الزمنية: {time_window} ساعة\n"
             f"📝 فحص النص: {'✅' if check_text else '❌'}\n"
             f"🎬 فحص الوسائط: {'✅' if check_media else '❌'}\n\n"
-            f"💡 هذا الفلتر يمنع توجيه الرسائل المتكررة",
-            buttons=buttons
+            f"💡 هذا الفلتر يمنع توجيه الرسائل المتكررة"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
-    async def show_forwarded_message_filter(self, event, task_id):
-        """Show forwarded message filter settings"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-            
+
+
+    async def _get_duplicate_settings_buttons(self, task_id):
+        """Get buttons for duplicate settings menu"""
         # Get current settings
-        settings = self.db.get_advanced_filters_settings(task_id)
-        is_enabled = settings.get('forwarded_message_filter_enabled', False)
-        
-        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        settings = self.db.get_duplicate_settings(task_id)
+        threshold = settings.get('similarity_threshold', 80)
+        time_window = settings.get('time_window_hours', 24)
+        check_text = settings.get('check_text', True)
+        check_media = settings.get('check_media', True)
         
         buttons = [
-            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_forwarded_message_filter_enabled_{task_id}")],
-            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+            [Button.inline(f"📏 نسبة التشابه ({threshold}%)", f"set_duplicate_threshold_{task_id}")],
+            [Button.inline(f"⏱️ النافذة الزمنية ({time_window}ساعة)", f"set_duplicate_time_{task_id}")],
+            [Button.inline(f"📝 فحص النص {'✅' if check_text else '❌'}", f"toggle_duplicate_text_{task_id}")],
+            [Button.inline(f"🎬 فحص الوسائط {'✅' if check_media else '❌'}", f"toggle_duplicate_media_{task_id}")],
+            [Button.inline("🔙 رجوع لفلتر التكرار", f"duplicate_filter_{task_id}")]
         ]
         
-        await event.edit(
-            f"↩️ فلتر الرسائل المعاد توجيهها - المهمة #{task_id}\n\n"
-            f"📊 الحالة: {status_text}\n\n"
-            f"💡 هذا الفلتر يحظر الرسائل المعاد توجيهها من قنوات أخرى",
-            buttons=buttons
-        )
+        return buttons
 
     async def show_duplicate_settings(self, event, task_id):
         """Show duplicate filter detailed settings"""
@@ -3151,16 +4846,17 @@ class SimpleTelegramBot:
         import time
         timestamp = int(time.time()) % 100
         
-        await event.edit(
+        message_text = (
             f"⚙️ إعدادات فلتر التكرار - المهمة #{task_id}\n\n"
             f"📏 نسبة التشابه: {threshold}%\n"
             f"⏱️ النافذة الزمنية: {time_window} ساعة\n"
             f"📝 فحص النص: {'مفعل' if check_text else 'معطل'}\n"
             f"🎬 فحص الوسائط: {'مفعل' if check_media else 'معطل'}\n\n"
             f"💡 اضبط هذه الإعدادات لتحكم أدق في كشف التكرار\n"
-            f"⏰ آخر تحديث: {timestamp}",
-            buttons=buttons
+            f"⏰ آخر تحديث: {timestamp}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_inline_button_block_mode(self, event, task_id):
         """Toggle inline button filter mode between block message and remove buttons"""
@@ -3176,7 +4872,7 @@ class SimpleTelegramBot:
             current_setting = self.db.get_inline_button_filter_setting(task_id)
             new_setting = not current_setting  # Toggle: False=remove buttons, True=block message
             
-            success = self.db.set_inline_button_filter_setting(task_id, new_setting)
+            success = self.db.set_inline_button_filter(task_id, new_setting)
             
             if success:
                 mode_text = "حظر الرسائل" if new_setting else "حذف الأزرار"
@@ -3194,92 +4890,38 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في تبديل وضع فلتر الأزرار الإنلاين: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
 
-    async def show_inline_button_filter(self, event, task_id):
-        """Show inline button filter settings"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-            
-        # Get current settings
-        settings = self.db.get_advanced_filters_settings(task_id)
-        is_enabled = settings.get('inline_button_filter_enabled', False)
-        button_setting = self.db.get_inline_button_filter_setting(task_id)
-        
-        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
-        mode_text = "حظر الرسائل" if button_setting else "حذف الأزرار"
-        
-        buttons = [
-            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_inline_button_filter_enabled_{task_id}")],
-            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_inline_block_{task_id}")],
-            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
-        ]
-        
-        # Add timestamp to force UI refresh
-        import time
-        timestamp = int(time.time()) % 100
-        
-        await event.edit(
-            f"🔘 فلتر الأزرار الإنلاين - المهمة #{task_id}\n\n"
-            f"📊 الحالة: {status_text}\n"
-            f"⚙️ الوضع: {mode_text}\n\n"
-            f"💡 هذا الفلتر يتحكم في الرسائل التي تحتوي على أزرار إنلاين\n"
-            f"⏰ آخر تحديث: {timestamp}",
-            buttons=buttons
-        )
 
-    async def show_forwarded_message_filter(self, event, task_id):
-        """Show forwarded message filter settings"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-            
-        # Get current settings
-        settings = self.db.get_advanced_filters_settings(task_id)
-        is_enabled = settings.get('forwarded_message_filter_enabled', False)
-        block_setting = self.db.get_forwarded_message_filter_setting(task_id)
-        
-        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
-        mode_text = "حظر الرسائل المُوجهة" if block_setting else "إزالة علامة التوجيه"
-        
-        buttons = [
-            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_forwarded_message_filter_enabled_{task_id}")],
-            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_forwarded_block_{task_id}")],
-            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
-        ]
-        
-        await event.edit(
-            f"↗️ فلتر الرسائل المُوجهة - المهمة #{task_id}\n\n"
-            f"📊 الحالة: {status_text}\n"
-            f"⚙️ الوضع: {mode_text}\n\n"
-            f"💡 هذا الفلتر يتحكم في الرسائل المُوجهة من مصادر أخرى",
-            buttons=buttons
-        )
+
+
 
     async def show_main_menu(self, event):
         """Show main menu"""
+        user_id = event.sender_id
+        
+        # Check UserBot status for status indicator
+        try:
+            from userbot_service.userbot import userbot_instance
+            is_userbot_running = user_id in userbot_instance.clients
+            userbot_status = "🟢 نشط" if is_userbot_running else "🟡 مطلوب فحص"
+        except:
+            userbot_status = "🔍 غير معروف"
+        
         buttons = [
             [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
+            [Button.inline("🔍 فحص حالة UserBot", b"check_userbot")],
             [Button.inline("⚙️ الإعدادات", b"settings")],
             [Button.inline("ℹ️ حول البوت", b"about")]
         ]
 
-        try:
-            await event.edit(
-                "🏠 القائمة الرئيسية\n\nاختر ما تريد فعله:",
-                buttons=buttons
-            )
-        except Exception as e:
-            # If edit fails, send new message
-            await event.respond(
-                "🏠 القائمة الرئيسية\n\nاختر ما تريد فعله:",
-                buttons=buttons
-            )
+        message_text = (
+            f"🏠 **القائمة الرئيسية**\n\n"
+            f"🤖 حالة النظام:\n"
+            f"• بوت التحكم: 🟢 نشط\n"
+            f"• UserBot: {userbot_status}\n\n"
+            f"اختر ما تريد فعله:"
+        )
+
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_tasks_menu(self, event):
         """Show tasks management menu"""
@@ -3289,21 +4931,23 @@ class SimpleTelegramBot:
         buttons = [
             [Button.inline("➕ إنشاء مهمة جديدة", b"create_task")],
             [Button.inline("📋 عرض المهام", b"list_tasks")],
+            [Button.inline("📺 إدارة القنوات", b"manage_channels")],
             [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
         ]
 
         tasks_count = len(tasks)
         active_count = len([t for t in tasks if t['is_active']])
 
-        await event.edit(
+        message_text = (
             f"📝 إدارة مهام التوجيه\n\n"
             f"📊 الإحصائيات:\n"
             f"• إجمالي المهام: {tasks_count}\n"
             f"• المهام النشطة: {active_count}\n"
             f"• المهام المتوقفة: {tasks_count - active_count}\n\n"
-            f"اختر إجراء:",
-            buttons=buttons
+            f"اختر إجراء:"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def start_create_task(self, event):
         """Start creating new task"""
@@ -3311,7 +4955,7 @@ class SimpleTelegramBot:
 
         # Check if user is authenticated
         if not self.db.is_user_authenticated(user_id):
-            await event.edit("❌ يجب تسجيل الدخول أولاً لإنشاء المهام")
+            await self.edit_or_send_message(event, "❌ يجب تسجيل الدخول أولاً لإنشاء المهام")
             return
 
         # Set conversation state
@@ -3321,13 +4965,14 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", b"manage_tasks")]
         ]
 
-        await event.edit(
+        message_text = (
             "➕ إنشاء مهمة توجيه جديدة\n\n"
             "🏷️ **الخطوة 1: تحديد اسم المهمة**\n\n"
             "أدخل اسماً لهذه المهمة (أو اضغط تخطي لاستخدام اسم افتراضي):\n\n"
-            "• اسم المهمة: (مثال: مهمة متابعة الأخبار)",
-            buttons=buttons
+            "• اسم المهمة: (مثال: مهمة متابعة الأخبار)"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
 
     async def list_tasks(self, event):
@@ -3336,7 +4981,7 @@ class SimpleTelegramBot:
 
         # Check if user is authenticated
         if not self.db.is_user_authenticated(user_id):
-            await event.edit("❌ يجب تسجيل الدخول أولاً لعرض المهام")
+            await self.edit_or_send_message(event, "❌ يجب تسجيل الدخول أولاً لعرض المهام")
             return
 
         tasks = self.db.get_user_tasks(user_id)
@@ -3347,12 +4992,13 @@ class SimpleTelegramBot:
                 [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
             ]
 
-            await event.edit(
+            message_text = (
                 "📋 قائمة المهام\n\n"
                 "❌ لا توجد مهام حالياً\n\n"
-                "أنشئ مهمتك الأولى للبدء!",
-                buttons=buttons
+                "أنشئ مهمتك الأولى للبدء!"
             )
+            
+            await self.edit_or_send_message(event, message_text, buttons=buttons)
             return
 
         # Build tasks list with full sources and targets info
@@ -3404,7 +5050,7 @@ class SimpleTelegramBot:
         buttons.append([Button.inline("➕ إنشاء مهمة جديدة", b"create_task")])
         buttons.append([Button.inline("🏠 القائمة الرئيسية", b"back_main")])
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def show_task_details(self, event, task_id):
         """Show task details"""
@@ -3487,16 +5133,17 @@ class SimpleTelegramBot:
             if len(targets) > 5:
                 targets_text += f"  ... و {len(targets) - 5} هدف آخر\n"
 
-        await event.edit(
+        message_text = (
             f"⚙️ تفاصيل المهمة #{task['id']}\n\n"
             f"🏷️ اسم المهمة: {task_name}\n"
             f"📊 الحالة: {status}\n"
             f"📋 وضع التوجيه: {forward_mode_text}\n\n"
             f"{sources_text}"
             f"{targets_text}\n"
-            f"📅 تاريخ الإنشاء: {task['created_at'][:16]}",
-            buttons=buttons
+            f"📅 تاريخ الإنشاء: {task['created_at'][:16]}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_task(self, event, task_id):
         """Toggle task status"""
@@ -3619,7 +5266,7 @@ class SimpleTelegramBot:
                 await self.handle_password_input(event, message_text, data)
         except Exception as e:
             logger.error(f"خطأ في معالجة رسالة المحادثة: {e}")
-            await event.respond("❌ حدث خطأ، حاول مرة أخرى")
+            await self.edit_or_send_message(event, "❌ حدث خطأ، حاول مرة أخرى")
             self.db.clear_conversation_state(user_id)
 
     async def handle_add_source_target(self, event, state_data):
@@ -3651,13 +5298,14 @@ class SimpleTelegramBot:
         logger.info(f"   Chat input: {chat_input}")
 
         if not task_id or not action:
-            await event.respond(
+            message_text = (
                 "❌ خطأ في البيانات، حاول مرة أخرى\n\n"
                 f"🔍 تفاصيل المشكلة:\n"
                 f"• معرف المهمة: {task_id}\n"
                 f"• الإجراء: {action}\n"
                 f"• الحالة: {state}"
             )
+            await self.edit_or_send_message(event, message_text)
             self.db.clear_conversation_state(user_id)
             return
 
@@ -3668,7 +5316,7 @@ class SimpleTelegramBot:
         chat_ids, chat_names = self.parse_chat_input(chat_input)
 
         if not chat_ids:
-            await event.respond(
+            message_text = (
                 "❌ تنسيق معرف المجموعة/القناة غير صحيح\n\n"
                 "استخدم أحد الأشكال التالية:\n"
                 "• @channelname\n"
@@ -3676,12 +5324,53 @@ class SimpleTelegramBot:
                 "• -1001234567890\n\n"
                 "لعدة معرفات، افصل بينها بفاصلة: @channel1, @channel2"
             )
+            await self.edit_or_send_message(event, message_text)
             return
 
         # Add each chat
         added_count = 0
         for i, chat_id in enumerate(chat_ids):
             chat_name = chat_names[i] if chat_names and i < len(chat_names) else None
+
+            # Try to resolve a better display name via UserBot (channel/group title or user's full name)
+            try:
+                from userbot_service.userbot import userbot_instance
+                if user_id in userbot_instance.clients:
+                    client = userbot_instance.clients[user_id]
+
+                    # Build lookup identifier for Telethon
+                    lookup = chat_id
+                    chat_id_str = str(chat_id)
+                    if isinstance(chat_id, str):
+                        if chat_id_str.startswith('-') and chat_id_str[1:].isdigit():
+                            lookup = int(chat_id_str)
+                        elif chat_id_str.isdigit():
+                            lookup = int(chat_id_str)
+                        else:
+                            # keep usernames like @name as-is
+                            lookup = chat_id_str
+                    else:
+                        # numeric provided
+                        lookup = int(chat_id)
+
+                    try:
+                        chat = await client.get_entity(lookup)
+                        resolved_name = getattr(chat, 'title', None)
+                        if not resolved_name:
+                            first_name = getattr(chat, 'first_name', None)
+                            last_name = getattr(chat, 'last_name', None)
+                            if first_name or last_name:
+                                resolved_name = ' '.join([n for n in [first_name, last_name] if n])
+                        if not resolved_name:
+                            resolved_name = getattr(chat, 'username', None)
+
+                        # Use resolved name if it's better than current
+                        if resolved_name and (not chat_name or str(chat_name).strip() in [None, '', chat_id_str.lstrip('@')]):
+                            chat_name = resolved_name
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             try:
                 if action == 'add_source':
@@ -3716,7 +5405,7 @@ class SimpleTelegramBot:
             except Exception as e:
                 logger.error(f"خطأ في تحديث مهام UserBot: {e}")
 
-            await event.respond(f"✅ تم إضافة {added_count} {plural} بنجاح!")
+            await self.edit_or_send_message(event, f"✅ تم إضافة {added_count} {plural} بنجاح!")
 
             # Return to appropriate management menu
             if action == 'add_source':
@@ -3724,7 +5413,7 @@ class SimpleTelegramBot:
             else:
                 await self.manage_task_targets(event, task_id)
         else:
-            await event.respond("❌ فشل في إضافة المدخلات")
+            await self.edit_or_send_message(event, "❌ فشل في إضافة المدخلات")
 
     async def handle_task_name(self, event, task_name):
         """Handle task name input"""
@@ -3753,24 +5442,17 @@ class SimpleTelegramBot:
         }
         self.db.set_conversation_state(user_id, 'waiting_source_chat', json.dumps(task_data))
 
-        buttons = [
-            [Button.inline("❌ إلغاء", b"manage_tasks")]
-        ]
-
-        await event.respond(
+        # Offer selection from added channels
+        buttons = [[Button.inline("🧭 اختيار من القنوات المضافة", b"choose_sources")],
+                   [Button.inline("❌ إلغاء", b"manage_tasks")]]
+        message_text = (
             f"✅ اسم المهمة: {task_name}\n\n"
             f"📥 **الخطوة 2: تحديد المصادر**\n\n"
-            f"أرسل معرفات أو روابط المجموعات/القنوات المصدر:\n\n"
-            f"🔹 **للمصدر الواحد:**\n"
-            f"• @channelname\n"
-            f"• https://t.me/channelname\n"
-            f"• -1001234567890\n\n"
-            f"🔹 **لعدة مصادر (مفصولة بفاصلة):**\n"
-            f"• @channel1, @channel2, @channel3\n"
-            f"• -1001234567890, -1001234567891\n\n"
-            f"⚠️ تأكد من أن البوت مضاف لجميع المجموعات/القنوات وله صلاحيات قراءة الرسائل",
-            buttons=buttons
+            f"يمكنك:\n"
+            f"• الضغط على 'اختيار من القنوات المضافة' لاختيار عدة قنوات\n"
+            f"• أو إرسال المعرفات/الروابط يدوياً كما تحب"
         )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_source_chat(self, event, chat_input):
         """Handle source chat input using database conversation state"""
@@ -3780,7 +5462,7 @@ class SimpleTelegramBot:
         source_chat_ids, source_chat_names = self.parse_chat_input(chat_input)
 
         if not source_chat_ids:
-            await event.respond(
+            message_text = (
                 "❌ تنسيق معرفات المجموعات/القنوات غير صحيح\n\n"
                 "استخدم أحد الأشكال التالية:\n"
                 "• @channelname\n"
@@ -3788,6 +5470,7 @@ class SimpleTelegramBot:
                 "• -1001234567890\n\n"
                 "لعدة مصادر، افصل بينها بفاصلة: @channel1, @channel2"
             )
+            await self.edit_or_send_message(event, message_text)
             return
 
         # Get existing task data (task name) from previous step
@@ -3810,10 +5493,11 @@ class SimpleTelegramBot:
         self.db.set_conversation_state(user_id, 'waiting_target_chat', json.dumps(task_data))
 
         buttons = [
+            [Button.inline("🧭 اختيار الأهداف من القنوات", b"choose_targets")],
             [Button.inline("❌ إلغاء", b"manage_tasks")]
         ]
 
-        await event.respond(
+        message_text = (
             f"✅ تم تحديد المصادر: {', '.join([str(name) for name in source_chat_names if name])}\n\n"
             f"📤 **الخطوة 3: تحديد الوجهة**\n\n"
             f"أرسل معرف أو رابط المجموعة/القناة المراد توجيه الرسائل إليها:\n\n"
@@ -3821,9 +5505,9 @@ class SimpleTelegramBot:
             f"• @targetchannel\n"
             f"• https://t.me/targetchannel\n"
             f"• -1001234567890\n\n"
-            f"⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات إرسال الرسائل",
-            buttons=buttons
+            f"⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات إرسال الرسائل"
         )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_target_chat(self, event, chat_input):
         """Handle target chat input using database conversation state"""
@@ -3833,7 +5517,7 @@ class SimpleTelegramBot:
         target_chat_ids, target_chat_names = self.parse_chat_input(chat_input)
 
         if not target_chat_ids:
-            await event.respond(
+            message_text = (
                 "❌ تنسيق معرفات المجموعات/القنوات غير صحيح\n\n"
                 "استخدم أحد الأشكال التالية:\n"
                 "• @channelname\n"
@@ -3841,12 +5525,13 @@ class SimpleTelegramBot:
                 "• -1001234567890\n\n"
                 "لعدة أهداف، افصل بينها بفاصلة: @channel1, @channel2"
             )
+            await self.edit_or_send_message(event, message_text)
             return
 
         # Get source chat data from database
         state_data = self.db.get_conversation_state(user_id)
         if not state_data:
-            await event.respond("❌ حدث خطأ، يرجى البدء من جديد")
+            await self.edit_or_send_message(event, "❌ حدث خطأ، يرجى البدء من جديد")
             return
 
         state, data_str = state_data
@@ -3875,10 +5560,10 @@ class SimpleTelegramBot:
                 # Ensure all source_chat_ids are strings
                 source_chat_ids = [str(chat_id) for chat_id in source_chat_ids]
             except:
-                await event.respond("❌ حدث خطأ في البيانات، يرجى البدء من جديد")
+                await self.edit_or_send_message(event, "❌ حدث خطأ في البيانات، يرجى البدء من جديد")
                 return
         else:
-            await event.respond("❌ لم يتم تحديد المصدر، يرجى البدء من جديد")
+            await self.edit_or_send_message(event, "❌ لم يتم تحديد المصدر، يرجى البدء من جديد")
             return
 
         # Create task in database with multiple sources and targets
@@ -3932,16 +5617,161 @@ class SimpleTelegramBot:
             [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
         ]
 
-        await event.respond(
+        message_text = (
             f"🎉 تم إنشاء المهمة بنجاح!\n\n"
             f"🆔 رقم المهمة: #{task_id}\n"
             f"🏷️ اسم المهمة: {task_name}\n"
             f"📥 المصادر: {', '.join([str(name) for name in (source_chat_names or source_chat_ids)])}\n"
             f"📤 الوجهة: {target_chat_name}\n"
             f"🟢 الحالة: نشطة\n\n"
-            f"✅ سيتم توجيه جميع الرسائل الجديدة تلقائياً",
-            buttons=buttons
+            f"✅ سيتم توجيه جميع الرسائل الجديدة تلقائياً"
         )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_choose_sources(self, event):
+        user_id = event.sender_id
+        # read user channels from channels management DB
+        channels = ChannelsDatabase(self.db).get_user_channels(user_id)
+        if not channels:
+            await event.answer("❌ لا توجد قنوات مضافة")
+            return
+        # store temporary selection in state
+        sel = {'mode': 'source', 'selected': []}
+        self.set_user_state(user_id, 'choosing_channels', sel)
+        await self.show_channel_chooser(event, channels, 'source')
+
+    async def start_choose_targets(self, event):
+        user_id = event.sender_id
+        channels = ChannelsDatabase(self.db).get_user_channels(user_id)
+        if not channels:
+            await event.answer("❌ لا توجد قنوات مضافة")
+            return
+        sel = {'mode': 'target', 'selected': []}
+        self.set_user_state(user_id, 'choosing_channels', sel)
+        await self.show_channel_chooser(event, channels, 'target')
+
+    async def start_choose_sources_for_task(self, event, task_id):
+        user_id = event.sender_id
+        channels = ChannelsDatabase(self.db).get_user_channels(user_id)
+        if not channels:
+            await event.answer("❌ لا توجد قنوات مضافة")
+            return
+        sel = {'mode': 'source_for_task', 'task_id': task_id, 'selected': []}
+        self.set_user_state(user_id, 'choosing_channels', sel)
+        await self.show_channel_chooser(event, channels, 'source')
+
+    async def start_choose_targets_for_task(self, event, task_id):
+        user_id = event.sender_id
+        channels = ChannelsDatabase(self.db).get_user_channels(user_id)
+        if not channels:
+            await event.answer("❌ لا توجد قنوات مضافة")
+            return
+        sel = {'mode': 'target_for_task', 'task_id': task_id, 'selected': []}
+        self.set_user_state(user_id, 'choosing_channels', sel)
+        await self.show_channel_chooser(event, channels, 'target')
+
+    async def show_channel_chooser(self, event, channels, selection_type: str):
+        user_id = event.sender_id
+        # Read current selection to reflect in UI
+        selected_now = set((self.get_user_data(user_id) or {}).get('selected') or [])
+
+        rows = []
+        for ch in channels[:30]:
+            chat_id = str(ch.get('chat_id'))
+            name = ch.get('chat_name') or chat_id
+            is_admin = ch.get('is_admin', False)
+            role_icon = "👑" if is_admin else "👤"
+            sel_icon = "✅" if chat_id in selected_now else "☐"
+            label = f"{sel_icon} {role_icon} {name}"
+            rows.append([Button.inline(label, f"toggle_sel_{selection_type}_" + chat_id)])
+
+        # Footer controls
+        rows.append([Button.inline("✅ إنهاء التحديد", f"finish_sel_{selection_type}")])
+
+        # Include a small summary so edits always differ when selection changes
+        count = len(selected_now)
+        title = "المصادر" if selection_type == 'source' else "الأهداف"
+        text = f"اختر {title}:\nالمختارة: {count}"
+        await self.edit_or_send_message(event, text, buttons=rows)
+
+    async def toggle_channel_selection(self, event, selection_type: str, chat_id: str):
+        user_id = event.sender_id
+        state_name = self.get_user_state(user_id)
+        if state_name != 'choosing_channels':
+            await event.answer("❌ لا توجد عملية اختيار نشطة")
+            return
+        data = self.get_user_data(user_id) or {}
+        selected = set(data.get('selected') or [])
+        if chat_id in selected:
+            selected.remove(chat_id)
+        else:
+            selected.add(chat_id)
+        data['selected'] = list(selected)
+        self.set_user_state(user_id, 'choosing_channels', data)
+        # Refresh chooser and force new message if edit would be identical
+        channels = ChannelsDatabase(self.db).get_user_channels(user_id)
+        await self.show_channel_chooser(event, channels, selection_type)
+
+    async def finish_channel_selection(self, event, selection_type: str):
+        user_id = event.sender_id
+        state_name = self.get_user_state(user_id)
+        if state_name != 'choosing_channels':
+            await event.answer("❌ لا توجد عملية اختيار نشطة")
+            return
+        data = self.get_user_data(user_id) or {}
+        selected_ids = data.get('selected') or []
+        if not selected_ids:
+            await event.answer("❌ لم يتم اختيار أي قناة")
+            return
+
+        # If during task creation
+        conv_state = self.db.get_conversation_state(user_id)
+        if conv_state:
+            st, payload = conv_state
+            try:
+                payload_json = json.loads(payload) if payload else {}
+            except Exception:
+                payload_json = {}
+
+            if st == 'waiting_source_chat' and selection_type == 'source':
+                payload_json['source_chat_ids'] = selected_ids
+                payload_json['source_chat_names'] = selected_ids
+                self.db.set_conversation_state(user_id, 'waiting_target_chat', json.dumps(payload_json))
+                # Show target selection options immediately
+                buttons = [
+                    [Button.inline("🧭 اختيار الأهداف من القنوات", b"choose_targets")],
+                    [Button.inline("❌ إلغاء", b"manage_tasks")]
+                ]
+                await self.edit_or_send_message(event, "✅ تم تحديد المصادر. الآن اختر/أرسل الأهداف.", buttons=buttons, force_new=True)
+                return
+            if st == 'waiting_target_chat' and selection_type == 'target':
+                source_ids = payload_json.get('source_chat_ids') or []
+                source_names = payload_json.get('source_chat_names') or source_ids
+                target_ids = selected_ids
+                target_names = selected_ids
+                task_name = payload_json.get('task_name', 'مهمة توجيه')
+                task_id = self.db.create_task_with_multiple_sources_targets(
+                    user_id, task_name, source_ids, source_names, target_ids, target_names
+                )
+                self.clear_user_state(user_id)
+                self.db.clear_conversation_state(user_id)
+                # Jump to task management panel
+                await self.show_task_details(event, task_id)
+                return
+
+        # If managing an existing task
+        mode = data.get('mode')
+        task_id = data.get('task_id')
+        if mode == 'source_for_task' and task_id:
+            for cid in selected_ids:
+                self.db.add_task_source(task_id, cid, cid)
+            await self.manage_task_sources(event, task_id)
+            return
+        if mode == 'target_for_task' and task_id:
+            for cid in selected_ids:
+                self.db.add_task_target(task_id, cid, cid)
+            await self.manage_task_targets(event, task_id)
+            return
 
     def parse_chat_input(self, chat_input: str) -> tuple:
         """Parse chat input and return chat_ids and names"""
@@ -4044,7 +5874,7 @@ class SimpleTelegramBot:
         
         media_display = " • ".join(media_settings) if media_settings else "لا يوجد"
 
-        await event.edit(
+        message_text = (
             f"🏷️ إعدادات العلامة المائية - المهمة #{task_id}\n\n"
             f"📊 **الحالة**: {status}\n"
             f"🎭 **النوع**: {type_display}\n"
@@ -4056,9 +5886,10 @@ class SimpleTelegramBot:
             f"• حجم الخط: {watermark_settings.get('font_size', 32)}px\n\n"
             f"🏷️ **الوظيفة**: إضافة علامة مائية نصية أو صورة على الوسائط المرسلة لحماية الحقوق\n\n"
             f"📝 **نص العلامة**: {watermark_settings.get('watermark_text', 'غير محدد')[:30]}{'...' if len(watermark_settings.get('watermark_text', '')) > 30 else ''}\n"
-            f"🖼️ **صورة العلامة**: {'محددة' if watermark_settings.get('watermark_image_path') else 'غير محددة'}",
-            buttons=buttons
+            f"🖼️ **صورة العلامة**: {'محددة' if watermark_settings.get('watermark_image_path') else 'غير محددة'}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_watermark(self, event, task_id):
         """Toggle watermark on/off"""
@@ -4128,7 +5959,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"🎨 إعدادات مظهر العلامة المائية - المهمة #{task_id}\n\n"
             f"📏 **الحجم الحالي**: {size}% (المدى: 5-100%)\n"
             f"🌫️ **الشفافية**: {opacity}% (المدى: 10-100%)\n"
@@ -4140,9 +5971,10 @@ class SimpleTelegramBot:
             f"🎛️ **الإزاحة اليدوية**: تحريك العلامة المائية بدقة من موقعها الأساسي\n"
             f"🔧 **التحكم**: استخدم الأزرار أعلاه لتعديل الإعدادات\n"
             f"🔺 زيادة القيمة / ⬅️➡️⬆️⬇️ التحريك\n"
-            f"🔻 تقليل القيمة",
-            buttons=buttons
+            f"🔻 تقليل القيمة"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def adjust_watermark_size(self, event, task_id, increase=True):
         """Adjust watermark size"""
@@ -4278,12 +6110,13 @@ class SimpleTelegramBot:
         
         buttons.append([Button.inline("🔙 عودة لإعدادات المظهر", f"watermark_appearance_{task_id}")])
         
-        await event.edit(
+        message_text = (
             f"📍 اختيار موقع العلامة المائية - المهمة #{task_id}\n\n"
             f"الموقع الحالي: {position_map.get(current_position, current_position)}\n\n"
-            f"اختر الموقع المطلوب:",
-            buttons=buttons
+            f"اختر الموقع المطلوب:"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def set_watermark_position(self, event, task_id, position):
         """Set watermark position"""
@@ -4318,14 +6151,15 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"🎭 نوع العلامة المائية - المهمة #{task_id}\n\n"
             f"اختر نوع العلامة المائية:\n\n"
             f"📝 **نص**: إضافة نص مخصص\n"
             f"🖼️ **صورة**: استخدام صورة PNG شفافة\n\n"
-            f"النوع الحالي: {'📝 نص' if current_type == 'text' else '🖼️ صورة'}",
-            buttons=buttons
+            f"النوع الحالي: {'📝 نص' if current_type == 'text' else '🖼️ صورة'}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_watermark_media_types(self, event, task_id):
         """Show watermark media type selection"""
@@ -4342,15 +6176,16 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"📱 أنواع الوسائط للعلامة المائية - المهمة #{task_id}\n\n"
             f"اختر أنواع الوسائط التي تريد تطبيق العلامة المائية عليها:\n\n"
             f"📷 **الصور**: JPG, PNG, WebP\n"
             f"🎥 **الفيديوهات**: MP4, AVI, MOV\n"
             f"📄 **المستندات**: ملفات الصور المرسلة كمستندات\n\n"
-            f"✅ = مفعل  |  ❌ = معطل",
-            buttons=buttons
+            f"✅ = مفعل  |  ❌ = معطل"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def set_watermark_type(self, event, task_id, watermark_type):
         """Set watermark type (text or image)"""
@@ -4368,21 +6203,23 @@ class SimpleTelegramBot:
     async def start_watermark_text_input(self, event, task_id):
         """Start watermark text input process"""
         self.set_user_state(event.sender_id, f'watermark_text_input_{task_id}', {'task_id': task_id})
-        await event.edit(
+        message_text = (
             f"📝 إدخال نص العلامة المائية - المهمة #{task_id}\n\n"
             f"أرسل النص الذي تريد استخدامه كعلامة مائية:\n\n"
             f"💡 **ملاحظات**:\n"
             f"• يمكنك استخدام النصوص العربية والإنجليزية\n"
             f"• تجنب النصوص الطويلة جداً\n"
             f"• يمكنك تعديل اللون والحجم من إعدادات المظهر\n\n"
-            f"أرسل /cancel للإلغاء",
-            buttons=[[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
+            f"أرسل /cancel للإلغاء"
         )
+        
+        buttons = [[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def start_watermark_image_input(self, event, task_id):
         """Start watermark image input process"""
         self.set_user_state(event.sender_id, f'watermark_image_input_{task_id}', {'task_id': task_id})
-        await event.edit(
+        message_text = (
             f"🖼️ رفع صورة العلامة المائية - المهمة #{task_id}\n\n"
             f"أرسل الصورة التي تريد استخدامها كعلامة مائية:\n\n"
             f"📋 **طرق الإرسال المدعومة**:\n"
@@ -4395,16 +6232,18 @@ class SimpleTelegramBot:
             f"⚙️ **المتطلبات**:\n"
             f"• حجم أقل من 10 ميجابايت\n"
             f"• وضوح جيد للنتيجة المطلوبة\n\n"
-            f"أرسل /cancel للإلغاء",
-            buttons=[[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
+            f"أرسل /cancel للإلغاء"
         )
+        
+        buttons = [[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_watermark_text_input(self, event, task_id):
         """Handle watermark text input"""
         text = event.message.text.strip()
         
         if not text:
-            await event.respond("❌ يرجى إرسال نص صالح للعلامة المائية.")
+            await self.edit_or_send_message(event, "❌ يرجى إرسال نص صالح للعلامة المائية.")
             return
         
         # Update watermark settings with the text
@@ -4413,13 +6252,18 @@ class SimpleTelegramBot:
         # Clear user state
         self.clear_user_state(event.sender_id)
         
-        await event.respond(
+        message_text = (
             f"✅ تم حفظ نص العلامة المائية بنجاح!\n\n"
             f"📝 **النص المحفوظ**: {text}\n\n"
-            f"يمكنك الآن تعديل إعدادات المظهر من قائمة العلامة المائية.",
-            buttons=[[Button.inline("🎨 إعدادات المظهر", f"watermark_appearance_{task_id}")],
-                     [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]]
+            f"يمكنك الآن تعديل إعدادات المظهر من قائمة العلامة المائية."
         )
+        
+        buttons = [
+            [Button.inline("🎨 إعدادات المظهر", f"watermark_appearance_{task_id}")],
+            [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
+        ]
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_watermark_image_input(self, event, task_id):
         """Handle watermark image input (supports both photos and documents)"""
@@ -4429,7 +6273,7 @@ class SimpleTelegramBot:
         
         # Check if it's a photo or a document (file)
         if not media and not document and not photo:
-            await event.respond("❌ يرجى إرسال صورة أو ملف PNG للعلامة المائية.")
+            await self.edit_or_send_message(event, "❌ يرجى إرسال صورة أو ملف PNG للعلامة المائية.")
             return
         
         # Validate file type if it's a document
@@ -4445,7 +6289,7 @@ class SimpleTelegramBot:
             is_valid_mime = mime_type in valid_mime_types
             
             if not is_valid_extension and not is_valid_mime:
-                await event.respond(
+                await self.edit_or_send_message(event, 
                     "❌ نوع الملف غير مدعوم!\n\n"
                     "📋 **الصيغ المدعومة**:\n"
                     "• PNG (مُفضل للخلفية الشفافة)\n"
@@ -4458,7 +6302,7 @@ class SimpleTelegramBot:
                 
             # Check file size (limit to 10MB)
             if hasattr(document, 'size') and document.size > 10 * 1024 * 1024:
-                await event.respond("❌ حجم الملف كبير جداً! الحد الأقصى 10 ميجابايت.")
+                await self.edit_or_send_message(event, "❌ حجم الملف كبير جداً! الحد الأقصى 10 ميجابايت.")
                 return
         
         try:
@@ -4481,7 +6325,7 @@ class SimpleTelegramBot:
             )
             
             if not file_path:
-                await event.respond("❌ فشل في تحميل الصورة.")
+                await self.edit_or_send_message(event, "❌ فشل في تحميل الصورة.")
                 return
             
             # Verify the downloaded file is actually an image
@@ -4498,7 +6342,7 @@ class SimpleTelegramBot:
                     os.remove(file_path)
                 except:
                     pass
-                await event.respond(
+                await self.edit_or_send_message(event,
                     "❌ الملف المُرسل ليس صورة صالحة!\n\n"
                     "يرجى إرسال صورة بصيغة PNG، JPG، أو أي صيغة صورة مدعومة."
                 )
@@ -4512,21 +6356,26 @@ class SimpleTelegramBot:
             
             file_type_display = "📄 ملف PNG" if file_path.lower().endswith('.png') else "📷 صورة"
             
-            await event.respond(
+            message_text = (
                 f"✅ تم رفع صورة العلامة المائية بنجاح!\n\n"
                 f"📁 **اسم الملف**: {os.path.basename(file_path)}\n"
                 f"🎭 **نوع الملف**: {file_type_display}\n"
                 f"📏 **الحجم**: {width}x{height} بكسل\n"
                 f"📋 **الصيغة**: {format_name}\n\n"
                 f"💡 **ملاحظة**: صيغة PNG توفر أفضل جودة مع دعم الشفافية\n\n"
-                f"يمكنك الآن تعديل إعدادات المظهر من قائمة العلامة المائية.",
-                buttons=[[Button.inline("🎨 إعدادات المظهر", f"watermark_appearance_{task_id}")],
-                         [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]]
+                f"يمكنك الآن تعديل إعدادات المظهر من قائمة العلامة المائية."
             )
+            
+            buttons = [
+                [Button.inline("🎨 إعدادات المظهر", f"watermark_appearance_{task_id}")],
+                [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
+            ]
+            
+            await self.edit_or_send_message(event, message_text, buttons=buttons)
             
         except Exception as e:
             logger.error(f"خطأ في معالجة صورة العلامة المائية: {e}")
-            await event.respond(
+            await self.edit_or_send_message(event,
                 "❌ حدث خطأ في رفع الصورة\n\n"
                 "يرجى التأكد من:\n"
                 "• الملف هو صورة صالحة\n"
@@ -4583,13 +6432,43 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", b"cancel_auth")]
         ]
 
-        await event.edit(
+        message_text = (
             "📱 تسجيل الدخول\n\n"
             "أرسل رقم هاتفك مع رمز البلد:\n"
             "مثال: +966501234567\n\n"
-            "⚠️ تأكد من صحة الرقم",
-            buttons=buttons
+            "⚠️ تأكد من صحة الرقم"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_session_login(self, event):
+        """Start session-based login process"""
+        user_id = event.sender_id
+
+        # Save conversation state in database
+        self.db.set_conversation_state(user_id, 'waiting_session', json.dumps({}))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", b"cancel_auth")]
+        ]
+
+        message_text = (
+            "🔑 تسجيل الدخول بجلسة جاهزة\n\n"
+            "📋 **كيفية الحصول على الجلسة**:\n"
+            "• استخدم @SessionStringBot\n"
+            "• أو استخدم @StringSessionBot\n"
+            "• أو استخدم @UseTGXBot\n\n"
+            "📝 **أرسل الجلسة الآن**:\n"
+            "• انسخ الجلسة من البوت\n"
+            "• أرسلها هنا\n"
+            "• مثال: 1BQANOTEz...\n\n"
+            "⚠️ **تحذير**:\n"
+            "• لا تشارك الجلسة مع أحد\n"
+            "• احتفظ بها آمنة\n"
+            "• الجلسة تمنح الوصول الكامل لحسابك"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def start_login(self, event): # New function for login button
         """Start login process"""
@@ -4597,12 +6476,15 @@ class SimpleTelegramBot:
         session_data = self.db.get_user_session(user_id)
 
         if session_data and len(session_data) >= 2 and session_data[2]: # Check for session string
-            await event.edit("🔄 أنت مسجل دخولك بالفعل.\n"
-                             "هل تريد تسجيل الخروج وإعادة تسجيل الدخول؟",
-                             buttons=[
-                                 [Button.inline("✅ نعم، إعادة تسجيل الدخول", b"auth_phone")],
-                                 [Button.inline("❌ لا، العودة للإعدادات", b"settings")]
-                             ])
+            message_text = (
+                "🔄 أنت مسجل دخولك بالفعل.\n"
+                "هل تريد تسجيل الخروج وإعادة تسجيل الدخول؟"
+            )
+            buttons = [
+                [Button.inline("✅ نعم، إعادة تسجيل الدخول", b"auth_phone")],
+                [Button.inline("❌ لا، العودة للإعدادات", b"settings")]
+            ]
+            await self.edit_or_send_message(event, message_text, buttons=buttons)
         else:
             await self.start_auth(event) # If no session, start normal authentication
 
@@ -4617,10 +6499,11 @@ class SimpleTelegramBot:
         self.db.clear_conversation_state(user_id)
 
         # Start fresh authentication
-        await event.edit(
+        message_text = (
             "🔄 تم تسجيل الخروج من الجلسة السابقة\n\n"
             "📱 سيتم بدء عملية تسجيل دخول جديدة..."
         )
+        await self.edit_or_send_message(event, message_text)
 
         # Small delay for better UX
         import asyncio
@@ -4642,12 +6525,15 @@ class SimpleTelegramBot:
                 await self.handle_code_input(event, message_text, data)
             elif state == 'waiting_password':
                 await self.handle_password_input(event, message_text, data)
+            elif state == 'waiting_session':
+                await self.handle_session_input(event, message_text)
         except Exception as e:
             logger.error(f"خطأ في التسجيل للمستخدم {user_id}: {e}")
-            await event.respond(
+            message_text = (
                 "❌ حدث خطأ أثناء التسجيل. حاول مرة أخرى.\n"
                 "اضغط /start للبدء من جديد."
             )
+            await self.edit_or_send_message(event, message_text)
             self.db.clear_conversation_state(user_id)
 
     async def handle_phone_input(self, event, phone: str):
@@ -4660,13 +6546,13 @@ class SimpleTelegramBot:
                 [Button.inline("❌ إلغاء", b"cancel_auth")]
             ]
 
-            await event.respond(
+            message_text = (
                 "❌ تنسيق رقم الهاتف غير صحيح\n\n"
                 "📞 يجب أن يبدأ الرقم بـ + ويكون بالتنسيق الدولي\n"
                 "مثال: +966501234567\n\n"
-                "أرسل رقم الهاتف مرة أخرى:",
-                buttons=buttons
+                "أرسل رقم الهاتف مرة أخرى:"
             )
+            await self.edit_or_send_message(event, message_text, buttons=buttons)
             return
 
         # Create temporary Telegram client for authentication
@@ -4700,21 +6586,22 @@ class SimpleTelegramBot:
                 [Button.inline("❌ إلغاء", b"cancel_auth")]
             ]
 
-            await event.respond(
+            message_text = (
                 f"✅ تم إرسال رمز التحقق إلى {phone}\n\n"
                 f"🔢 أرسل الرمز المكون من 5 أرقام:\n"
                 f"• يمكن إضافة حروف لتجنب حظر تليجرام: aa12345\n"
                 f"• أو إرسال الأرقام مباشرة: 12345\n\n"
-                f"⏰ انتظر بضع ثواني حتى يصل الرمز",
-                buttons=buttons
+                f"⏰ انتظر بضع ثواني حتى يصل الرمز"
             )
+            await self.edit_or_send_message(event, message_text, buttons=buttons)
 
         except asyncio.TimeoutError:
             logger.error("مهلة زمنية في إرسال الرمز")
-            await event.respond(
+            message_text = (
                 "❌ مهلة زمنية في الاتصال\n\n"
                 "🌐 تأكد من اتصالك بالإنترنت وحاول مرة أخرى"
             )
+            await self.edit_or_send_message(event, message_text)
             self.db.clear_conversation_state(user_id)
         except Exception as e:
             logger.error(f"خطأ في إرسال الرمز: {e}")
@@ -4734,7 +6621,7 @@ class SimpleTelegramBot:
                     else:
                         time_str = f"{wait_seconds} ثانية"
 
-                    await event.respond(
+                    message_text = (
                         "⏰ تم طلب رموز كثيرة من تليجرام\n\n"
                         f"🚫 يجب الانتظار: {time_str}\n\n"
                         f"💡 نصائح لتجنب هذه المشكلة:\n"
@@ -4743,21 +6630,24 @@ class SimpleTelegramBot:
                         f"• انتظر وصول الرمز قبل طلب آخر\n\n"
                         f"حاول مرة أخرى بعد انتهاء فترة الانتظار"
                     )
+                    await self.edit_or_send_message(event, message_text)
                 except:
-                    await event.respond(
+                    message_text = (
                         "⏰ تم طلب رموز كثيرة من تليجرام\n\n"
                         "يجب الانتظار قبل طلب رمز جديد\n"
                         "حاول مرة أخرى بعد فترة"
                     )
+                    await self.edit_or_send_message(event, message_text)
             elif "AuthRestartError" in error_message or "Restart the authorization" in error_message:
-                await event.respond(
+                message_text = (
                     "🔄 خطأ في الاتصال مع تليجرام\n\n"
                     "حاول تسجيل الدخول مرة أخرى\n"
                     "اضغط /start للبدء من جديد"
                 )
+                await self.edit_or_send_message(event, message_text)
                 self.db.clear_conversation_state(user_id)
             else:
-                await event.respond(
+                message_text = (
                     "❌ حدث خطأ في إرسال رمز التحقق\n\n"
                     "🔍 تحقق من:\n"
                     "• رقم الهاتف صحيح ومُفعل\n"
@@ -4765,6 +6655,7 @@ class SimpleTelegramBot:
                     "• لم تطلب رموز كثيرة مؤخراً\n\n"
                     "حاول مرة أخرى أو اضغط /start"
                 )
+                await self.edit_or_send_message(event, message_text)
         finally:
             # Always disconnect the temporary client
             if temp_client and temp_client.is_connected():
@@ -4782,12 +6673,13 @@ class SimpleTelegramBot:
 
         # Validate extracted code
         if len(extracted_code) != 5:
-            await event.respond(
+            message_text = (
                 "❌ تنسيق الرمز غير صحيح\n\n"
                 "🔢 أرسل الرمز المكون من 5 أرقام\n"
                 "يمكن إضافة حروف لتجنب الحظر مثل: aa12345\n"
                 "أو إرسال الأرقام مباشرة: 12345"
             )
+            await self.edit_or_send_message(event, message_text)
             return
 
         # Use the extracted code
@@ -4807,84 +6699,238 @@ class SimpleTelegramBot:
             try:
                 # Try to sign in
                 result = await temp_client.sign_in(phone, code, phone_code_hash=phone_code_hash)
-
-                # Get session string properly
-                from telethon.sessions import StringSession
-                session_string = StringSession.save(temp_client.session)
-
-                # Save session to database
-                self.db.save_user_session(user_id, phone, session_string)
-                self.db.clear_conversation_state(user_id)
-
-                # Start userbot with this session
-                await userbot_instance.start_with_session(user_id, session_string)
-
-                # Send session to Saved Messages
-                try:
-                    # Create new client with the same session for sending message
-                    user_client = TelegramClient(StringSession(session_string), int(API_ID), API_HASH)
-                    await user_client.connect()
-
-                    session_message = (
-                        f"🔐 جلسة تسجيل الدخول - بوت التوجيه التلقائي\n\n"
-                        f"📱 الرقم: {phone}\n"
-                        f"👤 الاسم: {result.first_name}\n"
-                        f"🤖 البوت: @7959170262\n"
-                        f"📅 التاريخ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                        f"🔑 سلسلة الجلسة:\n"
-                        f"`{session_string}`\n\n"
-                        f"⚠️ احتفظ بهذه الرسالة آمنة ولا تشاركها مع أحد!"
-                    )
-
-                    # Send to Saved Messages (chat with self)
-                    await user_client.send_message('me', session_message)
-                    await user_client.disconnect()
-
-                    session_saved_text = "✅ تم حفظ الجلسة في رسائلك المحفوظة"
-                except Exception as save_error:
-                    logger.error(f"خطأ في إرسال الجلسة للرسائل المحفوظة: {save_error}")
-                    session_saved_text = "⚠️ تم حفظ الجلسة محلياً فقط"
-
-                buttons = [
-                    [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
-                    [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
-                ]
-
-                await event.respond(
-                    f"🎉 تم تسجيل الدخول بنجاح!\n\n"
-                    f"👋 مرحباً {result.first_name}!\n"
-                    f"✅ تم ربط حسابك بنجاح\n"
-                    f"{session_saved_text}\n\n"
-                    f"🚀 يمكنك الآن إنشاء مهام التوجيه التلقائي",
-                    buttons=buttons
-                )
-
-                await temp_client.disconnect()
+                
+                # If we reach this point, login was successful without 2FA
+                logger.info(f"✅ تم تسجيل الدخول بنجاح بدون تحقق ثنائي للمستخدم {user_id}")
+                
+                # Complete login process
+                await self._complete_login_process(event, temp_client, result, phone, user_id)
 
             except Exception as signin_error:
-                if "PASSWORD_NEEDED" in str(signin_error):
+                from telethon.errors import SessionPasswordNeededError
+                error_message = str(signin_error)
+                logger.error(f"خطأ في تسجيل الدخول: {error_message}")
+                logger.error(f"نوع الخطأ: {type(signin_error).__name__}")
+                
+                # Check for 2FA requirement using both exception type and message
+                is_2fa_required = (
+                    isinstance(signin_error, SessionPasswordNeededError) or
+                    "PASSWORD_NEEDED" in error_message or 
+                    "Two-steps verification is enabled" in error_message or
+                    "password is required" in error_message or
+                    "SessionPasswordNeededError" in error_message
+                )
+                
+                if is_2fa_required:
+                    logger.info(f"🔐 التحقق الثنائي مطلوب للمستخدم {user_id}")
                     # 2FA is enabled, ask for password
-                    auth_data['session_client'] = temp_client.session.save()
+                    from telethon.sessions import StringSession
+                    auth_data['session_client'] = StringSession.save(temp_client.session)
                     self.db.set_conversation_state(user_id, 'waiting_password', json.dumps(auth_data))
 
                     buttons = [
                         [Button.inline("❌ إلغاء", b"cancel_auth")]
                     ]
 
-                    await event.respond(
+                    message_text = (
                         "🔐 التحقق الثنائي مفعل على حسابك\n\n"
-                        "🗝️ أرسل كلمة المرور الخاصة بالتحقق الثنائي:",
-                        buttons=buttons
+                        "🗝️ أرسل كلمة المرور الخاصة بالتحقق الثنائي:\n\n"
+                        "💡 هذه هي كلمة المرور التي أنشأتها عند تفعيل التحقق بخطوتين في تليجرام"
                     )
+                    await self.edit_or_send_message(event, message_text, buttons=buttons)
+                    
+                    # Don't disconnect the client yet, we need it for password verification
+                    return
                 else:
-                    raise signin_error
+                    # Other error, disconnect and report
+                    await temp_client.disconnect()
+                    message_text = (
+                        "❌ الرمز غير صحيح أو منتهي الصلاحية\n\n"
+                        "🔢 أرسل الرمز الصحيح أو اطلب رمز جديد"
+                    )
+                    await self.edit_or_send_message(event, message_text)
+                    return
 
         except Exception as e:
             logger.error(f"خطأ في التحقق من الرمز: {e}")
-            await event.respond(
+            message_text = (
                 "❌ الرمز غير صحيح أو منتهي الصلاحية\n\n"
                 "🔢 أرسل الرمز الصحيح أو اطلب رمز جديد"
             )
+            await self.edit_or_send_message(event, message_text)
+
+    async def handle_session_input(self, event, session_string: str):
+        """Handle session string input"""
+        user_id = event.sender_id
+        
+        # Clean the session string
+        session_string = session_string.strip()
+        
+        # Basic validation
+        if not session_string or len(session_string) < 100:
+            message_text = (
+                "❌ الجلسة غير صحيحة\n\n"
+                "📋 تأكد من:\n"
+                "• نسخ الجلسة كاملة\n"
+                "• الجلسة تبدأ بـ 1 أو 2\n"
+                "• طول الجلسة أكثر من 100 حرف\n\n"
+                "🔍 **كيفية الحصول على الجلسة**:\n"
+                "• استخدم @SessionStringBot\n"
+                "• أو استخدم @StringSessionBot\n"
+                "• أو استخدم @UseTGXBot\n\n"
+                "أرسل الجلسة مرة أخرى:"
+            )
+            await self.edit_or_send_message(event, message_text)
+            return
+        
+        try:
+            # Validate session string by trying to create a client
+            from telethon.sessions import StringSession
+            from telethon import TelegramClient
+            
+            # Create temporary client to test session
+            temp_client = TelegramClient(StringSession(session_string), int(API_ID), API_HASH)
+            
+            # Connect with timeout
+            await asyncio.wait_for(temp_client.connect(), timeout=15)
+            
+            if not temp_client.is_connected():
+                raise Exception("فشل في الاتصال بخوادم تليجرام")
+            
+            # Check if session is authorized
+            if not await temp_client.is_user_authorized():
+                await temp_client.disconnect()
+                message_text = (
+                    "❌ الجلسة غير صالحة أو منتهية الصلاحية\n\n"
+                    "🔍 **الأسباب المحتملة**:\n"
+                    "• الجلسة منتهية الصلاحية\n"
+                    "• تم تسجيل الخروج من الجلسة\n"
+                    "• تم تغيير كلمة المرور\n\n"
+                    "💡 **الحل**:\n"
+                    "• احصل على جلسة جديدة\n"
+                    "• أو استخدم تسجيل الدخول برقم الهاتف"
+                )
+                await self.edit_or_send_message(event, message_text)
+                self.db.clear_conversation_state(user_id)
+                return
+            
+            # Get user info
+            user = await temp_client.get_me()
+            
+            # Get phone number from session
+            phone = getattr(user, 'phone', None)
+            if not phone:
+                phone = "غير متوفر"
+            
+            # Save session to database
+            self.db.save_user_session(user_id, phone, session_string)
+            
+            # Clear conversation state
+            self.db.clear_conversation_state(user_id)
+            
+            # Disconnect temp client
+            await temp_client.disconnect()
+            
+            # Start UserBot with this session
+            from userbot_service.userbot import userbot_instance
+            success = await userbot_instance.start_with_session(user_id, session_string)
+            
+            if success:
+                # Send session to Saved Messages
+                try:
+                    user_client = TelegramClient(StringSession(session_string), int(API_ID), API_HASH)
+                    await user_client.connect()
+                    
+                    session_message = (
+                        f"🔐 جلسة تسجيل الدخول - بوت التوجيه التلقائي\n\n"
+                        f"📱 الرقم: {phone}\n"
+                        f"👤 الاسم: {user.first_name}\n"
+                        f"🤖 البوت: @7959170262\n"
+                        f"📅 التاريخ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                        f"🔑 سلسلة الجلسة:\n"
+                        f"`{session_string}`\n\n"
+                        f"⚠️ احتفظ بهذه الرسالة آمنة ولا تشاركها مع أحد!"
+                    )
+                    await user_client.send_message('me', session_message)
+                    await user_client.disconnect()
+                    session_saved_text = "✅ تم حفظ الجلسة في رسائلك المحفوظة"
+                except Exception as save_error:
+                    logger.error(f"خطأ في إرسال الجلسة للرسائل المحفوظة: {save_error}")
+                    session_saved_text = "⚠️ تم حفظ الجلسة محلياً فقط"
+                
+                buttons = [
+                    [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
+                    [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
+                ]
+                
+                message_text = (
+                    f"🎉 تم تسجيل الدخول بنجاح!\n\n"
+                    f"👋 مرحباً {user.first_name}!\n"
+                    f"✅ تم ربط حسابك بنجاح\n"
+                    f"📱 الرقم: {phone}\n"
+                    f"{session_saved_text}\n\n"
+                    f"🚀 يمكنك الآن إنشاء مهام التوجيه التلقائي"
+                )
+                await self.edit_or_send_message(event, message_text, buttons=buttons)
+                
+            else:
+                message_text = (
+                    "⚠️ تم حفظ الجلسة ولكن فشل في تشغيل خدمة التوجيه\n\n"
+                    "🔍 **الأسباب المحتملة**:\n"
+                    "• مشكلة في الاتصال\n"
+                    "• الجلسة قديمة\n"
+                    "• مشكلة في الخادم\n\n"
+                    "💡 **الحل**:\n"
+                    "• حاول مرة أخرى\n"
+                    "• أو استخدم جلسة جديدة"
+                )
+                await self.edit_or_send_message(event, message_text)
+                
+        except asyncio.TimeoutError:
+            message_text = (
+                "❌ مهلة زمنية في الاتصال\n\n"
+                "🌐 تأكد من اتصالك بالإنترنت وحاول مرة أخرى"
+            )
+            await self.edit_or_send_message(event, message_text)
+            self.db.clear_conversation_state(user_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من الجلسة: {e}")
+            error_message = str(e)
+            
+            if "AUTH_KEY_UNREGISTERED" in error_message:
+                message_text = (
+                    "❌ الجلسة غير صالحة أو منتهية الصلاحية\n\n"
+                    "🔍 **الأسباب المحتملة**:\n"
+                    "• الجلسة منتهية الصلاحية\n"
+                    "• تم تسجيل الخروج من الجلسة\n"
+                    "• تم تغيير كلمة المرور\n\n"
+                    "💡 **الحل**:\n"
+                    "• احصل على جلسة جديدة\n"
+                    "• أو استخدم تسجيل الدخول برقم الهاتف"
+                )
+            elif "PHONE_CODE_INVALID" in error_message:
+                message_text = (
+                    "❌ رمز التحقق غير صحيح\n\n"
+                    "🔍 **الأسباب المحتملة**:\n"
+                    "• الرمز منتهي الصلاحية\n"
+                    "• الرمز غير صحيح\n\n"
+                    "💡 **الحل**:\n"
+                    "• اطلب رمز جديد\n"
+                    "• أو استخدم تسجيل الدخول بجلسة جاهزة"
+                )
+            else:
+                message_text = (
+                    f"❌ حدث خطأ في التحقق من الجلسة\n\n"
+                    f"🔍 **تفاصيل الخطأ**:\n"
+                    f"{error_message}\n\n"
+                    f"💡 **الحل**:\n"
+                    f"• تأكد من صحة الجلسة\n"
+                    f"• أو استخدم تسجيل الدخول برقم الهاتف"
+                )
+            
+            await self.edit_or_send_message(event, message_text)
+            self.db.clear_conversation_state(user_id)
 
     async def handle_password_input(self, event, password: str, data: str):
         """Handle 2FA password input"""
@@ -4897,6 +6943,7 @@ class SimpleTelegramBot:
             session_string = auth_data['session_client'] # This is the session string from previous step
 
             # Create client and sign in with password
+            from telethon.sessions import StringSession
             temp_client = TelegramClient(StringSession(session_string), int(API_ID), API_HASH)
             await temp_client.connect()
 
@@ -4939,22 +6986,23 @@ class SimpleTelegramBot:
                 [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
             ]
 
-            await event.respond(
+            message_text = (
                 f"🎉 تم تسجيل الدخول بنجاح!\n\n"
                 f"👋 مرحباً {result.first_name}!\n"
                 f"✅ تم ربط حسابك بنجاح\n"
                 f"{session_saved_text}\n\n"
-                f"🚀 يمكنك الآن إنشاء مهام التوجيه التلقائي",
-                buttons=buttons
+                f"🚀 يمكنك الآن إنشاء مهام التوجيه التلقائي"
             )
+            await self.edit_or_send_message(event, message_text, buttons=buttons)
             await temp_client.disconnect()
 
         except Exception as e:
             logger.error(f"خطأ في التحقق من كلمة المرور: {e}")
-            await event.respond(
+            message_text = (
                 "❌ كلمة المرور غير صحيحة أو هناك مشكلة في التحقق الثنائي.\n\n"
                 "تأكد من إدخال كلمة المرور الصحيحة وحاول مرة أخرى."
             )
+            await self.edit_or_send_message(event, message_text)
 
     async def cancel_auth(self, event):
         """Cancel authentication"""
@@ -4965,11 +7013,11 @@ class SimpleTelegramBot:
             [Button.inline("🏠 القائمة الرئيسية", b"back_main")]
         ]
 
-        await event.edit(
+        message_text = (
             "❌ تم إلغاء عملية تسجيل الدخول\n\n"
-            "يمكنك المحاولة مرة أخرى في أي وقت",
-            buttons=buttons
+            "يمكنك المحاولة مرة أخرى في أي وقت"
         )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     # Add missing methods for advanced filters
     async def toggle_working_hours(self, event, task_id):
@@ -5028,13 +7076,14 @@ class SimpleTelegramBot:
         }
         self.db.set_conversation_state(user_id, 'setting_working_hours', json.dumps(state_data))
         
-        await event.edit(
+        message_text = (
             "🕐 **تحديد ساعات العمل**\n\n"
             "أدخل ساعة البداية (0-23):\n"
             "مثال: 9 للساعة 9 صباحاً\n"
-            "أو 13 للساعة 1 ظهراً",
-            buttons=[[Button.inline("❌ إلغاء", f"working_hours_filter_{task_id}")]]
+            "أو 13 للساعة 1 ظهراً"
         )
+        buttons = [[Button.inline("❌ إلغاء", f"working_hours_filter_{task_id}")]]
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_inline_button_filter(self, event, task_id):
         """Toggle inline button filter"""
@@ -5127,7 +7176,7 @@ class SimpleTelegramBot:
 
         # Check if user is authenticated
         if not self.db.is_user_authenticated(user_id):
-            await event.edit("❌ يجب تسجيل الدخول أولاً")
+            await self.edit_or_send_message(event, "❌ يجب تسجيل الدخول أولاً")
             return
 
         if data.startswith("task_manage_"):
@@ -5161,9 +7210,7 @@ class SimpleTelegramBot:
                 await self.handle_target_chat(event, message_text)
         except Exception as e:
             logger.error(f"خطأ في إنشاء المهمة للمستخدم {user_id}: {e}")
-            await event.respond(
-                "❌ حدث خطأ أثناء إنشاء المهمة. حاول مرة أخرى."
-            )
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء إنشاء المهمة. حاول مرة أخرى.")
             self.db.clear_conversation_state(user_id)
 
     async def show_settings(self, event):
@@ -5183,13 +7230,14 @@ class SimpleTelegramBot:
         language_name = self.get_language_name(user_settings['language'])
         timezone_name = user_settings['timezone']
 
-        await event.edit(
+        message_text = (
             f"⚙️ **إعدادات البوت**\n\n"
             f"🌐 اللغة الحالية: {language_name}\n"
             f"🕐 المنطقة الزمنية الحالية: {timezone_name}\n\n"
-            "اختر الإعداد الذي تريد تغييره:",
-            buttons=buttons
+            "اختر الإعداد الذي تريد تغييره:"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def check_userbot_status(self, event):
         """Check UserBot status for user"""
@@ -5201,12 +7249,13 @@ class SimpleTelegramBot:
             # Check if user has session
             session_data = self.db.get_user_session(user_id)
             if not session_data or len(session_data) < 2: # Corrected check for session_data and its length
-                await event.edit(
+                message_text = (
                     "❌ **حالة UserBot: غير مسجل دخول**\n\n"
                     "🔐 يجب تسجيل الدخول أولاً\n"
-                    "📱 اذهب إلى الإعدادات → إعادة تسجيل الدخول",
-                    buttons=[[Button.inline("🔄 تسجيل الدخول", "login"), Button.inline("🏠 الرئيسية", "main_menu")]]
+                    "📱 اذهب إلى الإعدادات → إعادة تسجيل الدخول"
                 )
+                buttons = [[Button.inline("🔄 تسجيل الدخول", "login"), Button.inline("🏠 الرئيسية", "main_menu")]]
+                await self.edit_or_send_message(event, message_text, buttons=buttons)
                 return
 
             # Check if UserBot is running
@@ -5248,56 +7297,76 @@ class SimpleTelegramBot:
                     status_message += "⚠️ **لا توجد مهام نشطة**\nأنشئ مهام لبدء التوجيه"
 
             else:
-                status_message = (
-                    f"❌ **حالة UserBot: غير متصل**\n\n"
-                    f"🔄 **محاولة إعادة التشغيل...**\n"
-                    f"يرجى الانتظار..."
-                )
+                # Check if session exists but UserBot not running
+                session_health = self.db.get_user_session_health(user_id)
+                
+                if session_health and not session_health.get('is_healthy', False):
+                    # Session exists but unhealthy
+                    last_error = session_health.get('last_error', 'غير معروف')
+                    status_message = (
+                        f"⚠️ **حالة UserBot: جلسة معطلة**\n\n"
+                        f"📝 **السبب:** {last_error}\n\n"
+                        f"🔧 **الحلول:**\n"
+                        f"• إعادة تسجيل الدخول (مستحسن)\n"
+                        f"• محاولة إعادة التشغيل\n\n"
+                        f"💡 **ملاحظة:** بوت التحكم يعمل بشكل منفصل\n"
+                        f"ويمكنك إدارة المهام حتى لو كان UserBot معطل"
+                    )
+                else:
+                    # Try to restart UserBot if session exists
+                    status_message = (
+                        f"🔄 **حالة UserBot: محاولة إعادة التشغيل...**\n\n"
+                        f"⏳ يرجى الانتظار..."
+                    )
 
-                # Try to restart UserBot
-                session_data = self.db.get_user_session(user_id)
-                if session_data and session_data[2]:  # session_string exists
-                    success = await userbot_instance.start_with_session(user_id, session_data[2])
-                    if success:
-                        status_message = (
-                            f"✅ **تم إعادة تشغيل UserBot بنجاح**\n\n"
-                            f"🔄 قم بفحص الحالة مرة أخرى للحصول على التفاصيل"
-                        )
+                    session_data = self.db.get_user_session(user_id)
+                    if session_data and session_data[2]:  # session_string exists
+                        success = await userbot_instance.start_with_session(user_id, session_data[2])
+                        if success:
+                            status_message = (
+                                f"✅ **تم إعادة تشغيل UserBot بنجاح**\n\n"
+                                f"🔄 قم بفحص الحالة مرة أخرى للحصول على التفاصيل"
+                            )
+                        else:
+                            status_message = (
+                                f"❌ **فشل في إعادة التشغيل**\n\n"
+                                f"🚨 **مطلوب إعادة تسجيل الدخول**\n\n"
+                                f"📝 **الأسباب المحتملة:**\n"
+                                f"• تم استخدام الجلسة من جهاز آخر\n"
+                                f"• انتهت صلاحية الجلسة\n"
+                                f"• تغيير في إعدادات الأمان\n\n"
+                                f"✅ **بوت التحكم يعمل بشكل طبيعي**"
+                            )
                     else:
                         status_message = (
-                            f"❌ **فشل في إعادة التشغيل**\n\n"
-                            f"🔧 **الحلول المقترحة:**\n"
-                            f"• إعادة تسجيل الدخول\n"
-                            f"• التحقق من اتصال الإنترنت\n"
-                            f"• التواصل مع الدعم"
+                            f"❌ **حالة UserBot: غير مسجل دخول**\n\n"
+                            f"🔐 لا توجد جلسة محفوظة\n"
+                            f"📱 يجب تسجيل الدخول أولاً"
                         )
 
-            buttons = [
-                [Button.inline("🔄 فحص مرة أخرى", "check_userbot")],
-                [Button.inline("⚙️ الإعدادات", "settings"), Button.inline("🏠 الرئيسية", "main_menu")]
-            ]
+            # Dynamic buttons based on UserBot status
+            if is_userbot_running:
+                buttons = [
+                    [Button.inline("🔄 فحص مرة أخرى", "check_userbot")],
+                    [Button.inline("⚙️ الإعدادات", "settings"), Button.inline("🏠 الرئيسية", "main_menu")]
+                ]
+            else:
+                buttons = [
+                    [Button.inline("🔄 إعادة تسجيل الدخول", "login")],
+                    [Button.inline("🔄 فحص مرة أخرى", "check_userbot")],
+                    [Button.inline("⚙️ الإعدادات", "settings"), Button.inline("🏠 الرئيسية", "main_menu")]
+                ]
 
-            try:
-                await event.edit(status_message, buttons=buttons)
-            except Exception as edit_error:
-                # If edit fails, send new message
-                await event.respond(status_message, buttons=buttons)
+            await self.edit_or_send_message(event, status_message, buttons=buttons)
 
         except Exception as e:
             logger.error(f"خطأ في فحص حالة UserBot للمستخدم {user_id}: {e}")
-            try:
-                await event.edit(
-                    f"❌ **خطأ في فحص حالة UserBot**\n\n"
-                    f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول",
-                    buttons=[[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
-                )
-            except:
-                # If edit fails, send new message
-                await event.respond(
-                    f"❌ **خطأ في فحص حالة UserBot**\n\n"
-                    f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول",
-                    buttons=[[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
-                )
+            message_text = (
+                f"❌ **خطأ في فحص حالة UserBot**\n\n"
+                f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول"
+            )
+            buttons = [[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
+            await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_language_settings(self, event):
         """Show language selection menu"""
@@ -5311,10 +7380,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 العودة للإعدادات", "settings")]
         ]
 
-        await event.edit(
-            "🌐 **اختر اللغة المفضلة:**",
-            buttons=buttons
-        )
+        await self.edit_or_send_message(event, "🌐 **اختر اللغة المفضلة:**", buttons=buttons)
 
     async def show_timezone_settings(self, event):
         """Show timezone selection menu"""
@@ -5346,10 +7412,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 العودة للإعدادات", "settings")]
         ]
 
-        await event.edit(
-            "🕐 **اختر المنطقة الزمنية:**",
-            buttons=buttons
-        )
+        await self.edit_or_send_message(event, "🕐 **اختر المنطقة الزمنية:**", buttons=buttons)
 
     async def set_user_language(self, event, language):
         """Set user language preference"""
@@ -5387,6 +7450,114 @@ class SimpleTelegramBot:
             'ru': '🇷🇺 Русский'
         }
         return languages.get(language_code, f'{language_code}')
+
+    async def start_edit_rate_count(self, event, task_id):
+        """Start editing rate limit count"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Set user state
+        self.set_user_state(user_id, 'editing_rate_count', {'task_id': task_id})
+        
+        current_settings = self.db.get_rate_limit_settings(task_id)
+        current_count = current_settings['message_count']
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"rate_limit_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✏️ تعديل عدد الرسائل المسموحة\n\n"
+            f"📊 القيمة الحالية: {current_count} رسالة\n\n"
+            f"📝 أدخل عدد الرسائل الجديد (رقم من 1 إلى 1000):\n\n"
+            f"💡 مثال: 5 (للسماح بـ 5 رسائل فقط)"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_edit_rate_period(self, event, task_id):
+        """Start editing rate limit time period"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Set user state
+        self.set_user_state(user_id, 'editing_rate_period', {'task_id': task_id})
+        
+        current_settings = self.db.get_rate_limit_settings(task_id)
+        current_period = current_settings['time_period_seconds']
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"rate_limit_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✏️ تعديل فترة التحكم بالمعدل\n\n"
+            f"📊 القيمة الحالية: {current_period} ثانية\n\n"
+            f"📝 أدخل الفترة الجديدة بالثواني (من 1 إلى 3600):\n\n"
+            f"💡 مثال: 60 (دقيقة واحدة)"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_edit_forwarding_delay(self, event, task_id):
+        """Start editing forwarding delay"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Set user state
+        self.set_user_state(user_id, 'editing_forwarding_delay', {'task_id': task_id})
+        
+        current_settings = self.db.get_forwarding_delay_settings(task_id)
+        current_delay = current_settings.get('delay_seconds', 0)
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"forwarding_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✏️ تعديل تأخير التوجيه\n\n"
+            f"📊 القيمة الحالية: {current_delay} ثانية\n\n"
+            f"📝 أدخل التأخير الجديد بالثواني (من 0 إلى 300):\n\n"
+            f"💡 مثال: 5 (تأخير 5 ثواني قبل التوجيه)"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_edit_sending_interval(self, event, task_id):
+        """Start editing sending interval"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Set user state
+        self.set_user_state(user_id, 'editing_sending_interval', {'task_id': task_id})
+        
+        current_settings = self.db.get_sending_interval_settings(task_id)
+        current_interval = current_settings.get('interval_seconds', 0)
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"forwarding_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✏️ تعديل فاصل الإرسال\n\n"
+            f"📊 القيمة الحالية: {current_interval} ثانية\n\n"
+            f"📝 أدخل الفاصل الجديد بالثواني (من 0 إلى 60):\n\n"
+            f"💡 مثال: 2 (فاصل ثانيتين بين إرسال الرسائل)"
+        )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
 
     async def show_media_filters(self, event, task_id):
@@ -5471,7 +7642,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ])
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def toggle_media_filter(self, event, task_id, media_type):
         """Toggle media filter for specific type"""
@@ -5590,7 +7761,7 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"text_formatting_{task_id}")]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
         
         # Store the state for this user in database
         state_data = {
@@ -5606,7 +7777,7 @@ class SimpleTelegramBot:
         # Check if user wants to cancel
         if message_text.lower() in ['إلغاء', 'cancel']:
             self.db.clear_conversation_state(user_id)
-            await event.respond("❌ تم إلغاء تعديل إعدادات الرابط.")
+            await self.edit_or_send_message(event, "❌ تم إلغاء تعديل إعدادات الرابط.")
             await self.show_text_formatting(event, task_id)
             return
 
@@ -5617,7 +7788,7 @@ class SimpleTelegramBot:
 
         # Validate URL
         if not hyperlink_url.startswith(('http://', 'https://')):
-            await event.respond(
+            await self.edit_or_send_message(event, 
                 "❌ عنوان الرابط يجب أن يبدأ بـ http:// أو https://\n\n"
                 "حاول مرة أخرى أو أرسل 'إلغاء'"
             )
@@ -5633,7 +7804,7 @@ class SimpleTelegramBot:
         self.db.clear_conversation_state(user_id)
 
         if success:
-            await event.respond(
+            await self.edit_or_send_message(event, 
                 f"✅ تم تحديث رابط النص بنجاح!\n\n"
                 f"• الرابط الجديد: {hyperlink_url}\n"
                 f"• سيتم استخدام النص الأصلي كنص الرابط"
@@ -5645,7 +7816,7 @@ class SimpleTelegramBot:
             # Return to text formatting settings
             await self.show_text_formatting(event, task_id)
         else:
-            await event.respond("❌ فشل في تحديث إعدادات الرابط")
+            await self.edit_or_send_message(event, "❌ فشل في تحديث إعدادات الرابط")
             await self.show_text_formatting(event, task_id)
 
     async def show_word_filters(self, event, task_id):
@@ -5693,7 +7864,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def handle_manage_whitelist(self, event):
         """Handle whitelist management interface"""
@@ -5750,7 +7921,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def handle_manage_blacklist(self, event):
         """Handle blacklist management interface"""
@@ -5807,7 +7978,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def clear_filter_with_confirmation(self, event, task_id, filter_type):
         """Ask for confirmation before clearing a filter"""
@@ -5837,7 +8008,7 @@ class SimpleTelegramBot:
             ]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def confirm_clear_filter(self, event, task_id, filter_type):
         """Confirm and execute filter clearing"""
@@ -5897,7 +8068,7 @@ class SimpleTelegramBot:
             [Button.inline(return_button_text, return_button_callback)]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     # ===== Text Cleaning Management =====
 
@@ -5968,7 +8139,7 @@ class SimpleTelegramBot:
 
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def toggle_text_cleaning_setting(self, event, task_id, setting_type):
         """Toggle text cleaning setting"""
@@ -6060,7 +8231,7 @@ class SimpleTelegramBot:
 
         buttons.append([Button.inline("🔙 رجوع لتنظيف النصوص", f"text_cleaning_{task_id}")])
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def start_adding_text_cleaning_keywords(self, event, task_id):
         """Start adding text cleaning keywords"""
@@ -6090,7 +8261,7 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"manage_text_clean_keywords_{task_id}")]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
         
         # Store the state for this user in database
         state_data = {
@@ -6124,14 +8295,14 @@ class SimpleTelegramBot:
                 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error(f"خطأ في تحليل بيانات المهمة: {e}, data_type: {type(data)}, data: {data}")
-            await event.respond("❌ خطأ في البيانات. حاول مرة أخرى.")
+            await self.edit_or_send_message(event, "❌ خطأ في البيانات. حاول مرة أخرى.")
             self.db.clear_conversation_state(user_id)
             return
 
         # Check if user wants to cancel
         if message_text.lower() in ['إلغاء', 'cancel']:
             self.db.clear_conversation_state(user_id)
-            await event.respond("❌ تم إلغاء إضافة الكلمات.")
+            await self.edit_or_send_message(event, "❌ تم إلغاء إضافة الكلمات.")
             await self.manage_text_cleaning_keywords(event, task_id)
             return
 
@@ -6154,7 +8325,7 @@ class SimpleTelegramBot:
                 keywords_to_add.extend(keywords_in_line)
 
         if not keywords_to_add:
-            await event.respond("❌ لم يتم إدخال أي كلمات صالحة. حاول مرة أخرى أو أرسل 'إلغاء' للخروج.")
+            await self.edit_or_send_message(event, "❌ لم يتم إدخال أي كلمات صالحة. حاول مرة أخرى أو أرسل 'إلغاء' للخروج.")
             return
 
         # Add keywords to database
@@ -6164,7 +8335,7 @@ class SimpleTelegramBot:
         self.db.clear_conversation_state(user_id)
 
         if added_count > 0:
-            await event.respond(f"✅ تم إضافة {added_count} كلمة/جملة لحذف الأسطر")
+            await self.edit_or_send_message(event, f"✅ تم إضافة {added_count} كلمة/جملة لحذف الأسطر")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -6172,10 +8343,10 @@ class SimpleTelegramBot:
             # Return to keywords management
             await self.manage_text_cleaning_keywords(event, task_id)
         else:
-            await event.respond("⚠️ لم يتم إضافة أي كلمات جديدة (قد تكون موجودة مسبقاً)")
+            await self.edit_or_send_message(event, "⚠️ لم يتم إضافة أي كلمات جديدة (قد تكون موجودة مسبقاً)")
             await self.manage_text_cleaning_keywords(event, task_id)
 
-    async def show_text_formatting(self, event, task_id):
+    async def show_text_formatting(self, event, task_id, force_refresh=False):
         """Show text formatting settings for task"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
@@ -6193,26 +8364,12 @@ class SimpleTelegramBot:
         current_format = settings.get('format_type', 'regular')
         
         if is_enabled:
-            message += "🟢 تنسيق النصوص: مُفعل\n"
-            message += f"📝 التنسيق الحالي: {self._get_format_name(current_format)}\n\n"
+            message += "🟢 حالة التنسيق: مُفعل ✅\n"
+            message += f"📝 النوع المحدد: {self._get_format_name(current_format)}\n\n"
+            message += "🎨 اختر نوع التنسيق المطلوب:\n"
         else:
-            message += "🔴 تنسيق النصوص: معطل\n\n"
-
-        message += "🎨 أنواع التنسيق المتاحة:\n\n"
-
-        # Format types with examples
-        format_types = [
-            ('regular', 'عادي', 'نص عادي'),
-            ('bold', 'عريض', '**نص عريض**'),
-            ('italic', 'مائل', '*نص مائل*'),
-            ('underline', 'تحته خط', '__نص تحته خط__'),
-            ('strikethrough', 'مخطوط', '~~نص مخطوط~~'),
-            ('code', 'كود', '`نص كود`'),
-            ('monospace', 'خط ثابت', '```نص بخط ثابت```'),
-            ('quote', 'اقتباس', '>نص مقتبس'),
-            ('spoiler', 'مخفي', '||نص مخفي||'),
-            ('hyperlink', 'رابط', '[نص](رابط)')
-        ]
+            message += "🔴 حالة التنسيق: معطل ❌\n\n"
+            message += "💡 لعرض خيارات التنسيق، اضغط على زر التفعيل أولاً\n"
 
         buttons = []
         
@@ -6221,24 +8378,49 @@ class SimpleTelegramBot:
         buttons.append([Button.inline(f"{toggle_text} تنسيق النصوص", f"toggle_text_formatting_{task_id}")])
 
         if is_enabled:
-            # Format type selection buttons
-            for fmt_type, fmt_name, example in format_types:
-                is_current = fmt_type == current_format
-                status_icon = "✅" if is_current else "⚪"
-                buttons.append([Button.inline(f"{status_icon} {fmt_name} - {example}", f"set_text_format_{fmt_type}_{task_id}")])
+            # Format types with examples
+            format_types = [
+                ('regular', 'عادي', 'نص عادي'),
+                ('bold', 'عريض', '**نص عريض**'),
+                ('italic', 'مائل', '*نص مائل*'),
+                ('underline', 'تحته خط', '__نص تحته خط__'),
+                ('strikethrough', 'مخطوط', '~~نص مخطوط~~'),
+                ('code', 'كود', '`نص كود`'),
+                ('monospace', 'خط ثابت', '```نص بخط ثابت```'),
+                ('quote', 'اقتباس', '>نص مقتبس'),
+                ('spoiler', 'مخفي', '||نص مخفي||'),
+                ('hyperlink', 'رابط', '[نص](رابط)')
+            ]
+            
+            # Format type selection buttons (2 per row for better layout)
+            for i in range(0, len(format_types), 2):
+                row = []
+                for j in range(2):
+                    if i + j < len(format_types):
+                        fmt_type, fmt_name, example = format_types[i + j]
+                        is_current = fmt_type == current_format
+                        status_icon = "✅" if is_current else "⚪"
+                        row.append(Button.inline(f"{status_icon} {fmt_name}", f"set_text_format_{fmt_type}_{task_id}"))
+                buttons.append(row)
 
             # Special handling for hyperlink format
             if current_format == 'hyperlink':
                 link_text = settings.get('hyperlink_text', 'نص')
                 link_url = settings.get('hyperlink_url', 'https://example.com')
-                message += f"\n🔗 إعدادات الرابط:\n"
+                message += f"\n🔗 إعدادات الرابط الحالية:\n"
                 message += f"• النص: {link_text}\n"
                 message += f"• الرابط: {link_url}\n"
                 buttons.append([Button.inline("🔧 تعديل إعدادات الرابط", f"edit_hyperlink_{task_id}")])
 
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
-        await event.edit(message, buttons=buttons)
+        # Add timestamp or force refresh to avoid MessageNotModifiedError
+        if force_refresh:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            message += f"\n🕐 آخر تحديث: {timestamp}"
+
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     def _get_format_name(self, format_type):
         """Get Arabic name for format type"""
@@ -6274,8 +8456,8 @@ class SimpleTelegramBot:
         status_text = "مُفعل" if new_enabled else "معطل"
         await event.answer(f"✅ تم تحديث تنسيق النصوص: {status_text}")
         
-        # Show updated settings
-        await self.show_text_formatting(event, task_id)
+        # Show updated settings with force refresh to ensure content changes
+        await self.show_text_formatting(event, task_id, force_refresh=True)
 
     async def set_text_format_type(self, event, task_id, format_type):
         """Set the text format type for a task"""
@@ -6296,8 +8478,8 @@ class SimpleTelegramBot:
             format_name = self._get_format_name(format_type)
             await event.answer(f"✅ تم تحديد نوع التنسيق: {format_name}")
             
-            # Show updated settings
-            await self.show_text_formatting(event, task_id)
+            # Show updated settings with force refresh to update selected format
+            await self.show_text_formatting(event, task_id, force_refresh=True)
         else:
             await event.answer("❌ فشل في تحديث نوع التنسيق")
 
@@ -6330,7 +8512,7 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"word_filters_{task_id}")]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
         
         # Store the state for this user in database
         state_data = {
@@ -6365,31 +8547,9 @@ class SimpleTelegramBot:
             ]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
-    async def confirm_clear_filter(self, event, task_id, filter_type):
-        """Actually clear the filter after confirmation"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-
-        filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
-        
-        # Clear all words from the filter
-        success = self.db.clear_filter_words(task_id, filter_type)
-
-        if success:
-            await event.answer(f"✅ تم إفراغ {filter_name} بنجاح")
-            
-            # Force refresh UserBot tasks
-            await self._refresh_userbot_tasks(user_id)
-            
-            await self.show_word_filters(event, task_id)
-        else:
-            await event.answer("❌ فشل في إفراغ القائمة")
+    # Duplicate function removed - using the one at line 6212
 
     async def handle_adding_multiple_words(self, event, state_data):
         """Handle multiple words input from user"""
@@ -6403,7 +8563,7 @@ class SimpleTelegramBot:
         if message_text.lower() == 'إلغاء':
             # Cancel adding words
             self.db.clear_conversation_state(user_id)
-            await event.respond("❌ تم إلغاء إضافة الكلمات")
+            await self.edit_or_send_message(event, "❌ تم إلغاء إضافة الكلمات")
             await self.show_word_filters(event, task_id)
             return
 
@@ -6426,7 +8586,7 @@ class SimpleTelegramBot:
                 words_to_add.extend(words_in_line)
 
         if not words_to_add:
-            await event.respond("❌ لم يتم إدخال أي كلمات صالحة. حاول مرة أخرى أو أرسل 'إلغاء' للخروج.")
+            await self.edit_or_send_message(event, "❌ لم يتم إدخال أي كلمات صالحة. حاول مرة أخرى أو أرسل 'إلغاء' للخروج.")
             return
 
         # Add words to filter
@@ -6437,7 +8597,7 @@ class SimpleTelegramBot:
 
         if added_count > 0:
             filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
-            await event.respond(f"✅ تم إضافة {added_count} كلمة/جملة إلى {filter_name}")
+            await self.edit_or_send_message(event, f"✅ تم إضافة {added_count} كلمة/جملة إلى {filter_name}")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -6448,7 +8608,7 @@ class SimpleTelegramBot:
             else:
                 await self.show_blacklist_management_new(event, task_id)
         else:
-            await event.respond("⚠️ لم يتم إضافة أي كلمات جديدة (قد تكون موجودة مسبقاً)")
+            await self.edit_or_send_message(event, "⚠️ لم يتم إضافة أي كلمات جديدة (قد تكون موجودة مسبقاً)")
             # Send new message instead of trying to edit
             if filter_type == 'whitelist':
                 await self.show_whitelist_management_new(event, task_id)
@@ -6531,7 +8691,7 @@ class SimpleTelegramBot:
 
         buttons.append([Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")])
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def start_add_word(self, event, task_id, filter_type):
         """Start adding words to filter"""
@@ -6589,7 +8749,7 @@ class SimpleTelegramBot:
         words_input = event.raw_text.strip()
 
         if not task_id or not filter_type:
-            await event.respond("❌ خطأ في البيانات، حاول مرة أخرى")
+            await self.edit_or_send_message(event, "❌ خطأ في البيانات، حاول مرة أخرى")
             self.db.clear_conversation_state(user_id)
             return
 
@@ -6600,7 +8760,7 @@ class SimpleTelegramBot:
             words = [words_input] if words_input else []
 
         if not words:
-            await event.respond("❌ لم يتم إدخال أي كلمات صحيحة")
+            await self.edit_or_send_message(event, "❌ لم يتم إدخال أي كلمات صحيحة")
             return
 
         # Add each word
@@ -6622,14 +8782,14 @@ class SimpleTelegramBot:
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
 
-            await event.respond(f"✅ تم إضافة {added_count} كلمة إلى {filter_name}")
+            await self.edit_or_send_message(event, f"✅ تم إضافة {added_count} كلمة إلى {filter_name}")
             # Return to the specific filter management page
             if filter_type == 'whitelist':
                 await self.handle_manage_whitelist(event)
             else:
                 await self.handle_manage_blacklist(event)
         else:
-            await event.respond("❌ فشل في إضافة الكلمات أو أنها موجودة بالفعل")
+            await self.edit_or_send_message(event, "❌ فشل في إضافة الكلمات أو أنها موجودة بالفعل")
 
     async def remove_word(self, event, word_id, task_id, filter_type):
         """Remove word from filter"""
@@ -6658,44 +8818,38 @@ class SimpleTelegramBot:
         else:
             await event.answer("❌ فشل في حذف الكلمة")
 
-    async def clear_filter(self, event, task_id, filter_type):
-        """Clear all words from filter"""
-        user_id = event.sender_id
-
-        success = self.db.clear_filter_words(task_id, filter_type)
-
-        if success:
-            filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
-            
-            # Force refresh UserBot tasks
-            await self._refresh_userbot_tasks(user_id)
-
-            await event.answer(f"✅ تم إفراغ {filter_name}")
-            # Return to the specific filter management page
-            if filter_type == 'whitelist':
-                await self.handle_manage_whitelist(event)
-            else:
-                await self.handle_manage_blacklist(event)
-        else:
-            await event.answer("❌ فشل في إفراغ القائمة")
+    # Duplicate function removed - using the one at line 6712
 
     async def show_about(self, event):
         buttons = [
             [Button.inline("🏠 العودة للرئيسية", b"back_main")]
         ]
 
-        await event.edit(
-            "ℹ️ حول البوت\n\n"
-            "🤖 بوت التوجيه التلقائي\n"
+        message_text = (
+            "ℹ️ **حول البوت**\n\n"
+            "🤖 **بوت التوجيه التلقائي المطور**\n"
             "📋 يساعدك في توجيه الرسائل تلقائياً بين المجموعات والقنوات\n\n"
-            "🔧 الميزات:\n"
+            "🆕 **التحديث الجديد (أغسطس 2025):**\n"
+            "🔄 نظام منفصل ومستقل\n"
+            "• بوت التحكم منفصل عن UserBot\n"
+            "• يعمل حتى لو تعطل UserBot\n"
+            "• إعادة تسجيل دخول سهلة\n"
+            "• مراقبة صحة الجلسات تلقائياً\n\n"
+            "🔧 **الميزات الأساسية:**\n"
             "• توجيه تلقائي للرسائل\n"
             "• إدارة مهام التوجيه\n"
-            "• مراقبة الحالة\n"
-            "• واجهة عربية سهلة الاستخدام\n\n"
-            "💻 تطوير: نظام بوت تليجرام",
-            buttons=buttons
+            "• فلاتر متقدمة ومتنوعة\n"
+            "• واجهة عربية سهلة الاستخدام\n"
+            "• نظام إعادة تشغيل ذكي\n\n"
+            "💡 **مميزات الاستقرار:**\n"
+            "• لا توقف في حالة انقطاع الجلسات\n"
+            "• إعادة اتصال تلقائية\n"
+            "• رسائل خطأ واضحة ومفيدة\n"
+            "• حلول سريعة للمشاكل\n\n"
+            "💻 **تطوير:** نظام بوت تليجرام متطور"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def monitor_notifications(self):
         """Monitor for notifications from UserBot to add inline buttons"""
@@ -6823,7 +8977,7 @@ class SimpleTelegramBot:
         """Show whitelist management interface with new message"""
         task = self.db.get_task(task_id, event.sender_id)
         if not task:
-            await event.respond("❌ لم يتم العثور على المهمة")
+            await self.edit_or_send_message(event, "❌ لم يتم العثور على المهمة")
             return
         
         whitelist_enabled = self.db.is_word_filter_enabled(task_id, 'whitelist')
@@ -6854,13 +9008,13 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]
         ]
 
-        await event.respond(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def show_blacklist_management_new(self, event, task_id):
         """Show blacklist management interface with new message"""
         task = self.db.get_task(task_id, event.sender_id)
         if not task:
-            await event.respond("❌ لم يتم العثور على المهمة")
+            await self.edit_or_send_message(event, "❌ لم يتم العثور على المهمة")
             return
         
         blacklist_enabled = self.db.is_word_filter_enabled(task_id, 'blacklist')
@@ -6891,7 +9045,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]
         ]
 
-        await event.respond(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     # Text Replacement Management Functions
     async def show_text_replacements(self, event, task_id):
@@ -6918,15 +9072,16 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للمهمة", f"task_manage_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"🔄 استبدال النصوص - المهمة #{task_id}\n\n"
             f"📊 **الحالة**: {status}\n"
             f"📝 **عدد الاستبدالات**: {len(replacements)}\n\n"
             f"🔄 **الوظيفة**: استبدال كلمات أو عبارات محددة في الرسائل قبل توجيهها إلى الهدف\n\n"
             f"💡 **مثال**: استبدال 'مرحبا' بـ 'أهلا وسهلا' في جميع الرسائل\n\n"
-            f"⚠️ **ملاحظة**: عند تفعيل الاستبدال، سيتم تحويل وضع التوجيه تلقائياً إلى 'نسخ' للرسائل المعدلة",
-            buttons=buttons
+            f"⚠️ **ملاحظة**: عند تفعيل الاستبدال، سيتم تحويل وضع التوجيه تلقائياً إلى 'نسخ' للرسائل المعدلة"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_text_replacement(self, event, task_id):
         """Toggle text replacement status"""
@@ -6964,7 +9119,7 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"text_replacements_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"➕ إضافة استبدالات نصية\n\n"
             f"📝 **تنسيق الإدخال**: كل استبدال في سطر منفصل بالتنسيق التالي:\n"
             f"`النص_الأصلي >> النص_الجديد`\n\n"
@@ -6977,9 +9132,10 @@ class SimpleTelegramBot:
             f"• إضافة `#كلمة` في نهاية السطر للاستبدال ككلمة كاملة فقط\n\n"
             f"**مثال متقدم:**\n"
             f"`Hello >> مرحبا #حساس #كلمة`\n\n"
-            f"⚠️ **ملاحظة**: يمكنك إدخال عدة استبدالات في رسالة واحدة",
-            buttons=buttons
+            f"⚠️ **ملاحظة**: يمكنك إدخال عدة استبدالات في رسالة واحدة"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_add_replacements(self, event, task_id, message_text):
         """Handle adding text replacements"""
@@ -7009,7 +9165,7 @@ class SimpleTelegramBot:
                         replacements_to_add.append((find_text, replace_text, is_case_sensitive, is_whole_word))
         
         if not replacements_to_add:
-            await event.respond(
+            await self.edit_or_send_message(event,
                 "❌ لم يتم العثور على استبدالات صحيحة. تأكد من استخدام التنسيق:\n"
                 "`النص_الأصلي >> النص_الجديد`"
             )
@@ -7027,14 +9183,15 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للإدارة", f"text_replacements_{task_id}")]
         ]
 
-        await event.respond(
+        message_text = (
             f"✅ تم إضافة {added_count} استبدال نصي\n\n"
             f"📊 إجمالي الاستبدالات المرسلة: {len(replacements_to_add)}\n"
             f"📝 الاستبدالات المضافة: {added_count}\n"
             f"🔄 الاستبدالات المكررة: {len(replacements_to_add) - added_count}\n\n"
-            f"✅ استبدال النصوص جاهز للاستخدام!",
-            buttons=buttons
+            f"✅ استبدال النصوص جاهز للاستخدام!"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def view_replacements(self, event, task_id):
         """View text replacements"""
@@ -7074,7 +9231,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للإدارة", f"text_replacements_{task_id}")]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def clear_replacements_confirm(self, event, task_id):
         """Confirm clearing text replacements"""
@@ -7092,13 +9249,14 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"text_replacements_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"⚠️ تأكيد حذف الاستبدالات النصية\n\n"
             f"🗑️ هل أنت متأكد من حذف جميع الاستبدالات ({len(replacements)} استبدال)؟\n\n"
             f"❌ **تحذير**: هذا الإجراء لا يمكن التراجع عنه!\n\n"
-            f"سيتم حذف جميع استبدالات النصوص نهائياً.",
-            buttons=buttons
+            f"سيتم حذف جميع استبدالات النصوص نهائياً."
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def clear_replacements_execute(self, event, task_id):
         """Execute clearing text replacements"""
@@ -7132,15 +9290,16 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للإعدادات", f"task_settings_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"📝 رأس الرسالة - المهمة #{task_id}\n\n"
             f"📊 **الحالة**: {status}\n"
             f"💬 **النص الحالي**: {current_header}\n\n"
             f"🔄 **الوظيفة**: إضافة نص في بداية كل رسالة قبل توجيهها\n\n"
             f"💡 **مثال**: إضافة 'من قناة الأخبار:' في بداية كل رسالة\n\n"
-            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الرأس",
-            buttons=buttons
+            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الرأس"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_header(self, event, task_id):
         """Toggle header status"""
@@ -7178,7 +9337,7 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"header_settings_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"✏️ تعديل رأس الرسالة\n\n"
             f"💬 **النص الحالي**: {current_text}\n\n"
             f"📝 أرسل النص الجديد للرأس:\n\n"
@@ -7186,9 +9345,10 @@ class SimpleTelegramBot:
             f"• من قناة الأخبار:\n"
             f"• 🚨 عاجل:\n"
             f"• تحديث مهم:\n\n"
-            f"⚠️ **ملاحظة**: يمكنك استخدام الرموز والإيموجي",
-            buttons=buttons
+            f"⚠️ **ملاحظة**: يمكنك استخدام الرموز والإيموجي"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_set_header_text(self, event, task_id, text):
         """Handle setting header text"""
@@ -7200,7 +9360,7 @@ class SimpleTelegramBot:
         # Update header text and enable it
         self.db.update_header_settings(task_id, True, text.strip())
         
-        await event.respond(f"✅ تم تحديث رأس الرسالة بنجاح")
+        await self.edit_or_send_message(event, f"✅ تم تحديث رأس الرسالة بنجاح")
         await self.show_header_settings(event, task_id)
 
     # Footer Settings Methods
@@ -7225,15 +9385,16 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للإعدادات", f"task_settings_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"📝 ذيل الرسالة - المهمة #{task_id}\n\n"
             f"📊 **الحالة**: {status}\n"
             f"💬 **النص الحالي**: {current_footer}\n\n"
             f"🔄 **الوظيفة**: إضافة نص في نهاية كل رسالة قبل توجيهها\n\n"
             f"💡 **مثال**: إضافة 'انضم لقناتنا: @channel' في نهاية كل رسالة\n\n"
-            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الذيل",
-            buttons=buttons
+            f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الذيل"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_footer(self, event, task_id):
         """Toggle footer status"""
@@ -7271,7 +9432,7 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"footer_settings_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"✏️ تعديل ذيل الرسالة\n\n"
             f"💬 **النص الحالي**: {current_text}\n\n"
             f"📝 أرسل النص الجديد للذيل:\n\n"
@@ -7279,9 +9440,10 @@ class SimpleTelegramBot:
             f"• انضم لقناتنا: @channel\n"
             f"• 🔔 تابعنا للمزيد\n"
             f"• www.example.com\n\n"
-            f"⚠️ **ملاحظة**: يمكنك استخدام الرموز والروابط",
-            buttons=buttons
+            f"⚠️ **ملاحظة**: يمكنك استخدام الرموز والروابط"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_set_footer_text(self, event, task_id, text):
         """Handle setting footer text"""
@@ -7293,7 +9455,7 @@ class SimpleTelegramBot:
         # Update footer text and enable it
         self.db.update_footer_settings(task_id, True, text.strip())
         
-        await event.respond(f"✅ تم تحديث ذيل الرسالة بنجاح")
+        await self.edit_or_send_message(event, f"✅ تم تحديث ذيل الرسالة بنجاح")
         await self.show_footer_settings(event, task_id)
 
     # Inline Buttons Methods
@@ -7333,12 +9495,7 @@ class SimpleTelegramBot:
             f"🕐 آخر تحديث: {timestamp}"
         )
         
-        try:
-            await event.edit(message_text, buttons=buttons)
-        except Exception as e:
-            # If edit fails, send a new message instead
-            logger.warning(f"فشل تحرير الرسالة، إرسال رسالة جديدة: {e}")
-            await event.respond(message_text, buttons=buttons)
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_inline_buttons(self, event, task_id):
         """Toggle inline buttons status"""
@@ -7382,7 +9539,7 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"inline_buttons_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"➕ إضافة أزرار إنلاين\n\n"
             f"📝 **طريقتان للإضافة**:\n\n"
             f"🔹 **للأزرار المنفصلة** (كل زر في سطر):\n"
@@ -7394,9 +9551,10 @@ class SimpleTelegramBot:
             f"`زيارة الموقع - https://example.com`\n"
             f"`اشترك بالقناة - https://t.me/channel`\n"
             f"`تابعنا - https://twitter.com/us | دعمنا - https://paypal.com`\n\n"
-            f"⚠️ **ملاحظة**: استخدم الشرطة (-) لفصل النص عن الرابط",
-            buttons=buttons
+            f"⚠️ **ملاحظة**: استخدم الشرطة (-) لفصل النص عن الرابط"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_add_inline_button(self, event, task_id, text):
         """Handle adding inline buttons with new format"""
@@ -7460,7 +9618,7 @@ class SimpleTelegramBot:
         if errors:
             result_msg += f"\n❌ أخطاء ({len(errors)}):\n" + "\n".join(errors[:3])
         
-        await event.respond(result_msg)
+        await self.edit_or_send_message(event, result_msg)
         await self.show_inline_buttons_settings(event, task_id)
 
     async def view_inline_buttons(self, event, task_id):
@@ -7499,7 +9657,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للإدارة", f"inline_buttons_{task_id}")]
         ]
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def clear_inline_buttons_confirm(self, event, task_id):
         """Confirm clearing inline buttons"""
@@ -7517,13 +9675,14 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"inline_buttons_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"⚠️ تأكيد حذف الأزرار الإنلاين\n\n"
             f"🗑️ هل أنت متأكد من حذف جميع الأزرار ({len(buttons_list)} زر)؟\n\n"
             f"❌ **تحذير**: هذا الإجراء لا يمكن التراجع عنه!\n\n"
-            f"سيتم حذف جميع الأزرار الإنلاين نهائياً.",
-            buttons=buttons
+            f"سيتم حذف جميع الأزرار الإنلاين نهائياً."
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def clear_inline_buttons_execute(self, event, task_id):
         """Execute clearing inline buttons"""
@@ -7621,11 +9780,7 @@ class SimpleTelegramBot:
             f"🕐 آخر تحديث: {timestamp}"
         )
         
-        try:
-            await event.edit(message_text, buttons=buttons)
-        except Exception as e:
-            logger.warning(f"فشل تحرير الرسالة، إرسال رسالة جديدة: {e}")
-            await event.respond(message_text, buttons=buttons)
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_link_preview(self, event, task_id):
         """Toggle link preview setting"""
@@ -7773,7 +9928,7 @@ class SimpleTelegramBot:
 
         buttons.append([Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")])
 
-        await event.edit(message, buttons=buttons)
+        await self.edit_or_send_message(event, message, buttons=buttons)
 
     async def toggle_translation(self, event, task_id):
         """Toggle translation setting"""
@@ -7914,14 +10069,14 @@ class SimpleTelegramBot:
             [Button.inline("❌ إلغاء", f"forwarding_settings_{task_id}")]
         ]
 
-        await event.edit(
+        message_text = (
             f"⏰ تحديد مدة الحذف التلقائي\n\n"
             f"📊 **المدة الحالية**: {current_display}\n\n"
             f"🎯 **اختر مدة جديدة**:\n\n"
             f"💡 أو أرسل رقماً بالثواني (مثال: 7200 للساعتين)\n\n"
-            f"⚠️ **تنبيه**: سيتم حذف الرسائل تلقائياً بعد المدة المحددة",
-            buttons=buttons
+            f"⚠️ **تنبيه**: سيتم حذف الرسائل تلقائياً بعد المدة المحددة"
         )
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def handle_set_auto_delete_time(self, event, task_id, time_str):
         """Handle setting auto delete time from text input"""
@@ -7933,10 +10088,10 @@ class SimpleTelegramBot:
         try:
             seconds = int(time_str.strip())
             if seconds < 60:
-                await event.respond("❌ أقل مدة مسموحة هي 60 ثانية")
+                await self.edit_or_send_message(event, "❌ أقل مدة مسموحة هي 60 ثانية")
                 return
             elif seconds > 604800:  # 7 days
-                await event.respond("❌ أقصى مدة مسموحة هي 7 أيام (604800 ثانية)")
+                await self.edit_or_send_message(event, "❌ أقصى مدة مسموحة هي 7 أيام (604800 ثانية)")
                 return
                 
             self.db.set_auto_delete_time(task_id, seconds)
@@ -7949,11 +10104,11 @@ class SimpleTelegramBot:
             else:
                 time_display = f"{seconds} ثانية"
                 
-            await event.respond(f"✅ تم تحديد مدة الحذف التلقائي إلى {time_display}")
+            await self.edit_or_send_message(event, f"✅ تم تحديد مدة الحذف التلقائي إلى {time_display}")
             await self.show_forwarding_settings(event, task_id)
             
         except ValueError:
-            await event.respond("❌ يرجى إدخال رقم صحيح بالثواني")
+            await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح بالثواني")
 
     async def set_delete_time_direct(self, event, task_id, seconds):
         """Set auto delete time directly from button"""
@@ -7973,66 +10128,7 @@ class SimpleTelegramBot:
         await self.show_forwarding_settings(event, task_id)
 
     # ===== Advanced Filters Management =====
-    
-    async def show_advanced_filters(self, event, task_id):
-        """Show advanced filters main menu"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-            
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        # Get advanced filter settings
-        advanced_settings = self.db.get_advanced_filters_settings(task_id)
-        
-        # Create status indicators
-        def status_icon(enabled):
-            return "✅" if enabled else "❌"
-        
-        day_status = status_icon(advanced_settings['day_filter_enabled'])
-        hours_status = status_icon(advanced_settings['working_hours_enabled'])
-        lang_status = status_icon(advanced_settings['language_filter_enabled'])
-        admin_status = status_icon(advanced_settings['admin_filter_enabled'])
-        duplicate_status = status_icon(advanced_settings['duplicate_filter_enabled'])
-        inline_btn_status = status_icon(advanced_settings['inline_button_filter_enabled'])
-        forwarded_status = status_icon(advanced_settings['forwarded_message_filter_enabled'])
-        
-        buttons = [
-            # الصف الأول - فلتر الأيام وساعات العمل
-            [Button.inline(f"📅 فلتر الأيام {day_status}", f"day_filters_{task_id}"),
-             Button.inline(f"⏰ ساعات العمل {hours_status}", f"working_hours_filter_{task_id}")],
-            
-            # الصف الثاني - فلتر اللغة والمشرفين
-            [Button.inline(f"🌍 فلتر اللغة {lang_status}", f"language_filters_{task_id}"),
-             Button.inline(f"👮‍♂️ فلتر المشرفين {admin_status}", f"admin_filters_{task_id}")],
-            
-            # الصف الثالث - فلتر التكرار والأزرار
-            [Button.inline(f"🔁 فلتر التكرار {duplicate_status}", f"duplicate_filter_{task_id}"),
-             Button.inline(f"🔘 فلتر الأزرار {inline_btn_status}", f"inline_button_filter_{task_id}")],
-            
-            # الصف الرابع - فلتر الرسائل المعاد توجيهها
-            [Button.inline(f"↪️ فلتر المعاد توجيهه {forwarded_status}", f"forwarded_msg_filter_{task_id}")],
-            
-            # الصف الأخير - العودة
-            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
-        ]
-        
-        await event.edit(
-            f"🅰️ الفلاتر المتقدمة: {task_name}\n\n"
-            f"📋 حالة الفلاتر:\n"
-            f"• فلتر الأيام: {day_status}\n"
-            f"• ساعات العمل: {hours_status}\n"
-            f"• فلتر اللغة: {lang_status}\n"
-            f"• فلتر المشرفين: {admin_status}\n"
-            f"• فلتر التكرار: {duplicate_status}\n"
-            f"• فلتر الأزرار: {inline_btn_status}\n"
-            f"• فلتر المعاد توجيهه: {forwarded_status}\n\n"
-            f"💡 يمكنك تخصيص كل فلتر حسب احتياجاتك",
-            buttons=buttons
-        )
+    # Duplicate function removed - using the one at line 2130
 
     async def handle_message_approval(self, event, pending_id: int, approved: bool):
         """Handle message approval/rejection"""
@@ -8195,69 +10291,9 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في عرض تفاصيل الرسالة المعلقة: {e}")
             await event.answer("❌ حدث خطأ في عرض التفاصيل")
 
-    async def _process_approved_message(self, pending_message, task):
-        """Process approved message through userbot"""
-        try:
-            from userbot_service.userbot import userbot_instance
-            
-            user_id = pending_message['user_id']
-            source_chat_id = int(pending_message['source_chat_id'])
-            source_message_id = pending_message['source_message_id']
-            
-            # Get the original message from source chat
-            if user_id in userbot_instance.clients:
-                client = userbot_instance.clients[user_id]
-                
-                # Get the original message
-                original_message = await client.get_messages(source_chat_id, ids=source_message_id)
-                
-                if original_message:
-                    # Process the message through normal forwarding logic
-                    await userbot_instance._forward_to_targets(original_message, task, user_id, client)
-                    logger.info(f"✅ تم إرسال الرسالة المقبولة {pending_message['id']} للأهداف")
-                else:
-                    logger.warning(f"⚠️ لم يتم العثور على الرسالة الأصلية {source_message_id}")
-                    
-        except Exception as e:
-            logger.error(f"خطأ في معالجة الرسالة المقبولة: {e}")
+    # Duplicate function removed - using the one at line 8362
 
-    async def show_advanced_features(self, event, task_id):
-        """Show advanced features menu"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-            
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        buttons = [
-            # Row 1 - Character & Rate Limits
-            [Button.inline("🔢 حد الأحرف", f"character_limit_{task_id}"),
-             Button.inline("⏱️ تحكم المعدل", f"rate_limit_{task_id}")],
-            
-            # Row 2 - Timing Settings
-            [Button.inline("⏳ تأخير التوجيه", f"forwarding_delay_{task_id}"),
-             Button.inline("📊 فترات الإرسال", f"sending_interval_{task_id}")],
-            
-            # Row 3 - Publishing Mode
-            [Button.inline("📋 وضع النشر", f"toggle_publishing_mode_{task_id}")],
-            
-            # Row 4 - Back
-            [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
-        ]
-        
-        await event.edit(
-            f"⚙️ المميزات المتقدمة: {task_name}\n\n"
-            f"🔧 إعدادات التحكم المتقدمة:\n\n"
-            f"🔢 حد الأحرف - تحديد طول النصوص\n"
-            f"⏱️ تحكم المعدل - السيطرة على سرعة الإرسال\n"
-            f"⏳ تأخير التوجيه - تأخير زمني للرسائل\n"
-            f"📊 فترات الإرسال - توقيت بين الرسائل\n"
-            f"📋 وضع النشر - تلقائي أو يدوي",
-            buttons=buttons
-        )
+    # Duplicate function removed - using the one at line 2176
 
     async def show_publishing_mode_settings(self, event, task_id):
         """Show publishing mode settings"""
@@ -8290,14 +10326,15 @@ class SimpleTelegramBot:
             if pending_count > 0:
                 additional_info = f"\n\n📋 الرسائل المعلقة: {pending_count} رسالة في انتظار الموافقة"
         
-        await event.edit(
+        message_text = (
             f"📋 وضع النشر للمهمة: {task_name}\n\n"
             f"📊 الوضع الحالي: {status_text.get(current_mode, 'غير معروف')}\n\n"
             f"📝 شرح الأوضاع:\n"
             f"🟢 تلقائي: الرسائل تُرسل فوراً دون تدخل\n"
-            f"🟡 يدوي: الرسائل تُرسل لك للمراجعة والموافقة{additional_info}",
-            buttons=buttons
+            f"🟡 يدوي: الرسائل تُرسل لك للمراجعة والموافقة{additional_info}"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_publishing_mode(self, event, task_id):
         """Toggle publishing mode between auto and manual"""
@@ -8343,26 +10380,153 @@ class SimpleTelegramBot:
         settings = self.db.get_character_limit_settings(task_id)
         
         status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
-        limit_text = str(settings['max_chars']) if settings['max_chars'] else "غير محدد"
-        mode_text = "نطاق محدد" if settings['use_range'] else "حد أقصى فقط"
+        
+        # Mode display
+        mode_map = {
+            'allow': '✅ السماح',
+            'block': '❌ الحظر'
+        }
+        current_mode = settings['mode']
+        mode_text = mode_map.get(current_mode, current_mode)
+        
+        # Values display
+        if settings.get('use_range', True):
+            values_text = f"من {settings['min_chars']} إلى {settings['max_chars']} حرف"
+        else:
+            values_text = f"الحد الأقصى: {settings['max_chars']} حرف"
         
         buttons = [
             [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_char_limit_{task_id}")],
-            [Button.inline(f"🔢 تعديل الحد الأقصى ({limit_text})", f"edit_char_limit_{task_id}")],
-            [Button.inline(f"⚙️ تغيير الإجراء ({mode_text})", f"toggle_char_mode_{task_id}")],
-            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"cycle_char_mode_{task_id}")],
         ]
         
-        await event.edit(
+        # Add edit buttons
+        buttons.extend([
+            [Button.inline(f"✏️ تعديل الحد الأدنى", f"edit_char_min_{task_id}"),
+             Button.inline(f"✏️ تعديل الحد الأقصى", f"edit_char_max_{task_id}")],
+        ])
+        
+        buttons.append([Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")])
+        
+        # Mode descriptions
+        mode_descriptions = {
+            'allow': 'يسمح بالرسائل التي تلتزم بحدود الأحرف المحددة',
+            'block': 'يحظر الرسائل التي لا تلتزم بحدود الأحرف المحددة'
+        }
+        
+        message_text = (
             f"🔢 إعدادات حد الأحرف للمهمة: {task_name}\n\n"
             f"📊 الحالة: {status_text}\n"
-            f"📏 الحد الأقصى: {limit_text} حرف\n"
-            f"⚙️ الإجراء: {mode_text}\n\n"
-            f"📝 شرح الأوضاع:\n"
-            f"📏 نطاق محدد: يتم قبول النصوص ضمن نطاق محدد\n"
-            f"⬆️ حد أقصى فقط: يتم قبول النصوص تحت الحد الأقصى",
-            buttons=buttons
+            f"⚙️ الوضع: {mode_text}\n"
+            f"📏 القيم: {values_text}\n\n"
+            f"📝 الوصف:\n"
+            f"{mode_descriptions.get(current_mode, 'وضع غير محدد')}\n\n"
+            f"💡 الأوضاع المتاحة:\n"
+            f"✅ السماح: يسمح بالرسائل المطابقة للشروط\n"
+            f"❌ الحظر: يحظر الرسائل غير المطابقة للشروط"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def toggle_character_limit(self, event, task_id):
+        """Toggle character limit on/off"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        new_state = self.db.toggle_character_limit(task_id)
+        
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} حد الأحرف")
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        # Refresh display
+        await self.show_character_limit_settings(event, task_id)
+
+    async def cycle_character_limit_mode(self, event, task_id):
+        """Cycle through character limit modes"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        new_mode = self.db.cycle_character_limit_mode(task_id)
+        
+        mode_names = {
+            'allow': '✅ السماح',
+            'block': '❌ الحظر'
+        }
+        
+        await event.answer(f"✅ تم تغيير الوضع إلى: {mode_names.get(new_mode, new_mode)}")
+        
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        
+        # Refresh display
+        await self.show_character_limit_settings(event, task_id)
+
+    async def start_edit_char_min(self, event, task_id):
+        """Start editing character minimum limit"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Set user state
+        self.set_user_state(user_id, 'editing_char_min', {'task_id': task_id})
+        
+        current_settings = self.db.get_character_limit_settings(task_id)
+        current_min = current_settings['min_chars']
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"character_limit_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✏️ تعديل الحد الأدنى لعدد الأحرف\n\n"
+            f"📊 القيمة الحالية: {current_min} حرف\n\n"
+            f"📝 أدخل الحد الأدنى الجديد (رقم من 1 إلى 10000):\n\n"
+            f"💡 مثال: 50"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_edit_char_max(self, event, task_id):
+        """Start editing character maximum limit"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Set user state
+        self.set_user_state(user_id, 'editing_char_max', {'task_id': task_id})
+        
+        current_settings = self.db.get_character_limit_settings(task_id)
+        current_max = current_settings['max_chars']
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"character_limit_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✏️ تعديل الحد الأقصى لعدد الأحرف\n\n"
+            f"📊 القيمة الحالية: {current_max} حرف\n\n"
+            f"📝 أدخل الحد الأقصى الجديد (رقم من 1 إلى 10000):\n\n"
+            f"💡 مثال: 1000"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_rate_limit_settings(self, event, task_id):
         """Show rate limit settings"""
@@ -8387,15 +10551,16 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"⏱️ إعدادات تحكم المعدل للمهمة: {task_name}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"📈 عدد الرسائل: {limit_text} رسالة\n"
             f"⏱️ خلال: {period_text}\n\n"
             f"📝 الوصف:\n"
-            f"يحدد هذا الإعداد عدد الرسائل المسموح بإرسالها خلال فترة زمنية محددة",
-            buttons=buttons
+            f"يحدد هذا الإعداد عدد الرسائل المسموح بإرسالها خلال فترة زمنية محددة"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_forwarding_delay_settings(self, event, task_id):
         """Show forwarding delay settings"""
@@ -8427,14 +10592,15 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"⏳ إعدادات تأخير التوجيه للمهمة: {task_name}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"⏱️ مدة التأخير: {delay_text}\n\n"
             f"📝 الوصف:\n"
-            f"يضيف تأخير زمني قبل إرسال الرسائل المُوجهة",
-            buttons=buttons
+            f"يضيف تأخير زمني قبل إرسال الرسائل المُوجهة"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def show_sending_interval_settings(self, event, task_id):
         """Show sending interval settings"""
@@ -8466,14 +10632,15 @@ class SimpleTelegramBot:
             [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
         ]
         
-        await event.edit(
+        message_text = (
             f"📊 إعدادات فترات الإرسال للمهمة: {task_name}\n\n"
             f"📊 الحالة: {status_text}\n"
             f"⏱️ الفترة بين الرسائل: {interval_text}\n\n"
             f"📝 الوصف:\n"
-            f"يحدد الفترة الزمنية بين إرسال كل رسالة والتي تليها",
-            buttons=buttons
+            f"يحدد الفترة الزمنية بين إرسال كل رسالة والتي تليها"
         )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
 
     async def toggle_forwarding_delay(self, event, task_id):
         """Toggle forwarding delay setting"""
@@ -8521,7 +10688,7 @@ class SimpleTelegramBot:
         await self.show_rate_limit_settings(event, task_id)
 
     async def show_admin_list(self, event, task_id):
-        """Show admin list for filter management"""
+        """Show source list for admin filter management"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
@@ -8540,38 +10707,35 @@ class SimpleTelegramBot:
                 buttons=[[Button.inline("🔙 رجوع", f"admin_filters_{task_id}")]]
             )
             return
-            
-        # Get admin filters for this task
-        admin_filters = self.db.get_admin_filters(task_id)
-        enabled_admins = [str(admin_filter['admin_user_id']) for admin_filter in admin_filters if admin_filter.get('is_enabled', False)]
         
         buttons = []
         for source in sources:
-            chat_id = source['chat_id']
-            chat_name = source['chat_name'] or str(chat_id)
+            chat_id = str(source['chat_id'])
+            chat_name = source['chat_name'] or f"محادثة {chat_id}"
             
-            # Check if this admin is enabled
-            is_enabled = str(chat_id) in enabled_admins
-            status_icon = "✅" if is_enabled else "❌"
+            # Get admin count for this source
+            source_admins = self.db.get_admin_filters_by_source(task_id, chat_id)
+            admin_count = len(source_admins)
+            enabled_count = len([a for a in source_admins if a['is_allowed']])
+            
+            button_text = f"📋 {chat_name}"
+            if admin_count > 0:
+                button_text += f" ({enabled_count}/{admin_count})"
             
             buttons.append([
-                Button.inline(
-                    f"{status_icon} {chat_name}",
-                    f"toggle_admin_{task_id}_{chat_id}"
-                )
+                Button.inline(button_text, f"source_admins_{task_id}_{chat_id}")
             ])
         
         buttons.extend([
-            [Button.inline("🔄 تحديث القائمة", f"refresh_admins_{task_id}")],
+            [Button.inline("🔄 تحديث من جميع المصادر", f"refresh_all_admins_{task_id}")],
             [Button.inline("🔙 رجوع", f"admin_filters_{task_id}")]
         ])
         
         await event.edit(
-            f"👥 قائمة المشرفين - {task_name}\n\n"
-            f"📋 المشرفون المتاحون:\n"
-            f"✅ = مفعل للفلترة\n"
-            f"❌ = معطل للفلترة\n\n"
-            f"💡 فقط الرسائل من المشرفين المفعلين ستمر عبر الفلتر",
+            f"👥 اختر المصدر لإدارة المشرفين - {task_name}\n\n"
+            f"📋 اختر مصدر لعرض قائمة المشرفين الخاصة به:\n\n"
+            f"💡 كل مصدر له قائمة مشرفين منفصلة\n"
+            f"📊 الأرقام تعني (المفعل/الإجمالي)",
             buttons=buttons
         )
 
@@ -8595,7 +10759,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.respond("❌ المهمة غير موجودة")
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
             return
             
         message_text = event.message.text.strip()
@@ -8613,19 +10777,19 @@ class SimpleTelegramBot:
                 success = self.db.update_watermark_position(task_id, y=value)
                 setting_name = "موقع Y للعلامة المائية"
             else:
-                await event.respond("❌ نوع إعداد غير مدعوم")
+                await self.edit_or_send_message(event, "❌ نوع إعداد غير مدعوم")
                 return
                 
             if success:
-                await event.respond(f"✅ تم تحديث {setting_name}")
+                await self.edit_or_send_message(event, f"✅ تم تحديث {setting_name}")
             else:
-                await event.respond(f"❌ فشل في تحديث {setting_name}")
+                await self.edit_or_send_message(event, f"❌ فشل في تحديث {setting_name}")
                 
         except ValueError:
-            await event.respond("❌ قيمة غير صحيحة. يرجى إدخال رقم صحيح")
+            await self.edit_or_send_message(event, "❌ قيمة غير صحيحة. يرجى إدخال رقم صحيح")
         except Exception as e:
             logger.error(f"خطأ في تحديث إعداد العلامة المائية: {e}")
-            await event.respond("❌ حدث خطأ أثناء التحديث")
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
         
         # Clear user state
         self.clear_user_state(user_id)
@@ -8636,7 +10800,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.respond("❌ المهمة غير موجودة")
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
             return
             
         message_text = event.message.text.strip()
@@ -8644,153 +10808,198 @@ class SimpleTelegramBot:
         try:
             value = int(message_text)
             if value < 1:
-                await event.respond("❌ يجب أن يكون العدد أكبر من 0")
+                await self.edit_or_send_message(event, "❌ يجب أن يكون العدد أكبر من 0")
                 return
                 
             success = self.db.update_character_limit(task_id, value)
             
             if success:
-                await event.respond(f"✅ تم تحديث حد الأحرف إلى {value}")
+                await self.edit_or_send_message(event, f"✅ تم تحديث حد الأحرف إلى {value}")
             else:
-                await event.respond("❌ فشل في تحديث حد الأحرف")
+                await self.edit_or_send_message(event, "❌ فشل في تحديث حد الأحرف")
                 
         except ValueError:
-            await event.respond("❌ يرجى إدخال رقم صحيح")
+            await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
         except Exception as e:
             logger.error(f"خطأ في تحديث حد الأحرف: {e}")
-            await event.respond("❌ حدث خطأ أثناء التحديث")
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
         
         # Clear user state
         self.clear_user_state(user_id)
 
-    async def handle_edit_rate_count(self, event, task_id):
+    async def handle_edit_rate_count(self, event, task_id, message_text=None):
         """Handle rate count input"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.respond("❌ المهمة غير موجودة")
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
             return
             
-        message_text = event.message.text.strip()
+        if message_text is None:
+            message_text = event.message.text.strip()
+        else:
+            message_text = message_text.strip()
         
         try:
             value = int(message_text)
-            if value < 1:
-                await event.respond("❌ يجب أن يكون العدد أكبر من 0")
+            if value < 1 or value > 1000:
+                await self.edit_or_send_message(event, "❌ يجب أن يكون العدد بين 1 و 1000")
                 return
                 
-            success = self.db.update_rate_limit_count(task_id, value)
+            success = self.db.update_rate_limit_settings(task_id, message_count=value)
             
             if success:
-                await event.respond(f"✅ تم تحديث عدد الرسائل إلى {value}")
+                # Show success message with back button
+                buttons = [
+                    [Button.inline("🔙 رجوع لإعدادات حد المعدل", f"rate_limit_{task_id}")]
+                ]
+                await self.edit_or_send_message(event, 
+                    f"✅ تم تحديث عدد الرسائل المسموحة بنجاح!\n\n"
+                    f"📊 العدد الجديد: {value} رسالة\n"
+                    f"🎯 المهمة: {task.get('task_name', 'مهمة بدون اسم')}",
+                    buttons=buttons
+                )
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
             else:
-                await event.respond("❌ فشل في تحديث عدد الرسائل")
+                await self.edit_or_send_message(event, "❌ فشل في تحديث عدد الرسائل")
                 
         except ValueError:
-            await event.respond("❌ يرجى إدخال رقم صحيح")
+            await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
         except Exception as e:
             logger.error(f"خطأ في تحديث عدد الرسائل: {e}")
-            await event.respond("❌ حدث خطأ أثناء التحديث")
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
         
         # Clear user state
         self.clear_user_state(user_id)
 
-    async def handle_edit_rate_period(self, event, task_id):
+    async def handle_edit_rate_period(self, event, task_id, message_text=None):
         """Handle rate period input"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.respond("❌ المهمة غير موجودة")
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
             return
             
-        message_text = event.message.text.strip()
+        if message_text is None:
+            message_text = event.message.text.strip()
+        else:
+            message_text = message_text.strip()
         
         try:
             value = int(message_text)
-            if value < 1:
-                await event.respond("❌ يجب أن يكون العدد أكبر من 0")
+            if value < 1 or value > 3600:
+                await self.edit_or_send_message(event, "❌ يجب أن تكون الفترة بين 1 و 3600 ثانية")
                 return
                 
-            success = self.db.update_rate_limit_period(task_id, value)
+            success = self.db.update_rate_limit_settings(task_id, time_period_seconds=value)
             
             if success:
-                await event.respond(f"✅ تم تحديث فترة التحكم إلى {value} ثانية")
+                # Show success message with back button
+                period_minutes = value // 60 if value >= 60 else 0
+                period_display = f"{period_minutes} دقيقة" if period_minutes > 0 else f"{value} ثانية"
+                
+                buttons = [
+                    [Button.inline("🔙 رجوع لإعدادات حد المعدل", f"rate_limit_{task_id}")]
+                ]
+                await self.edit_or_send_message(event, 
+                    f"✅ تم تحديث فترة التحكم بالمعدل بنجاح!\n\n"
+                    f"⏰ الفترة الجديدة: {period_display}\n"
+                    f"🎯 المهمة: {task.get('task_name', 'مهمة بدون اسم')}",
+                    buttons=buttons
+                )
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
             else:
-                await event.respond("❌ فشل في تحديث فترة التحكم")
+                await self.edit_or_send_message(event, "❌ فشل في تحديث فترة التحكم")
                 
         except ValueError:
-            await event.respond("❌ يرجى إدخال رقم صحيح")
+            await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
         except Exception as e:
             logger.error(f"خطأ في تحديث فترة التحكم: {e}")
-            await event.respond("❌ حدث خطأ أثناء التحديث")
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
         
         # Clear user state
         self.clear_user_state(user_id)
 
-    async def handle_edit_forwarding_delay(self, event, task_id):
+    async def handle_edit_forwarding_delay(self, event, task_id, message_text=None):
         """Handle forwarding delay input"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.respond("❌ المهمة غير موجودة")
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
             return
             
-        message_text = event.message.text.strip()
+        if message_text is None:
+            message_text = event.message.text.strip()
+        else:
+            message_text = message_text.strip()
         
         try:
             value = int(message_text)
-            if value < 0:
-                await event.respond("❌ يجب أن يكون العدد 0 أو أكبر")
+            if value < 0 or value > 300:
+                await self.edit_or_send_message(event, "❌ يجب أن يكون التأخير بين 0 و 300 ثانية")
                 return
                 
-            success = self.db.update_forwarding_delay(task_id, value)
+            success = self.db.update_forwarding_delay_settings(task_id, delay_seconds=value)
             
             if success:
-                await event.respond(f"✅ تم تحديث تأخير التوجيه إلى {value} ثانية")
+                await self.edit_or_send_message(event, f"✅ تم تحديث تأخير التوجيه إلى {value} ثانية")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
             else:
-                await event.respond("❌ فشل في تحديث تأخير التوجيه")
+                await self.edit_or_send_message(event, "❌ فشل في تحديث تأخير التوجيه")
                 
         except ValueError:
-            await event.respond("❌ يرجى إدخال رقم صحيح")
+            await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
         except Exception as e:
             logger.error(f"خطأ في تحديث تأخير التوجيه: {e}")
-            await event.respond("❌ حدث خطأ أثناء التحديث")
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
         
         # Clear user state
         self.clear_user_state(user_id)
 
-    async def handle_edit_sending_interval(self, event, task_id):
+    async def handle_edit_sending_interval(self, event, task_id, message_text=None):
         """Handle sending interval input"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.respond("❌ المهمة غير موجودة")
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
             return
             
-        message_text = event.message.text.strip()
+        if message_text is None:
+            message_text = event.message.text.strip()
+        else:
+            message_text = message_text.strip()
         
         try:
             value = int(message_text)
-            if value < 1:
-                await event.respond("❌ يجب أن يكون العدد أكبر من 0")
+            if value < 0 or value > 60:
+                await self.edit_or_send_message(event, "❌ يجب أن يكون الفاصل بين 0 و 60 ثانية")
                 return
                 
-            success = self.db.update_sending_interval(task_id, value)
+            success = self.db.update_sending_interval_settings(task_id, interval_seconds=value)
             
             if success:
-                await event.respond(f"✅ تم تحديث فترة الإرسال إلى {value} ثانية")
+                await self.edit_or_send_message(event, f"✅ تم تحديث فاصل الإرسال إلى {value} ثانية")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
             else:
-                await event.respond("❌ فشل في تحديث فترة الإرسال")
+                await self.edit_or_send_message(event, "❌ فشل في تحديث فاصل الإرسال")
                 
         except ValueError:
-            await event.respond("❌ يرجى إدخال رقم صحيح")
+            await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
         except Exception as e:
             logger.error(f"خطأ في تحديث فترة الإرسال: {e}")
-            await event.respond("❌ حدث خطأ أثناء التحديث")
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
         
         # Clear user state
         self.clear_user_state(user_id)
@@ -8841,37 +11050,65 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.respond("❌ المهمة غير موجودة")
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
             return
             
-        message_text = event.message.text.strip()
+        message_text = event.text.strip()
         
         try:
-            # Parse language codes (e.g., "ar,en,fr")
-            language_codes = [lang.strip().lower() for lang in message_text.split(',')]
-            
-            # Validate language codes
-            valid_codes = {'ar', 'en', 'fr', 'de', 'es', 'ru', 'ja', 'zh', 'ko', 'hi', 'it', 'pt'}
-            invalid_codes = [code for code in language_codes if code not in valid_codes]
-            
-            if invalid_codes:
-                await event.respond(f"❌ رموز لغات غير صحيحة: {', '.join(invalid_codes)}\n"
-                                  f"الرموز المدعومة: {', '.join(sorted(valid_codes))}")
+            # Parse language input (e.g., "en English" or "ar العربية")
+            parts = message_text.split(' ', 1)
+            if len(parts) != 2:
+                await self.edit_or_send_message(event, 
+                    "❌ تنسيق غير صحيح\n\n"
+                    "📝 استخدم التنسيق: `[كود اللغة] [اسم اللغة]`\n"
+                    "مثال: `en English` أو `ar العربية`"
+                )
                 return
-                
-            success = self.db.add_language_filters(task_id, language_codes)
+            
+            language_code = parts[0].strip().lower()
+            language_name = parts[1].strip()
+            
+            # Validate language code (2-3 characters)
+            if not (2 <= len(language_code) <= 3):
+                await self.edit_or_send_message(event, 
+                    "❌ كود اللغة غير صحيح\n\n"
+                    "📝 كود اللغة يجب أن يكون من 2-3 أحرف\n"
+                    "مثال: `en`, `ar`, `fr`"
+                )
+                return
+            
+            # Add language filter
+            success = self.db.add_language_filter(task_id, language_code, language_name, True)
             
             if success:
-                await event.respond(f"✅ تم إضافة فلاتر اللغات: {', '.join(language_codes)}")
+                # Clear conversation state
+                self.db.clear_conversation_state(user_id)
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Show success message
+                await self.edit_or_send_message(event, 
+                    f"✅ تم إضافة اللغة بنجاح!\n\n"
+                    f"🌍 اللغة: {language_name}\n"
+                    f"🔤 الكود: {language_code.upper()}\n"
+                    f"📊 الحالة: 🟢 مفعلة"
+                )
+                
+                # Refresh language management after brief delay
+                import asyncio
+                await asyncio.sleep(1.5)
+                await self.show_language_management(event, task_id)
             else:
-                await event.respond("❌ فشل في إضافة فلاتر اللغات")
+                await self.edit_or_send_message(event, "❌ فشل في إضافة اللغة")
                 
         except Exception as e:
-            logger.error(f"خطأ في إضافة فلاتر اللغات: {e}")
-            await event.respond("❌ حدث خطأ أثناء الإضافة")
-        
-        # Clear user state
-        self.clear_user_state(user_id)
+            logger.error(f"خطأ في إضافة فلتر اللغة: {e}")
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء الإضافة")
+            
+        # Clear conversation state
+        self.db.clear_conversation_state(user_id)
 
     async def toggle_language_mode(self, event, task_id):
         """Toggle language filter mode between allow and block"""
@@ -9086,6 +11323,29 @@ class SimpleTelegramBot:
 
 
 
+    def _get_bot_token(self):
+        """Get BOT_TOKEN from various sources"""
+        try:
+            # Try to import from config.py
+            from config import BOT_TOKEN
+            return BOT_TOKEN
+        except ImportError:
+            # Try to get from environment
+            import os
+            BOT_TOKEN = os.getenv('BOT_TOKEN')
+            if BOT_TOKEN:
+                return BOT_TOKEN
+            
+            # Try to get from userbot instance
+            try:
+                from userbot_service.userbot import userbot_instance
+                if hasattr(userbot_instance, 'bot_token'):
+                    return userbot_instance.bot_token
+            except:
+                pass
+            
+            return None
+
     async def show_source_admins(self, event, task_id, source_chat_id):
         """Show admins for a specific source chat"""
         user_id = event.sender_id
@@ -9106,58 +11366,147 @@ class SimpleTelegramBot:
             client = userbot_instance.clients[user_id]
             try:
                 from telethon.tl.types import ChannelParticipantsAdmins
-                admins = await client.get_participants(int(source_chat_id), filter=ChannelParticipantsAdmins())
                 
-                if not admins:
-                    await event.answer("❌ لم يتم العثور على مشرفين")
-                    return
+                # First get from database (cached) with statistics
+                admin_data = self.db.get_admin_filters_by_source_with_stats(task_id, str(source_chat_id))
+                cached_admins = admin_data['admins']
+                stats = admin_data['stats']
+                
+                # Get source name
+                sources = self.db.get_task_sources(task_id)
+                source_name = next((s['chat_name'] for s in sources if str(s['chat_id']) == str(source_chat_id)), f"محادثة {source_chat_id}")
+                
+                if not cached_admins:
+                    # If no cached admins, try to fetch from Telegram using UserBot's event loop
+                    await event.edit(f"🔄 جاري جلب المشرفين من {source_name}...")
                     
-                # Get current admin filters
-                admin_filters = self.db.get_admin_filters(task_id)
-                filtered_admin_ids = {af['admin_user_id'] for af in admin_filters}
-                
-                message = f"👥 مشرفو المصدر {source_chat_id}\n\n"
-                
-                buttons = []
-                for admin in admins[:10]:  # Limit to 10 admins
-                    if admin.bot:
-                        continue  # Skip bots
+                    # Use Bot API to get admins instead of UserBot
+                    from config import BOT_TOKEN
+                    admins_data = userbot_instance.get_channel_admins_via_bot(BOT_TOKEN, int(source_chat_id))
+                    
+                    if admins_data:
+                        logger.info(f"📋 تم جلب {len(admins_data)} مشرف من التليجرام للمصدر {source_chat_id}")
                         
-                    # Check if admin is filtered
-                    is_filtered = admin.id in filtered_admin_ids
-                    icon = "✅" if is_filtered else "❌"
+                        # Clear existing admins for this source first
+                        self.db.clear_admin_filters_for_source(task_id, str(source_chat_id))
+                        logger.info(f"🗑️ تم حذف المشرفين السابقين للمصدر {source_chat_id}")
+                        
+                        # Save to database
+                        saved_count = 0
+                        for admin_data_item in admins_data:
+                            try:
+                                self.db.add_admin_filter(
+                                    task_id, 
+                                    admin_data_item['id'], 
+                                    admin_data_item.get('username'),
+                                    admin_data_item.get('first_name', ''),
+                                    True,  # Default allow
+                                    str(source_chat_id),
+                                    admin_data_item.get('custom_title', '')  # Save admin signature
+                                )
+                                saved_count += 1
+                                logger.debug(f"✅ تم حفظ المشرف: {admin_data_item.get('first_name', 'Unknown')} (ID: {admin_data_item['id']})")
+                            except Exception as e:
+                                logger.error(f"❌ خطأ في حفظ المشرف {admin_data_item.get('first_name', 'Unknown')}: {e}")
+                        
+                        logger.info(f"💾 تم حفظ {saved_count} من {len(admins_data)} مشرف في قاعدة البيانات")
+                        
+                        # Reload from database
+                        admin_data = self.db.get_admin_filters_by_source_with_stats(task_id, str(source_chat_id))
+                        cached_admins = admin_data['admins']
+                        stats = admin_data['stats']
+                        logger.info(f"📊 تم تحميل {len(cached_admins)} مشرف من قاعدة البيانات")
+                
+                if not cached_admins:
+                    await event.edit(
+                        f"⚠️ لا يوجد مشرفين في {source_name}\n\n"
+                        f"💡 تأكد من أن المصدر قناة أو مجموعة عامة وأنك عضو فيها",
+                        buttons=[[Button.inline("🔙 رجوع", f"admin_list_{task_id}")]]
+                    )
+                    return
+                
+                # Create buttons for ALL admins without arbitrary limits
+                buttons = []
+                logger.info(f"📋 عرض جميع الـ {len(cached_admins)} مشرف للمصدر {source_chat_id}")
+                
+                # Show ALL admins, no arbitrary limits
+                for admin in cached_admins:
+                    is_allowed = admin['is_allowed']
+                    icon = "✅" if is_allowed else "❌"
                     
-                    name = f"{admin.first_name or ''} {admin.last_name or ''}".strip()
-                    if not name:
-                        name = admin.username or f"User {admin.id}"
+                    name = admin['admin_first_name'] or admin['admin_username'] or f"User {admin['admin_user_id']}"
+                    admin_signature = admin.get('admin_signature', '')
+                    
+                    # Add signature info if available
+                    if admin_signature:
+                        name = f"{name} ({admin_signature})"
+                    
+                    # Truncate if too long for button
+                    if len(name) > 30:
+                        name = name[:27] + "..."
                         
                     button_text = f"{icon} {name}"
-                    if len(button_text) > 30:
-                        button_text = button_text[:27] + "..."
-                        
-                    buttons.append([Button.inline(button_text, f"toggle_admin_{task_id}_{admin.id}_{source_chat_id}")])
+                    
+                    buttons.append([Button.inline(
+                        button_text, 
+                        f"toggle_source_admin_{task_id}_{admin['admin_user_id']}_{source_chat_id}"
+                    )])
                 
-                buttons.append([
-                    Button.inline("🔄 تحديث القائمة", f"refresh_source_admins_{task_id}_{source_chat_id}"),
-                    Button.inline("🔙 رجوع", f"admin_filter_{task_id}")
+                # Show all admins without arbitrary limits - Telegram has reasonable built-in limits
+                total_admins = len(cached_admins)
+                max_buttons_per_message = 100  # Telegram's actual limit
+                
+                if total_admins > max_buttons_per_message:
+                    logger.warning(f"📄 عدد المشرفين كبير جداً ({total_admins}), قد تحتاج لتحديث الواجهة")
+                    # Note: Keep all buttons - Telegram will handle the limit gracefully
+                    logger.info(f"📊 عرض جميع الـ {total_admins} مشرف (تحت حد التليجرام)")
+                else:
+                    logger.info(f"📊 عرض جميع الـ {total_admins} مشرف")
+                
+                # Add control buttons
+                buttons.extend([
+                    [
+                        Button.inline("🔄 تحديث من التليجرام", f"refresh_source_admins_{task_id}_{source_chat_id}"),
+                        Button.inline("✅ تفعيل الكل", f"enable_all_source_admins_{task_id}_{source_chat_id}")
+                    ],
+                    [
+                        Button.inline("❌ تعطيل الكل", f"disable_all_source_admins_{task_id}_{source_chat_id}"),
+                        Button.inline("✏️ إدارة التوقيعات", f"manage_signatures_{task_id}_{source_chat_id}")
+                    ],
+                    [
+                        Button.inline("🔙 رجوع", f"admin_list_{task_id}")
+                    ]
                 ])
                 
-                await event.edit(message, buttons=buttons)
+                # Use stats from database
+                enabled_count = stats['allowed']
+                total_count = stats['total']
+                
+                await event.edit(
+                    f"👥 مشرفو المصدر: {source_name}\n\n"
+                    f"📊 المفعل: {enabled_count} من أصل {total_count}\n"
+                    f"✅ مفعل - سيتم قبول رسائل هذا المشرف\n"
+                    f"❌ معطل - سيتم تجاهل رسائل هذا المشرف\n\n"
+                    f"💡 فقط رسائل المشرفين المفعلين ستمر عبر الفلتر\n"
+                    f"🔍 يتم الفلترة حسب توقيع المشرف (post_author)",
+                    buttons=buttons
+                )
                 
             except Exception as e:
                 logger.error(f"خطأ في جلب مشرفي المصدر {source_chat_id}: {e}")
-                await event.answer("❌ فشل في جلب قائمة المشرفين")
+                await event.edit(
+                    f"❌ فشل في جلب قائمة المشرفين من {source_name}\n\n"
+                    f"الخطأ: {str(e)}\n\n"
+                    f"💡 تأكد من أن المصدر قناة وأنك عضو فيها",
+                    buttons=[[Button.inline("🔙 رجوع", f"admin_list_{task_id}")]]
+                )
                 
         except Exception as e:
             logger.error(f"خطأ في عرض مشرفي المصدر: {e}")
             await event.answer("❌ حدث خطأ")
 
-    async def refresh_source_admin_list(self, event, task_id, source_chat_id):
-        """Refresh the admin list for a source"""
-        await self.show_source_admins(event, task_id, source_chat_id)
-
-    async def toggle_admin(self, event, task_id, admin_id, source_chat_id):
-        """Toggle admin filter for specific admin"""
+    async def toggle_source_admin_filter(self, event, task_id, admin_user_id, source_chat_id):
+        """Toggle admin filter for specific source"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
@@ -9166,33 +11515,417 @@ class SimpleTelegramBot:
             return
             
         try:
-            # Check if admin is currently filtered
-            admin_filters = self.db.get_admin_filters(task_id)
-            is_filtered = any(af['admin_user_id'] == int(admin_id) for af in admin_filters)
-            
-            if is_filtered:
-                # Remove admin filter
-                success = self.db.remove_admin_filter(task_id, int(admin_id))
-                action = "تم إلغاء فلترة"
-            else:
-                # Add admin filter
-                success = self.db.add_admin_filter(task_id, int(admin_id))
-                action = "تم فلترة"
+            # Toggle admin filter
+            success = self.db.toggle_admin_filter(task_id, admin_user_id, source_chat_id)
             
             if success:
-                await event.answer(f"✅ {action} المشرف")
+                # Check new state
+                admin_filters = self.db.get_admin_filters_by_source(task_id, source_chat_id)
+                admin_filter = next((af for af in admin_filters if af['admin_user_id'] == admin_user_id), None)
                 
-                # Force refresh UserBot tasks
-                await self._refresh_userbot_tasks(user_id)
+                if admin_filter:
+                    status = "تم تفعيل" if admin_filter['is_allowed'] else "تم تعطيل"
+                    admin_name = admin_filter['admin_first_name'] or admin_filter['admin_username'] or f"User {admin_user_id}"
+                    await event.answer(f"✅ {status} المشرف {admin_name}")
+                else:
+                    await event.answer("❌ لم يتم العثور على المشرف")
                 
-                # Refresh the admin list
+                # Refresh the display
                 await self.show_source_admins(event, task_id, source_chat_id)
             else:
-                await event.answer("❌ فشل في تحديث الفلتر")
+                await event.answer("❌ فشل في تحديث إعدادات المشرف")
                 
         except Exception as e:
-            logger.error(f"خطأ في تبديل فلتر المشرف {admin_id}: {e}")
+            logger.error(f"خطأ في تبديل فلتر المشرف {admin_user_id}: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
+
+    async def refresh_source_admins(self, event, task_id, source_chat_id):
+        """Refresh admin list for specific source from Telegram"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get admins from UserBot
+            from userbot_service.userbot import userbot_instance
+            if user_id not in userbot_instance.clients:
+                await event.answer("❌ UserBot غير متصل")
+                return
+                
+            await event.edit("🔄 جاري تحديث قائمة المشرفين من التليجرام...")
+            
+            client = userbot_instance.clients[user_id]
+            
+            # Get previous permissions to preserve them
+            existing_admins = self.db.get_admin_filters_by_source(task_id, source_chat_id)
+            previous_permissions = {admin['admin_user_id']: admin['is_allowed'] for admin in existing_admins}
+            
+            # Clear existing entries for this source
+            self.db.clear_admin_filters_for_source(task_id, source_chat_id)
+            
+            # Use Bot API to get admins instead of UserBot
+            BOT_TOKEN = self._get_bot_token()
+            if not BOT_TOKEN:
+                await event.edit(
+                    f"❌ لا يمكن العثور على BOT_TOKEN\n\n"
+                    f"💡 تأكد من إعداد BOT_TOKEN في ملف config.py أو متغير البيئة",
+                    buttons=[[Button.inline("🔙 رجوع", f"source_admins_{task_id}_{source_chat_id}")]]
+                )
+                return
+            
+            admins_data = userbot_instance.get_channel_admins_via_bot(BOT_TOKEN, int(source_chat_id))
+            
+            if admins_data:
+                # Save new admins with preserved permissions
+                for admin_data in admins_data:
+                    # Use previous permission if exists, otherwise default to True
+                    is_allowed = previous_permissions.get(admin_data['id'], True)
+                        
+                    self.db.add_admin_filter(
+                        task_id, 
+                        admin_data['id'], 
+                        admin_data.get('username'),
+                        admin_data.get('first_name', ''),
+                        is_allowed,
+                        str(source_chat_id),
+                        admin_data.get('custom_title', '')  # Save admin signature
+                    )
+            
+                await event.answer(f"✅ تم تحديث {len(admins_data)} مشرف")
+            else:
+                await event.answer("❌ فشل في جلب المشرفين من التليجرام")
+            
+            # Refresh the display
+            await self.show_source_admins(event, task_id, source_chat_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في تحديث مشرفي المصدر {source_chat_id}: {e}")
+            # Handle "Content of the message was not modified" error - this is actually success
+            if "Content of the message was not modified" in str(e):
+                logger.info(f"✅ المشرفين محدثين بالفعل للمصدر {source_chat_id}")
+                await event.answer("✅ تم تحديث المشرفين بنجاح", alert=False)
+                # Always try to refresh display even if content wasn't modified
+                try:
+                    await self.show_source_admins(event, task_id, source_chat_id)
+                except Exception as refresh_error:
+                    if "Content of the message was not modified" in str(refresh_error):
+                        # If even the refresh shows no changes, just acknowledge success
+                        logger.info("✅ لا توجد تغييرات في قائمة المشرفين")
+                    else:
+                        logger.error(f"خطأ في تحديث العرض: {refresh_error}")
+            else:
+                # Real error occurred
+                try:
+                    await event.edit(
+                        f"❌ فشل في جلب قائمة المشرفين\n\n"
+                        f"الخطأ: {str(e)}\n\n"
+                        f"💡 تأكد من أن المصدر قناة وأنك عضو فيها",
+                        buttons=[[Button.inline("🔙 رجوع", f"source_admins_{task_id}_{source_chat_id}")]]
+                    )
+                except Exception as edit_error:
+                    logger.error(f"خطأ في تحديث رسالة الخطأ: {edit_error}")
+                    await event.answer(f"❌ خطأ: {str(e)}", alert=True)
+
+    async def refresh_all_admins(self, event, task_id):
+        """Refresh admin lists for all sources"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get all sources for this task
+            sources = self.db.get_task_sources(task_id)
+            if not sources:
+                await event.answer("❌ لا توجد مصادر للمهمة")
+                return
+                
+            await event.edit("🔄 جاري تحديث قوائم المشرفين لجميع المصادر...")
+            
+            total_updated = 0
+            failed_sources = []
+            
+            for source in sources:
+                source_chat_id = str(source['chat_id'])
+                source_name = source['chat_name'] or f"محادثة {source_chat_id}"
+                
+                try:
+                    # Call refresh for each source without UI updates
+                    from userbot_service.userbot import userbot_instance
+                    if user_id not in userbot_instance.clients:
+                        continue
+                        
+                    client = userbot_instance.clients[user_id]
+                    
+                    # Get previous permissions
+                    existing_admins = self.db.get_admin_filters_by_source(task_id, source_chat_id)
+                    previous_permissions = {admin['admin_user_id']: admin['is_allowed'] for admin in existing_admins}
+                    
+                    # Clear existing entries for this source
+                    self.db.clear_admin_filters_for_source(task_id, source_chat_id)
+                    
+                    # Use Bot API to get admins instead of UserBot
+                    BOT_TOKEN = self._get_bot_token()
+                    if not BOT_TOKEN:
+                        logger.error(f"لا يمكن العثور على BOT_TOKEN للمصدر {source_chat_id}")
+                        continue
+                    
+                    admins_data = userbot_instance.get_channel_admins_via_bot(BOT_TOKEN, int(source_chat_id))
+                    
+                    if admins_data:
+                        # Save new admins
+                        for admin_data in admins_data:
+                            is_allowed = previous_permissions.get(admin_data['id'], True)
+                                
+                            self.db.add_admin_filter(
+                                task_id, 
+                                admin_data['id'], 
+                                admin_data.get('username'),
+                                admin_data.get('first_name', ''),
+                                is_allowed,
+                                source_chat_id,
+                                admin_data.get('admin_signature', '')  # Save admin signature
+                            )
+                        
+                        total_updated += len(admins_data)
+                    
+                except Exception as e:
+                    logger.error(f"خطأ في تحديث مشرفي {source_name}: {e}")
+                    failed_sources.append(source_name)
+            
+            # Show results
+            message = f"✅ تم تحديث {total_updated} مشرف من {len(sources)} مصادر"
+            if failed_sources:
+                message += f"\n\n❌ فشل التحديث من: {', '.join(failed_sources)}"
+            
+            await event.answer(message)
+            
+            # Refresh the main admin list display
+            await self.show_admin_list(event, task_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في تحديث جميع المشرفين: {e}")
+            # Handle "Content of the message was not modified" error
+            if "Content of the message was not modified" in str(e):
+                await event.answer("✅ تم تحديث جميع المشرفين بنجاح")
+                # Refresh the main admin list display
+                await self.show_admin_list(event, task_id)
+            else:
+                try:
+                    await event.answer(f"❌ خطأ: {str(e)}")
+                except:
+                    await event.answer(f"❌ خطأ: {str(e)}")
+
+    async def enable_all_source_admins(self, event, task_id, source_chat_id):
+        """Enable all admins for specific source"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get all admins for this source
+            admins = self.db.get_admin_filters_by_source(task_id, source_chat_id)
+            if not admins:
+                await event.answer("❌ لا يوجد مشرفين في هذا المصدر")
+                return
+            
+            # Create permissions dict for bulk update
+            admin_permissions = {admin['admin_user_id']: True for admin in admins}
+            
+            # Bulk update all admins to allowed
+            updated_count = self.db.bulk_update_admin_permissions(task_id, source_chat_id, admin_permissions)
+                
+            await event.answer(f"✅ تم تفعيل {updated_count} مشرف")
+            
+            # Refresh the display
+            await self.show_source_admins(event, task_id, source_chat_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في تفعيل جميع المشرفين: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def disable_all_source_admins(self, event, task_id, source_chat_id):
+        """Disable all admins for specific source"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get all admins for this source
+            admins = self.db.get_admin_filters_by_source(task_id, source_chat_id)
+            if not admins:
+                await event.answer("❌ لا يوجد مشرفين في هذا المصدر")
+                return
+            
+            # Create permissions dict for bulk update
+            admin_permissions = {admin['admin_user_id']: False for admin in admins}
+            
+            # Bulk update all admins to blocked
+            updated_count = self.db.bulk_update_admin_permissions(task_id, source_chat_id, admin_permissions)
+                
+            await event.answer(f"❌ تم تعطيل {updated_count} مشرف")
+            
+            # Refresh the display
+            await self.show_source_admins(event, task_id, source_chat_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في تعطيل جميع المشرفين: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def refresh_source_admin_list(self, event, task_id, source_chat_id):
+        """Refresh the admin list for a source"""
+        await self.show_source_admins(event, task_id, source_chat_id)
+
+    async def manage_admin_signatures(self, event, task_id, source_chat_id):
+        """Manage admin signatures for a specific source"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get admins with their signatures
+            admins = self.db.get_admin_filters_by_source(task_id, source_chat_id)
+            if not admins:
+                await event.answer("❌ لا يوجد مشرفين في هذا المصدر")
+                return
+            
+            # Get source name
+            sources = self.db.get_task_sources(task_id)
+            source_name = next((s['chat_name'] for s in sources if str(s['chat_id']) == str(source_chat_id)), f"محادثة {source_chat_id}")
+            
+            # Create buttons for signature management
+            buttons = []
+            for admin in admins:
+                admin_name = admin['admin_first_name'] or admin['admin_username'] or f"User {admin['admin_user_id']}"
+                admin_signature = admin.get('admin_signature', '')
+                
+                # Truncate if too long for button
+                if len(admin_name) > 25:
+                    admin_name = admin_name[:22] + "..."
+                
+                if admin_signature:
+                    button_text = f"✏️ {admin_name} ({admin_signature})"
+                else:
+                    button_text = f"➕ {admin_name} (بدون توقيع)"
+                
+                buttons.append([Button.inline(
+                    button_text, 
+                    f"edit_admin_signature_{task_id}_{admin['admin_user_id']}_{source_chat_id}"
+                )])
+            
+            # Add control buttons
+            buttons.extend([
+                [Button.inline("🔄 تحديث من التليجرام", f"refresh_source_admins_{task_id}_{source_chat_id}")],
+                [Button.inline("🔙 رجوع", f"source_admins_{task_id}_{source_chat_id}")]
+            ])
+            
+            await event.edit(
+                f"✏️ إدارة توقيعات المشرفين - {source_name}\n\n"
+                f"📝 التوقيع هو الاسم الذي يظهر في رسائل المشرف\n"
+                f"🔍 يتم استخدامه لفلترة الرسائل حسب المؤلف\n\n"
+                f"💡 اضغط على المشرف لتعديل توقيعه",
+                buttons=buttons
+            )
+            
+        except Exception as e:
+            logger.error(f"خطأ في إدارة توقيعات المشرفين: {e}")
+            await event.answer("❌ حدث خطأ")
+
+    async def edit_admin_signature(self, event, task_id, admin_user_id, source_chat_id):
+        """Edit admin signature"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get admin info
+            admin = self.db.get_admin_filter_setting(task_id, admin_user_id)
+            if not admin:
+                await event.answer("❌ المشرف غير موجود")
+                return
+            
+            admin_name = admin['admin_first_name'] or admin['admin_username'] or f"User {admin_user_id}"
+            current_signature = admin.get('admin_signature', '')
+            
+            # Set user state for signature input
+            self.set_user_state(user_id, f"edit_signature_{task_id}_{admin_user_id}", {'source_chat_id': source_chat_id})
+            
+            buttons = [[Button.inline("🔙 رجوع", f"manage_signatures_{task_id}_{source_chat_id}")]]
+            
+            if current_signature:
+                message = (
+                    f"✏️ تعديل توقيع المشرف: {admin_name}\n\n"
+                    f"📝 التوقيع الحالي: {current_signature}\n\n"
+                    f"💬 أرسل التوقيع الجديد أو 'حذف' لحذف التوقيع"
+                )
+            else:
+                message = (
+                    f"✏️ إضافة توقيع للمشرف: {admin_name}\n\n"
+                    f"💬 أرسل التوقيع الجديد"
+                )
+            
+            await event.edit(message, buttons=buttons)
+            
+        except Exception as e:
+            logger.error(f"خطأ في تعديل توقيع المشرف: {e}")
+            await event.answer("❌ حدث خطأ")
+
+    async def handle_signature_input(self, event, task_id, admin_user_id, source_chat_id):
+        """Handle admin signature input"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
+            return
+            
+        message_text = event.message.text.strip()
+        
+        try:
+            if message_text.lower() == 'حذف':
+                # Remove signature
+                success = self.db.update_admin_signature(task_id, admin_user_id, source_chat_id, '')
+                if success:
+                    await self.edit_or_send_message(event, "✅ تم حذف توقيع المشرف")
+                else:
+                    await self.edit_or_send_message(event, "❌ فشل في حذف التوقيع")
+            else:
+                # Update signature
+                success = self.db.update_admin_signature(task_id, admin_user_id, source_chat_id, message_text)
+                if success:
+                    await self.edit_or_send_message(event, f"✅ تم تحديث توقيع المشرف إلى: {message_text}")
+                else:
+                    await self.edit_or_send_message(event, "❌ فشل في تحديث التوقيع")
+            
+            # Clear user state
+            self.clear_user_state(user_id)
+            
+            # Return to signature management
+            await self.manage_admin_signatures(event, task_id, source_chat_id)
+            
+        except Exception as e:
+            logger.error(f"خطأ في معالجة توقيع المشرف: {e}")
+            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
+            self.clear_user_state(user_id)
+
+    # Duplicate function removed - using the one at line 9137
 
     async def toggle_language(self, event, task_id, language_code):
         """Toggle specific language in language filter"""
@@ -9243,38 +11976,7 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في تبديل فلتر اللغة {language_code}: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
 
-    async def toggle_language_mode(self, event, task_id):
-        """Toggle language filter mode between allow and block"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-            
-        try:
-            # Get current mode and toggle
-            current_settings = self.db.get_language_filter_settings(task_id)
-            current_mode = current_settings.get('filter_mode', 'allow')
-            new_mode = 'block' if current_mode == 'allow' else 'allow'
-            
-            success = self.db.set_language_filter_mode(task_id, new_mode)
-            
-            if success:
-                mode_text = "السماح" if new_mode == 'allow' else "الحظر"
-                await event.answer(f"✅ تم تغيير الوضع إلى {mode_text}")
-                
-                # Force refresh UserBot tasks
-                await self._refresh_userbot_tasks(user_id)
-                
-                # Refresh the language filter display
-                await self.show_language_filters(event, task_id)
-            else:
-                await event.answer("❌ فشل في تغيير الوضع")
-                
-        except Exception as e:
-            logger.error(f"خطأ في تبديل وضع فلتر اللغة: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+    # Duplicate function removed - using the one at line 9107
 
     async def toggle_forwarding_filter_mode(self, event, task_id):
         """Toggle forwarding filter mode"""
@@ -9349,6 +12051,317 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"خطأ في تبديل فلتر الأزرار الشفافة: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
+    
+    async def show_inline_button_filter(self, event, task_id):
+        """Show inline button filter settings for specific callback"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = settings.get('inline_button_filter_enabled', False)
+        button_setting = self.db.get_inline_button_filter_setting(task_id)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        mode_text = "حظر الرسائل" if button_setting else "حذف الأزرار"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_inline_button_filter_enabled_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_inline_block_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        # Add timestamp to force UI refresh
+        import time
+        timestamp = int(time.time()) % 100
+        
+        try:
+            await event.edit(
+                f"🔘 فلتر الأزرار الإنلاين - المهمة #{task_id}\n\n"
+                f"📊 الحالة: {status_text}\n"
+                f"⚙️ الوضع: {mode_text}\n\n"
+                f"💡 هذا الفلتر يتحكم في الرسائل التي تحتوي على أزرار إنلاين\n"
+                f"⏰ آخر تحديث: {timestamp}",
+                buttons=buttons
+            )
+        except Exception as e:
+            if "Content of the message was not modified" not in str(e):
+                raise e
+            logger.debug("المحتوى لم يتغير، فلتر الأزرار الإنلاين محدث بنجاح")
+    
+    async def show_forwarded_message_filter(self, event, task_id):
+        """Show forwarded message filter settings for specific callback"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        # Get current settings
+        settings = self.db.get_advanced_filters_settings(task_id)
+        is_enabled = settings.get('forwarded_message_filter_enabled', False)
+        block_setting = self.db.get_forwarded_message_filter_setting(task_id)
+        
+        status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
+        mode_text = "حظر الرسائل المُوجهة" if block_setting else "نسخ بدون علامة توجيه"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_advanced_filter_forwarded_message_filter_enabled_{task_id}")],
+            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"toggle_forwarded_block_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر المتقدمة", f"advanced_filters_{task_id}")]
+        ]
+        
+        # Add timestamp to force UI refresh
+        import time
+        timestamp = int(time.time()) % 100
+        
+        try:
+            await event.edit(
+                f"↗️ فلتر الرسائل المُوجهة - المهمة #{task_id}\n\n"
+                f"📊 الحالة: {status_text}\n"
+                f"⚙️ الوضع: {mode_text}\n\n"
+                f"💡 هذا الفلتر يتحكم في الرسائل المُوجهة من مصادر أخرى\n"
+                f"⏰ آخر تحديث: {timestamp}",
+                buttons=buttons
+            )
+        except Exception as e:
+            if "Content of the message was not modified" not in str(e):
+                raise e
+            logger.debug("المحتوى لم يتغير، فلتر الرسائل المُوجهة محدث بنجاح")
+
+    async def toggle_forwarded_message_block(self, event, task_id):
+        """Toggle forwarded message block mode"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        try:
+            # Get current setting and toggle
+            current_setting = self.db.get_forwarded_message_filter_setting(task_id)
+            new_setting = not current_setting
+            
+            success = self.db.set_forwarded_message_filter(task_id, new_setting)
+            
+            if success:
+                mode_text = "حظر الرسائل المُعاد توجيهها" if new_setting else "السماح بالرسائل المُعاد توجيهها"
+                await event.answer(f"✅ تم تغيير الوضع إلى: {mode_text}")
+                
+                # Force refresh UserBot tasks
+                await self._refresh_userbot_tasks(user_id)
+                
+                # Refresh the display
+                try:
+                    await self.show_forwarded_message_filter(event, task_id)
+                except Exception as e:
+                    if "Content of the message was not modified" not in str(e):
+                        raise e
+                    logger.debug("المحتوى لم يتغير، فلتر الرسائل المُعاد توجيهها محدث بنجاح")
+            else:
+                await event.answer("❌ فشل في تغيير الوضع")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تبديل وضع فلتر الرسائل المُعاد توجيهها: {e}")
+            await event.answer("❌ حدث خطأ في التحديث")
+
+    async def _complete_login_process(self, event, temp_client, result, phone, user_id):
+        """Complete the login process for accounts (with or without 2FA)"""
+        try:
+            # Get session string
+            from telethon.sessions import StringSession
+            session_string = StringSession.save(temp_client.session)
+            
+            # Save to database
+            self.db.save_user_session(user_id, phone, session_string)
+            
+            # Clear conversation state
+            self.db.clear_conversation_state(user_id)
+            
+            logger.info(f"✅ تم حفظ الجلسة للمستخدم {user_id}")
+            
+            # Disconnect temp client
+            await temp_client.disconnect()
+            
+            # Start UserBot for this user (asynchronously)
+            from userbot_service.userbot import userbot_instance
+            
+            # Show immediate success message
+            buttons = [
+                [Button.inline("📝 إدارة مهام التوجيه", b"manage_tasks")],
+                [Button.inline("⚙️ الإعدادات", b"settings")],
+                [Button.inline("ℹ️ حول البوت", b"about")]
+            ]
+            
+            await self.edit_or_send_message(event, 
+                f"🎉 تم تسجيل الدخول بنجاح!\n\n"
+                f"📱 الرقم: {phone}\n"
+                f"⏳ جاري تشغيل خدمة التوجيه التلقائي...\n\n"
+                f"اختر ما تريد فعله:",
+                buttons=buttons
+            )
+            
+            # Start UserBot in the background
+            asyncio.create_task(self._start_userbot_background(user_id, session_string, event))
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في إتمام عملية تسجيل الدخول: {e}")
+            await self.edit_or_send_message(event, 
+                "❌ حدث خطأ في إتمام تسجيل الدخول\n\n"
+                "حاول مرة أخرى باستخدام /start"
+            )
+
+    async def _start_userbot_background(self, user_id: int, session_string: str, event):
+        """Start UserBot in background and update user"""
+        try:
+            from userbot_service.userbot import userbot_instance
+            success = await userbot_instance.start_with_session(user_id, session_string)
+            
+            if success:
+                logger.info(f"✅ تم تشغيل UserBot للمستخدم {user_id} في الخلفية")
+                # Optionally send a notification to user that UserBot is ready
+                try:
+                    await self.edit_or_send_message(event, "✅ تم تشغيل خدمة التوجيه التلقائي بنجاح!")
+                except:
+                    # User might have moved on, that's fine
+                    pass
+            else:
+                logger.error(f"❌ فشل في تشغيل UserBot للمستخدم {user_id}")
+                try:
+                    await self.edit_or_send_message(event, 
+                        "⚠️ فشل في تشغيل خدمة التوجيه التلقائي\n"
+                        "يمكنك المحاولة مرة أخرى باستخدام /start"
+                    )
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"خطأ في تشغيل UserBot في الخلفية للمستخدم {user_id}: {e}")
+            try:
+                await self.edit_or_send_message(event, 
+                    "⚠️ حدث خطأ في تشغيل خدمة التوجيه\n"
+                    "يمكنك المحاولة مرة أخرى باستخدام /start"
+                )
+            except:
+                pass
+
+    # Send new message versions (for input responses)
+    async def send_forwarding_delay_settings(self, event, task_id):
+        """Send new forwarding delay settings message"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_forwarding_delay_settings(task_id)
+        
+        status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        
+        if settings['delay_seconds']:
+            if settings['delay_seconds'] >= 3600:
+                delay_text = f"{settings['delay_seconds'] // 3600} ساعة"
+            elif settings['delay_seconds'] >= 60:
+                delay_text = f"{settings['delay_seconds'] // 60} دقيقة"
+            else:
+                delay_text = f"{settings['delay_seconds']} ثانية"
+        else:
+            delay_text = "غير محدد"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_forwarding_delay_{task_id}")],
+            [Button.inline(f"⏱️ تعديل التأخير ({delay_text})", f"edit_forwarding_delay_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ]
+        
+        await self.edit_or_send_message(event, 
+            f"⏳ إعدادات تأخير التوجيه للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"⏱️ مدة التأخير: {delay_text}\n\n"
+            f"📝 الوصف:\n"
+            f"يضيف تأخير زمني قبل إرسال الرسائل المُوجهة",
+            buttons=buttons
+        )
+
+    async def send_sending_interval_settings(self, event, task_id):
+        """Send new sending interval settings message"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_sending_interval_settings(task_id)
+        
+        status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        
+        if settings['interval_seconds']:
+            if settings['interval_seconds'] >= 3600:
+                interval_text = f"{settings['interval_seconds'] // 3600} ساعة"
+            elif settings['interval_seconds'] >= 60:
+                interval_text = f"{settings['interval_seconds'] // 60} دقيقة"
+            else:
+                interval_text = f"{settings['interval_seconds']} ثانية"
+        else:
+            interval_text = "غير محدد"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_sending_interval_{task_id}")],
+            [Button.inline(f"📊 تعديل الفترة ({interval_text})", f"edit_sending_interval_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ]
+        
+        await self.edit_or_send_message(event, 
+            f"📊 إعدادات فترات الإرسال للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"⏱️ الفترة بين الرسائل: {interval_text}\n\n"
+            f"📝 الوصف:\n"
+            f"يحدد الفترة الزمنية بين إرسال كل رسالة والتي تليها",
+            buttons=buttons
+        )
+
+    async def send_rate_limit_settings(self, event, task_id):
+        """Send new rate limit settings message"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        settings = self.db.get_rate_limit_settings(task_id)
+        
+        status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
+        
+        period_minutes = settings['time_period_seconds'] // 60
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_rate_limit_{task_id}")],
+            [Button.inline(f"🔢 تعديل العدد ({settings['message_count']})", f"edit_rate_count_{task_id}")],
+            [Button.inline(f"⏰ تعديل الفترة ({period_minutes} دقيقة)", f"edit_rate_period_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ]
+        
+        await self.edit_or_send_message(event, 
+            f"⚡ إعدادات حد المعدل للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"🔢 عدد الرسائل: {settings['message_count']}\n"
+            f"⏰ خلال فترة: {period_minutes} دقيقة\n\n"
+            f"📝 الوصف:\n"
+            f"يحدد هذا الإعداد عدد الرسائل المسموح بإرسالها خلال فترة زمنية محددة",
+            buttons=buttons
+        )
 
 async def run_simple_bot():
     """Run the simple telegram bot"""
@@ -9363,5 +12376,312 @@ async def run_simple_bot():
     # Return bot instance for global access
     return bot
 
-    # ===== Advanced Features Menu =====
+# Removed erroneous redefinition of class SimpleTelegramBot
+    # ===== Audio Metadata Settings =====
     
+    async def audio_metadata_settings(self, event, task_id):
+        """Show audio metadata settings menu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+            
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Load audio metadata settings from database
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        
+        status_text = "🟢 مفعل" if audio_settings['enabled'] else "🔴 معطل"
+        template_text = audio_settings['template'].title()
+        art_status = "🟢 مفعل" if audio_settings['album_art_enabled'] else "🔴 معطل"
+        merge_status = "🟢 مفعل" if audio_settings['audio_merge_enabled'] else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_metadata_{task_id}")],
+            [Button.inline(f"⚙️ إعدادات القالب ({template_text})", f"audio_template_settings_{task_id}")],
+            [Button.inline(f"🖼️ صورة الغلاف ({art_status})", f"album_art_settings_{task_id}")],
+            [Button.inline(f"🔗 دمج المقاطع ({merge_status})", f"audio_merge_settings_{task_id}")],
+            [Button.inline("⚙️ إعدادات متقدمة", f"advanced_audio_settings_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات المهمة", f"task_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🎵 إعدادات الوسوم الصوتية للمهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n"
+            f"📋 القالب: {template_text}\n"
+            f"🖼️ صورة الغلاف: {art_status}\n"
+            f"🔗 دمج المقاطع: {merge_status}\n\n"
+            f"📝 الوصف:\n"
+            f"تعديل الوسوم الصوتية (ID3v2) للملفات الصوتية قبل إعادة التوجيه\n"
+            f"• دعم جميع أنواع الوسوم (Title, Artist, Album, Year, Genre, etc.)\n"
+            f"• قوالب جاهزة للاستخدام\n"
+            f"• صورة غلاف مخصصة\n"
+            f"• دمج مقاطع صوتية إضافية\n"
+            f"• الحفاظ على الجودة 100%"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+    
+    async def toggle_audio_metadata(self, event, task_id):
+        """Toggle audio metadata processing"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Toggle and persist
+        current = self.db.get_audio_metadata_settings(task_id)
+        new_status = not bool(current.get('enabled', False))
+        self.db.update_audio_metadata_enabled(task_id, new_status)
+        
+        status_text = "🟢 مفعل" if new_status else "🔴 معطل"
+        await event.answer(f"✅ تم {'تفعيل' if new_status else 'تعطيل'} الوسوم الصوتية")
+        
+        # Refresh the settings menu
+        await self.audio_metadata_settings(event, task_id)
+    
+    async def select_audio_template(self, event, task_id):
+        """Select audio metadata template"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        buttons = [
+            [Button.inline("🔹 القالب الافتراضي", f"set_audio_template_{task_id}_default")],
+            [Button.inline("🔹 قالب محسن", f"set_audio_template_{task_id}_enhanced")],
+            [Button.inline("🔹 قالب بسيط", f"set_audio_template_{task_id}_minimal")],
+            [Button.inline("🔹 قالب احترافي", f"set_audio_template_{task_id}_professional")],
+            [Button.inline("🔹 قالب مخصص", f"set_audio_template_{task_id}_custom")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"📋 اختيار قالب الوسوم الصوتية للمهمة: {task_name}\n\n"
+            f"🔹 القوالب المتاحة:\n\n"
+            f"**🔹 القالب الافتراضي**:\n"
+            f"يحافظ على الوسوم الأصلية مع إضافة تعليق\n\n"
+            f"**🔹 قالب محسن**:\n"
+            f"يضيف 'Enhanced' للعنوان ويحسن التعليق\n\n"
+            f"**🔹 قالب بسيط**:\n"
+            f"يحتوي على الوسوم الأساسية فقط\n\n"
+            f"**🔹 قالب احترافي**:\n"
+            f"مناسب للاستخدام التجاري والمهني\n\n"
+            f"**🔹 قالب مخصص**:\n"
+            f"للعلامات التجارية والتخصيص الكامل\n\n"
+            f"اختر القالب المناسب لاحتياجاتك:"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+    
+    async def set_audio_template(self, event, task_id, template_name):
+        """Set audio metadata template"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Persist template
+        self.db.update_audio_metadata_template(task_id, template_name)
+        
+        template_display_name = {
+            'default': 'الافتراضي',
+            'enhanced': 'محسن',
+            'minimal': 'بسيط',
+            'professional': 'احترافي',
+            'custom': 'مخصص'
+        }.get(template_name, template_name)
+        
+        await event.answer(f"✅ تم اختيار قالب '{template_display_name}'")
+        
+        # Return to audio metadata settings
+        await self.audio_metadata_settings(event, task_id)
+    
+    async def album_art_settings(self, event, task_id):
+        """Show album art settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get current album art settings
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        art_enabled = audio_settings.get('album_art_enabled', False)
+        apply_to_all = audio_settings.get('apply_art_to_all', False)
+        art_path = audio_settings.get('album_art_path', '')
+        
+        art_status = "🟢 مفعل" if art_enabled else "🔴 معطل"
+        apply_all_status = "🟢 نعم" if apply_to_all else "🔴 لا"
+        art_path_display = art_path if art_path else "غير محدد"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({art_status.split()[0]})", f"toggle_album_art_enabled_{task_id}")],
+            [Button.inline("🖼️ رفع صورة غلاف", f"upload_album_art_{task_id}")],
+            [Button.inline(f"⚙️ تطبيق على الجميع ({apply_all_status.split()[0]})", f"toggle_apply_art_to_all_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🖼️ إعدادات صورة الغلاف للمهمة: {task_name}\n\n"
+            f"📝 الوصف:\n"
+            f"• رفع صورة غلاف مخصصة للملفات الصوتية\n"
+            f"• خيار تطبيقها على جميع الملفات\n"
+            f"• خيار تطبيقها فقط على الملفات بدون صورة\n"
+            f"• الحفاظ على الجودة 100%\n"
+            f"• دعم الصيغ: JPG, PNG, BMP, TIFF\n\n"
+            f"📊 الحالة الحالية:\n"
+            f"• الحالة: {art_status}\n"
+            f"• تطبيق على الجميع: {apply_all_status}\n"
+            f"• المسار الحالي: {art_path_display}\n\n"
+            f"اختر الإعداد الذي تريد تعديله أو ارفع صورة جديدة:"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+    
+    async def audio_merge_settings(self, event, task_id):
+        """Show audio merge settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get current audio merge settings
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        merge_enabled = audio_settings.get('audio_merge_enabled', False)
+        intro_path = audio_settings.get('intro_path', '')
+        outro_path = audio_settings.get('outro_path', '')
+        intro_position = audio_settings.get('intro_position', 'start')
+        
+        merge_status = "🟢 مفعل" if merge_enabled else "🔴 معطل"
+        intro_path_display = intro_path if intro_path else "غير محدد"
+        outro_path_display = outro_path if outro_path else "غير محدد"
+        intro_position_display = "البداية" if intro_position == 'start' else "النهاية"
+        
+        buttons = [
+            [Button.inline(f"🎚️ تبديل حالة الدمج ({merge_status.split()[0]})", f"toggle_audio_merge_{task_id}")],
+            [Button.inline("🎵 مقطع مقدمة", f"intro_audio_settings_{task_id}")],
+            [Button.inline("🎵 مقطع خاتمة", f"outro_audio_settings_{task_id}")],
+            [Button.inline("⚙️ خيارات الدمج", f"merge_options_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🔗 إعدادات دمج المقاطع الصوتية للمهمة: {task_name}\n\n"
+            f"📝 الوصف:\n"
+            f"• إضافة مقطع مقدمة في البداية\n"
+            f"• إضافة مقطع خاتمة في النهاية\n"
+            f"• اختيار موضع المقدمة (بداية أو نهاية)\n"
+            f"• دعم جميع الصيغ الصوتية\n"
+            f"• جودة عالية 320k MP3\n\n"
+            f"📊 الحالة الحالية:\n"
+            f"• حالة الدمج: {merge_status}\n"
+            f"• مقدمة: {intro_path_display}\n"
+            f"• خاتمة: {outro_path_display}\n"
+            f"• موضع المقدمة: {intro_position_display}\n\n"
+            f"اختر الإعداد الذي تريد تعديله:"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+    
+    async def advanced_audio_settings(self, event, task_id):
+        """Show advanced audio settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get current advanced settings
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        preserve_quality = audio_settings.get('preserve_quality', True)
+        convert_to_mp3 = audio_settings.get('convert_to_mp3', False)
+        
+        preserve_status = "🟢" if preserve_quality else "🔴"
+        convert_status = "🟢" if convert_to_mp3 else "🔴"
+        
+        buttons = [
+            [Button.inline(f"{preserve_status} الحفاظ على الجودة", f"toggle_preserve_quality_{task_id}")],
+            [Button.inline(f"{convert_status} التحويل إلى MP3", f"toggle_convert_to_mp3_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"⚙️ الإعدادات المتقدمة للوسوم الصوتية للمهمة: {task_name}\n\n"
+            f"📝 الوصف:\n"
+            f"• الحفاظ على الجودة الأصلية 100%\n"
+            f"• تحويل إلى MP3 مع الحفاظ على الدقة\n"
+            f"• معالجة مرة واحدة وإعادة الاستخدام\n"
+            f"• Cache ذكي للملفات المعالجة\n"
+            f"• إعدادات الأداء والسرعة\n\n"
+            f"📊 الحالة الحالية:\n"
+            f"• الحفاظ على الجودة: {preserve_status} {'مفعل' if preserve_quality else 'معطل'}\n"
+            f"• التحويل إلى MP3: {convert_status} {'مفعل' if convert_to_mp3 else 'معطل'}\n\n"
+            f"اختر الإعداد الذي تريد تعديله:"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def show_album_art_options(self, event, task_id: int):
+        settings = self.db.get_audio_metadata_settings(task_id)
+        art_status = "🟢 مفعل" if settings.get('album_art_enabled') else "🔴 معطل"
+        apply_all_status = "🟢 نعم" if settings.get('apply_art_to_all') else "🔴 لا"
+        buttons = [
+            [Button.inline(f"🔄 تبديل صورة الغلاف ({art_status})", f"toggle_album_art_enabled_{task_id}")],
+            [Button.inline(f"📦 تطبيق على جميع الملفات ({apply_all_status})", f"toggle_apply_art_to_all_{task_id}")],
+            [Button.inline("🔙 رجوع", f"album_art_settings_{task_id}")]
+        ]
+        await self.edit_or_send_message(event, "⚙️ خيارات صورة الغلاف:", buttons=buttons)
+
+    async def show_intro_audio_settings(self, event, task_id: int):
+        settings = self.db.get_audio_metadata_settings(task_id)
+        intro_path = settings.get('intro_audio_path') or 'غير محدد'
+        buttons = [
+            [Button.inline("⬆️ رفع مقدمة", f"upload_intro_audio_{task_id}")],
+            [Button.inline("🗑️ حذف المقدمة", f"remove_intro_audio_{task_id}")],
+            [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
+        ]
+        await self.edit_or_send_message(event, f"🎵 مقدمة حالية: {intro_path}", buttons=buttons)
+
+    async def show_outro_audio_settings(self, event, task_id: int):
+        settings = self.db.get_audio_metadata_settings(task_id)
+        outro_path = settings.get('outro_audio_path') or 'غير محدد'
+        buttons = [
+            [Button.inline("⬆️ رفع خاتمة", f"upload_outro_audio_{task_id}")],
+            [Button.inline("🗑️ حذف الخاتمة", f"remove_outro_audio_{task_id}")],
+            [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
+        ]
+        await self.edit_or_send_message(event, f"🎵 خاتمة حالية: {outro_path}", buttons=buttons)
+
+    async def show_merge_options(self, event, task_id: int):
+        settings = self.db.get_audio_metadata_settings(task_id)
+        pos = settings.get('intro_position', 'start')
+        pos_text = 'البداية' if pos == 'start' else 'النهاية'
+        buttons = [
+            [Button.inline("⬆️ المقدمة في البداية", f"set_intro_position_start_{task_id}")],
+            [Button.inline("⬇️ المقدمة في النهاية", f"set_intro_position_end_{task_id}")],
+            [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
+        ]
+        await self.edit_or_send_message(event, f"⚙️ موضع المقدمة الحالي: {pos_text}", buttons=buttons)
+
+    # ===== Advanced Features Menu =====
