@@ -333,8 +333,11 @@ class UserbotService:
                     del self.clients[user_id]
                 
                 for attr in ['user_tasks', 'album_collectors', 'session_health_status']:
-                    if hasattr(self, attr) and user_id in getattr(self, attr):
-                        delattr(self, attr)[user_id]
+                    if hasattr(self, attr):
+                        try:
+                            getattr(self, attr).pop(user_id, None)
+                        except Exception:
+                            pass
 
         except Exception as e:
             logger.error(f"خطأ في إيقاف جلسة المستخدم {user_id}: {e}")
@@ -1429,6 +1432,7 @@ class UserbotService:
                                                 logger.info(f"📁 سيتم إرسال الملف باسم (تفكيك الألبوم): {filename_to_send}")
                                                 
                                                 # For photos with watermarks, ensure they're sent as photos
+                                                is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
                                                 if is_photo and media_to_send != event.message.media:
                                                     # Send watermarked photo as photo (not document)
                                                     from send_file_helper import TelethonFileSender
@@ -1856,9 +1860,7 @@ class UserbotService:
     def is_media_allowed(self, task_id, media_type):
         """Check if media type is allowed for this task"""
         try:
-            from database.database import Database
-            db = Database()
-            filters = db.get_task_media_filters(task_id)
+            filters = self.db.get_task_media_filters(task_id)
 
             # Default is allowed if no filter is set
             is_allowed = filters.get(media_type, True)
@@ -1871,11 +1873,8 @@ class UserbotService:
     async def is_admin_allowed_by_signature(self, task_id: int, message, source_chat_id: str) -> bool:
         """Check if admin is allowed based on message post_author signature"""
         try:
-            from database.database import Database
-            db = Database()
-            
             # Check if admin filter is enabled for this task
-            admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
+            admin_filter_enabled = self.db.is_advanced_filter_enabled(task_id, 'admin')
             logger.info(f"👮‍♂️ [ADMIN FILTER] فلتر المشرفين مُفعل: {admin_filter_enabled}")
 
             if not admin_filter_enabled:
@@ -1883,7 +1882,7 @@ class UserbotService:
                 return True
             
             # Get admin filter settings for this specific source
-            admin_filters = db.get_admin_filters_by_source(task_id, source_chat_id)
+            admin_filters = self.db.get_admin_filters_by_source(task_id, source_chat_id)
             
             if not admin_filters:
                 # No admin filters configured for this source, allow everything
@@ -1927,13 +1926,10 @@ class UserbotService:
     async def is_admin_allowed(self, task_id, sender_id):
         """Check if message sender is allowed by admin filters using new logic"""
         try:
-            from database.database import Database
-            db = Database()
-
             logger.info(f"👮‍♂️ [ADMIN FILTER] فحص المهمة: {task_id}, المرسل: {sender_id}")
 
             # Check if admin filter is enabled for this task
-            admin_filter_enabled = db.is_advanced_filter_enabled(task_id, 'admin')
+            admin_filter_enabled = self.db.is_advanced_filter_enabled(task_id, 'admin')
             logger.info(f"👮‍♂️ [ADMIN FILTER] فلتر المشرفين مُفعل: {admin_filter_enabled}")
 
             if not admin_filter_enabled:
@@ -1962,9 +1958,7 @@ class UserbotService:
     def is_message_allowed_by_word_filter(self, task_id, message_text):
         """Check if message is allowed by word filters"""
         try:
-            from database.database import Database
-            db = Database()
-            is_allowed = db.is_message_allowed_by_word_filter(task_id, message_text)
+            is_allowed = self.db.is_message_allowed_by_word_filter(task_id, message_text)
             logger.info(f"🔍 فحص فلتر الكلمات: المهمة {task_id}, مسموح: {is_allowed}")
             return is_allowed
         except Exception as e:
@@ -1974,9 +1968,7 @@ class UserbotService:
     def apply_text_replacements(self, task_id, message_text):
         """Apply text replacements to message text"""
         try:
-            from database.database import Database
-            db = Database()
-            modified_text = db.apply_text_replacements(task_id, message_text)
+            modified_text = self.db.apply_text_replacements(task_id, message_text)
             return modified_text
         except Exception as e:
             logger.error(f"خطأ في تطبيق الاستبدالات النصية: {e}")
@@ -2137,9 +2129,7 @@ class UserbotService:
     def get_message_settings(self, task_id: int) -> dict:
         """Get message formatting settings for a task"""
         try:
-            from database.database import Database
-            db = Database()
-            settings = db.get_message_settings(task_id)
+            settings = self.db.get_message_settings(task_id)
             logger.info(f"🔧 إعدادات الرسالة للمهمة {task_id}: أزرار إنلاين={settings.get('inline_buttons_enabled', False)}")
             return settings
         except Exception as e:
@@ -2155,9 +2145,7 @@ class UserbotService:
     def get_forwarding_settings(self, task_id: int) -> dict:
         """Get forwarding settings for a task"""
         try:
-            from database.database import Database
-            db = Database()
-            settings = db.get_forwarding_settings(task_id)
+            settings = self.db.get_forwarding_settings(task_id)
             logger.info(f"🔧 إعدادات التوجيه للمهمة {task_id}: معاينة الرابط={settings.get('link_preview_enabled', True)}, تثبيت={settings.get('pin_message_enabled', False)}")
             return settings
         except Exception as e:
@@ -2494,11 +2482,9 @@ class UserbotService:
     def build_inline_buttons(self, task_id: int):
         """Build inline buttons for a task"""
         try:
-            from database.database import Database
             from telethon import Button
 
-            db = Database()
-            buttons_data = db.get_inline_buttons(task_id)
+            buttons_data = self.db.get_inline_buttons(task_id)
 
             logger.info(f"🔍 فحص أزرار إنلاين للمهمة {task_id}: تم العثور على {len(buttons_data) if buttons_data else 0} زر")
 
@@ -3458,18 +3444,8 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في إيقاف UserBot للمستخدم {user_id}: {e}")
 
-    async def stop_all(self):
-        """Stop all userbot clients"""
-        try:
-            self.running = False
-
-            for user_id in list(self.clients.keys()):
-                await self.stop_user(user_id)
-
-            logger.info("تم إيقاف جميع UserBot clients")
-
-        except Exception as e:
-            logger.error(f"خطأ في إيقاف UserBots: {e}")
+    
+    # Removed duplicate stop_all; unified earlier implementation stop_all that calls stop_user_session
 
     async def get_user_info(self, user_id: int) -> Optional[Dict]:
         """Get user info from userbot"""
@@ -3817,41 +3793,7 @@ class UserbotService:
             except Exception as e:
                 logger.error(f"خطأ في مراقبة صحة الجلسات: {e}")
 
-    async def stop_user_session(self, user_id: int):
-        """Stop and cleanup user session safely"""
-        try:
-            # Create lock if not exists
-            if user_id not in self.user_locks:
-                self.user_locks[user_id] = asyncio.Lock()
-
-            async with self.user_locks[user_id]:
-                # Disconnect client if exists
-                if user_id in self.clients:
-                    client = self.clients[user_id]
-                    try:
-                        await client.disconnect()
-                        logger.info(f"🔌 تم فصل العميل للمستخدم {user_id}")
-                    except Exception as e:
-                        logger.warning(f"خطأ في فصل العميل: {e}")
-                    finally:
-                        del self.clients[user_id]
-
-                # Clean up data structures
-                if user_id in self.user_tasks:
-                    del self.user_tasks[user_id]
-                if user_id in self.album_collectors:
-                    del self.album_collectors[user_id]
-                if user_id in self.session_health_status:
-                    del self.session_health_status[user_id]
-                
-                # Release session lock
-                if user_id in self.session_locks:
-                    self.session_locks[user_id] = False
-
-                logger.info(f"✅ تم تنظيف جلسة المستخدم {user_id} بالكامل")
-
-        except Exception as e:
-            logger.error(f"خطأ في إيقاف جلسة المستخدم {user_id}: {e}")
+    # Removed duplicate stop_user_session; using the earlier, more complete implementation above
 
     async def process_pending_admin_tasks(self):
         """Process pending admin fetch tasks in the main event loop"""
