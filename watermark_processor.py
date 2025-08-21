@@ -1142,6 +1142,104 @@ class WatermarkProcessor:
             logger.error(f"خطأ في ضغط الفيديو: {e}")
             return False
     
+    def _compress_video_maximum(self, input_path: str, output_path: str, preserve_resolution: bool = True) -> bool:
+        """ضغط الفيديو للحصول على أقصى ضغط ممكن مع الحفاظ على الدقة الأصلية"""
+        try:
+            logger.info("🔥 تطبيق أقصى ضغط ممكن للفيديو مع الحفاظ على الدقة...")
+            
+            # الحصول على معلومات الفيديو الأصلي
+            video_info = self.get_video_info(input_path)
+            if not video_info:
+                logger.warning("فشل في الحصول على معلومات الفيديو")
+                return False
+            
+            original_width = video_info.get('width', 0)
+            original_height = video_info.get('height', 0)
+            duration = video_info.get('duration', 0)
+            original_size = video_info.get('size_mb', 0)
+            
+            # حساب معدل البت منخفض جداً للحصول على أقصى ضغط
+            target_bitrate = int((original_size * 8 * 1024 * 1024 * 0.15) / duration) if duration > 0 else 300000  # تقليل 85%
+            target_bitrate = max(target_bitrate, 200000)  # حد أدنى 200 kbps
+            
+            logger.info(f"🎯 أقصى ضغط: {original_width}x{original_height}, معدل البت: {target_bitrate/1000:.0f} kbps")
+            
+            # إعدادات FFmpeg للحصول على أقصى ضغط ممكن مع الحفاظ على الدقة
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', input_path,
+                # إعدادات الفيديو - ضغط أقصى
+                '-c:v', 'libx264',               # كودك H.264
+                '-preset', 'veryslow',           # أبطء إعداد للحصول على أقصى ضغط
+                '-crf', '28',                    # جودة منخفضة للحصول على حجم أصغر
+                '-maxrate', f'{target_bitrate}', # معدل بت منخفض جداً
+                '-bufsize', f'{target_bitrate}', # حجم buffer مساوي لمعدل البت
+                '-profile:v', 'high',            # ملف عالي للضغط الأمثل
+                '-level', '4.1',                 # مستوى عالي
+                '-tune', 'film',                 # تحسين للفيديوهات
+                # إعدادات متقدمة لأقصى ضغط
+                '-x264opts', 'ref=5:bframes=16:b-adapt=2:direct=auto:me=umh:merange=24:subme=10:psy-rd=1.0,0.1:deblock=1,1:trellis=2:aq-mode=2:aq-strength=1.0',
+                # إعدادات الصوت - ضغط أقصى
+                '-c:a', 'aac',                   # كودك الصوت
+                '-b:a', '64k',                   # معدل بت صوت منخفض جداً
+                '-ar', '22050',                  # معدل عينات منخفض
+                '-ac', '1',                      # صوت أحادي لتوفير المساحة
+                # إعدادات إضافية للضغط الأقصى
+                '-movflags', '+faststart',       # تحسين التشغيل
+                '-pix_fmt', 'yuv420p',           # تنسيق بكسل متوافق
+                '-g', '15',                      # مجموعة صور صغيرة
+                '-keyint_min', '5',              # الحد الأدنى لمجموعة الصور
+                '-sc_threshold', '0',            # تعطيل تبديل المشهد
+                '-threads', '0',                 # استخدام كل المعالجات
+                output_path
+            ]
+            
+            # إضافة إعدادات الحفاظ على الدقة إن طُلب ذلك
+            if preserve_resolution:
+                # إدراج إعدادات الحجم قبل output_path
+                cmd.insert(-1, '-s')
+                cmd.insert(-1, f'{original_width}x{original_height}')
+                logger.info(f"🔒 الحفاظ على الدقة الأصلية: {original_width}x{original_height}")
+            
+            logger.info("🚀 بدء تطبيق أقصى ضغط للفيديو...")
+            
+            # تنفيذ الضغط مع وقت أطول
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)  # timeout 15 دقيقة
+            
+            if result.returncode == 0:
+                # التحقق من النتيجة
+                final_info = self.get_video_info(output_path)
+                if final_info:
+                    final_size = final_info.get('size_mb', 0)
+                    compression_ratio = (original_size - final_size) / original_size * 100
+                    
+                    logger.info(f"✅ تم تطبيق أقصى ضغط للفيديو: "
+                               f"{original_size:.2f} MB → {final_size:.2f} MB "
+                               f"(توفير {compression_ratio:.1f}%)")
+                    
+                    # التأكد من الحفاظ على الدقة
+                    final_width = final_info.get('width', 0)
+                    final_height = final_info.get('height', 0)
+                    if preserve_resolution and (final_width != original_width or final_height != original_height):
+                        logger.warning(f"⚠️ تغيرت الدقة: {original_width}x{original_height} → {final_width}x{final_height}")
+                    else:
+                        logger.info(f"✅ تم الحفاظ على الدقة الأصلية: {final_width}x{final_height}")
+                    
+                    return True
+                else:
+                    logger.warning("تم إنشاء الفيديو ولكن فشل في التحقق من النتيجة")
+                    return True
+            else:
+                logger.error(f"فشل في تطبيق أقصى ضغط: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error("انتهت مهلة ضغط الفيديو (15 دقيقة)")
+            return False
+        except Exception as e:
+            logger.error(f"خطأ في تطبيق أقصى ضغط: {e}")
+            return False
+
     def _compress_video_aggressive(self, input_path: str, output_path: str, target_size_mb: float) -> bool:
         """ضغط فيديو عدواني للحصول على حجم أصغر"""
         try:

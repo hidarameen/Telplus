@@ -245,6 +245,19 @@ class TelethonFileSender:
                     except Exception as e_attr:
                         logger.warning(f"⚠️ تعذر إضافة سمات الصوت: {e_attr}")
 
+
+                # CRITICAL FIX: Video handling
+                elif filename and filename.lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v")):
+                    try:
+                        from telethon.tl.types import DocumentAttributeVideo, DocumentAttributeFilename
+                        attributes = list(kwargs.pop("attributes", []) or [])
+                        attributes.append(DocumentAttributeVideo(duration=0, w=320, h=240, round_message=False, supports_streaming=True))
+                        attributes.append(DocumentAttributeFilename(file_name=filename))
+                        kwargs["attributes"] = attributes
+                        kwargs.setdefault("force_document", False)
+                        logger.info(f"🎬 إضافة سمات فيديو للملف: {filename}")
+                    except Exception as e_attr:
+                        logger.warning(f"⚠️ تعذر إضافة سمات الفيديو: {e_attr}")
                 # إرسال الملف مع stream
                 result = await client.send_file(entity, file_stream, **kwargs)
                 logger.info(f"✅ تم إرسال الملف {filename} بنجاح باستخدام BytesIO")
