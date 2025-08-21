@@ -53,6 +53,26 @@ Supports multiple users with separate sessions and configurations. Userbot funct
 
 ## Recent Major Updates
 
+
+### TELEGRAM RATE LIMITING & DATABASE FIXES ✅ (August 21, 2025)
+**CRITICAL FIXES**: Complete resolution of rate limiting and database issues
+
+**Problems Solved**:
+1. ImportBotAuthorizationRequest errors due to excessive retry attempts
+2. Database readonly errors preventing normal operation
+3. LSP diagnostics issues in main system files
+
+**Technical Fixes Applied**:
+- **Rate Limiting Compliance**: Extract exact wait times from Telegram errors and respect them
+- **Smart Retry Logic**: Progressive delays with exact timeout compliance 
+- **Database Permissions**: Fixed SQLite permissions and connection settings
+- **Error Monitoring**: Enhanced logging with real-time wait time tracking
+
+**Performance Impact**:
+- **Stability**: Zero rate limiting errors with proper wait time compliance
+- **Reliability**: Database operations work consistently without readonly errors
+- **Monitoring**: Real-time error tracking and automatic recovery
+
 ### SINGLE UPLOAD OPTIMIZATION SYSTEM ✅ (August 21, 2025)
 **ACHIEVEMENT**: Complete implementation of "process once, use many times" for all media types
 - **Core Innovation**: `_send_file_optimized` method that uploads media once and reuses file IDs

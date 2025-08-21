@@ -69,24 +69,29 @@ class TelegramBotSystem:
                 logger.error(f"❌ خطأ في بوت التحكم: {e}")
                 logger.info("🔄 بوت التحكم سيعيد المحاولة - معزول عن مشاكل UserBot")
                 
-                # Progressive delay with longer waits to avoid rate limiting
-                # Handle ImportBotAuthorizationRequest specifically
+                # CRITICAL: Respect Telegram's exact wait time requirements
                 error_str = str(e)
                 if "ImportBotAuthorizationRequest" in error_str or "wait" in error_str.lower():
-                    # Extract wait time if mentioned
+                    # Extract exact wait time from Telegram
                     wait_match = re.search(r'wait of (\d+) seconds', error_str)
                     if wait_match:
                         required_wait = int(wait_match.group(1))
-                        # Add 10% buffer to the required wait time
-                        delay = min(required_wait + int(required_wait * 0.1), 900)  # Max 15 minutes
-                        logger.info(f"⏱️ Telegram requires wait: {required_wait}s, using {delay}s with buffer")
+                        # Use EXACT wait time + small buffer to avoid repeated errors
+                        delay = required_wait + 30  # Just 30 seconds buffer
+                        logger.info(f"🚨 Telegram requires EXACT wait: {required_wait}s, using {delay}s")
+                        logger.info(f"⏰ سيتم إعادة المحاولة خلال {delay//60} دقيقة و {delay%60} ثانية")
                     else:
-                        delay = min(60 + (retry_count * 30), 900)  # Start with 1 minute, max 15 minutes
+                        # If can't extract exact time, use progressive delay
+                        delay = min(300 + (retry_count * 60), 1800)  # 5 minutes to 30 minutes
+                        logger.info(f"⏱️ لا يمكن استخراج الوقت المحدد، استخدام {delay//60} دقيقة")
                 else:
-                    delay = min(30 + (retry_count * 10), 300)  # Other errors: 30s to 5 minutes
+                    # For other errors, use shorter delays
+                    delay = min(60 + (retry_count * 30), 600)  # 1 minute to 10 minutes
+                    logger.info(f"⚠️ خطأ عام، انتظار {delay} ثانية")
                 
-                logger.info(f"⏱️ انتظار {delay} ثانية قبل إعادة تشغيل بوت التحكم...")
+                logger.info(f"💤 بدء الانتظار لمدة {delay} ثانية...")
                 await asyncio.sleep(delay)
+                logger.info("✅ انتهى الانتظار، إعادة المحاولة الآن...")
                 
                 # Reset counter after 10 failures
                 if retry_count >= 10:
@@ -186,21 +191,29 @@ class TelegramBotSystem:
                         logger.info("💡 بوت التحكم يعمل بشكل طبيعي")
                         userbot_failures += 1
                         
-                        # Progressive delay with better rate limiting handling
-                        if "ImportBotAuthorizationRequest" in str(e) or "wait" in str(e).lower():
-                            # Extract wait time if mentioned
-                            wait_match = re.search(r'wait of (\d+) seconds', str(e))
+                        # CRITICAL: Respect Telegram's exact wait time for UserBot
+                        error_str = str(e)
+                        if "ImportBotAuthorizationRequest" in error_str or "wait" in error_str.lower():
+                            # Extract exact wait time from Telegram
+                            wait_match = re.search(r'wait of (\d+) seconds', error_str)
                             if wait_match:
                                 required_wait = int(wait_match.group(1))
-                                wait_time = min(required_wait + 60, 1200)  # Add 1 minute buffer, max 20 minutes
-                                logger.info(f"⏱️ Telegram requires wait: {required_wait}s, using {wait_time}s with buffer")
+                                # Use EXACT wait time + minimal buffer
+                                wait_time = required_wait + 60  # Just 1 minute buffer
+                                logger.info(f"🚨 UserBot: Telegram requires EXACT wait: {required_wait}s, using {wait_time}s")
+                                logger.info(f"⏰ UserBot سيتم إعادة تشغيله خلال {wait_time//60} دقيقة")
                             else:
-                                wait_time = min(120 + (userbot_failures * 60), 1200)  # 2 minutes to 20 minutes
+                                # If can't extract exact time, use longer delay
+                                wait_time = min(600 + (userbot_failures * 120), 3600)  # 10 minutes to 1 hour
+                                logger.info(f"⏱️ UserBot: لا يمكن استخراج الوقت، استخدام {wait_time//60} دقيقة")
                         else:
-                            wait_time = min(60 + (userbot_failures * 30), 600)  # 1 minute to 10 minutes
+                            # For other errors
+                            wait_time = min(120 + (userbot_failures * 60), 1200)  # 2 minutes to 20 minutes
+                            logger.info(f"⚠️ UserBot: خطأ عام، انتظار {wait_time//60} دقيقة")
                         
-                        logger.info(f"⏱️ انتظار {wait_time} ثانية قبل إعادة المحاولة...")
+                        logger.info(f"💤 UserBot: بدء الانتظار لمدة {wait_time} ثانية...")
                         await asyncio.sleep(wait_time)
+                        logger.info("✅ UserBot: انتهى الانتظار، إعادة المحاولة...")
                         
                         # Reset failure counter after 10 failures to prevent infinite growth
                         if userbot_failures >= 10:
