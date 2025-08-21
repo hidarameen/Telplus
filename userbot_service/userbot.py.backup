@@ -1083,38 +1083,35 @@ class UserbotService:
                                         logger.error(f"❌ فشل الرفع المباشر للملف الصوتي المعالج: {direct_audio_err}")
 
                                 elif event.message.media:
-                                    # Handle media messages correctly - send media with caption
+                                    # Check media type to handle web page separately
                                     from telethon.tl.types import MessageMediaWebPage
                                     is_webpage = isinstance(event.message.media, MessageMediaWebPage)
-                                    
-                                    if is_webpage:
-                                        # Web page - send as text message with link preview
-                                        logger.info("🌐 إرسال صفحة ويب كنص مع معاينة الرابط")
+                                    has_processed_media = (processed_media is not None) or (processed_filename is not None)
+                                    if is_webpage and not has_processed_media:
+                                        # Web page - send as text message
+                                        # Process spoiler entities if present
                                         message_text = final_text or event.message.text or "رسالة"
+                                        processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                    
+                                    if spoiler_entities:
+                                        # Send with spoiler entities and buttons
                                         forwarded_msg = await client.send_message(
                                             target_entity,
-                                            message_text,
-                                            link_preview=forwarding_settings["link_preview_enabled"],
-                                            silent=forwarding_settings["silent_notifications"],
-                                            parse_mode="HTML",
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            formatting_entities=spoiler_entities,
                                             buttons=original_reply_markup or inline_buttons,
                                         )
                                     else:
-                                        # Regular media - send with caption using send_file
-                                        logger.info("📁 إرسال وسائط مع الكابشن")
-                                        caption_text = final_text
-                                        text_cleaning_settings = self.db.get_text_cleaning_settings(task["id"])
-                                        if text_cleaning_settings and text_cleaning_settings.get("remove_caption", False):
-                                            caption_text = None
-                                        
-                                        # Send media with caption
-                                        forwarded_msg = await client.send_file(
+                                        # Send normally with buttons
+                                        forwarded_msg = await client.send_message(
                                             target_entity,
-                                            file=event.message.media,
-                                            caption=caption_text,
-                                            silent=forwarding_settings["silent_notifications"],
-                                            parse_mode="HTML" if caption_text else None,
-                                            buttons=original_reply_markup or inline_buttons
+                                            processed_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML',
+                                            buttons=original_reply_markup or inline_buttons,
                                         )
                                 else:
                                     # Regular media message with caption handling

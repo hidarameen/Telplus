@@ -4,6 +4,15 @@
 
 This is a comprehensive Telegram bot system designed for automated message forwarding, media processing, and channel management. The bot supports both regular bot functionality and userbot features for enhanced message forwarding capabilities. Key features include watermark processing for images and videos, audio metadata management, translation services, publishing mode controls, and advanced filtering options.
 
+## Recent Changes (August 2025)
+
+### Fixed Media Forwarding Issue
+- **Problem**: Messages with media and captions were sending only the caption text without the media
+- **Solution**: Corrected the media handling logic in `userbot_service/userbot.py` to properly send media files with captions using `send_file`
+- **Impact**: Now properly forwards videos, images, audio files, and documents with their captions intact
+- **Mode Support**: Both forward and copy modes now respect user preferences from control panel
+- **Media Processing**: Only downloads/processes media when watermarks or audio tags are enabled, otherwise uses server-side forwarding
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
