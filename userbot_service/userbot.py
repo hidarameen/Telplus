@@ -1146,12 +1146,18 @@ class UserbotService:
                                 if event.message.media:
                                     # Copy media by re-sending the same media reference (server-side), keep original caption/buttons
                                     caption_text = event.message.text
+                                    # CRITICAL FIX: Add force_document=False for server-side copy of videos
+                                    server_copy_kwargs = {
+                                        "caption": caption_text,
+                                        "silent": forwarding_settings['silent_notifications'],
+                                        "buttons": original_reply_markup,
+                                        "force_document": False  # Ensure videos display with preview and duration
+                                    }
+                                    
                                     forwarded_msg = await client.send_file(
                                         target_entity,
                                         file=event.message.media,
-                                        caption=caption_text,
-                                        silent=forwarding_settings['silent_notifications'],
-                                        buttons=original_reply_markup
+                                        **server_copy_kwargs
                                     )
                                 else:
                                     # Pure text copy
@@ -1228,15 +1234,22 @@ class UserbotService:
                                                 task=task, event=event
                                             )
                                         else:
-                                            # Send original media
+                                            # Send original media with proper video attributes
                                             logger.info("📁 إرسال الوسائط الأصلية")
+                                            
+                                            # CRITICAL FIX: Ensure videos are sent as videos with proper attributes
+                                            video_kwargs = {
+                                                "caption": caption_text,
+                                                "silent": forwarding_settings["silent_notifications"],
+                                                "parse_mode": "HTML" if caption_text else None,
+                                                "buttons": original_reply_markup or inline_buttons,
+                                                "force_document": False  # Critical: ensure videos show as videos
+                                            }
+                                            
                                             forwarded_msg = await client.send_file(
                                                 target_entity,
                                                 file=media_to_send,
-                                                caption=caption_text,
-                                                silent=forwarding_settings["silent_notifications"],
-                                                parse_mode="HTML" if caption_text else None,
-                                                buttons=original_reply_markup or inline_buttons
+                                                **video_kwargs
                                             )
                                 else:
                                     # Regular media message with caption handling

@@ -292,17 +292,27 @@ class TelethonFileSender:
                         from telethon.tl.types import DocumentAttributeVideo, DocumentAttributeFilename
                         attributes = list(kwargs.pop("attributes", []) or [])
                         
-                        # Try to get actual video info
+                        # Try to get actual video info (returns width, height, duration, thumbnail)
                         video_info = _extract_video_info_from_bytes(file_data, filename)
-                        if isinstance(video_info, tuple) and len(video_info) >= 3:
-                            duration, width, height = video_info[:3]
+                        if isinstance(video_info, tuple) and len(video_info) >= 4:
+                            width, height, duration, thumbnail = video_info
                         else:
-                            duration, width, height = None, None, None
+                            width, height, duration, thumbnail = None, None, None, None
+                        
+                        # استخدام الصورة المصغرة إذا كانت متوفرة
+                        if thumbnail and not kwargs.get('thumb'):
+                            kwargs['thumb'] = thumbnail
+                            logger.info("🖼️ تم إضافة معاينة الفيديو المستخرجة")
+                        
+                        # تأكد من القيم الصحيحة للأبعاد والمدة
+                        video_duration = max(1, int(duration)) if duration and duration > 0 else 1
+                        video_width = max(320, int(width)) if width and width > 0 else 640
+                        video_height = max(240, int(height)) if height and height > 0 else 480
                         
                         attributes.append(DocumentAttributeVideo(
-                            duration=duration or 1,  # Use actual duration or at least 1 second to avoid 00:00
-                            w=width or 640,
-                            h=height or 480,
+                            duration=video_duration,
+                            w=video_width, 
+                            h=video_height,
                             round_message=False,
                             supports_streaming=True
                         ))
@@ -310,7 +320,7 @@ class TelethonFileSender:
                         kwargs["attributes"] = attributes
                         kwargs["force_document"] = False  # CRITICAL: إجبار الإرسال كفيديو وليس ملف
                         kwargs.setdefault("parse_mode", None)  # إزالة parse_mode للفيديوهات
-                        logger.info(f"🎬 إضافة سمات فيديو للملف: {filename} (مدة: {duration}s, أبعاد: {width}x{height})")
+                        logger.info(f"🎬 إضافة سمات فيديو للملف: {filename} (مدة: {video_duration}s, أبعاد: {video_width}x{video_height}, معاينة: {'✅' if thumbnail else '❌'})")
                     except Exception as e_attr:
                         logger.warning(f"⚠️ تعذر إضافة سمات الفيديو: {e_attr}")
                 # إرسال الملف مع stream
