@@ -26,7 +26,7 @@ class PublishingModeManager:
             task = self.db.get_task(task_id, user_id)
             
             if not task:
-                await event.answer("❌ المهمة غير موجودة")
+                await self.bot.safe_answer(event, "❌ المهمة غير موجودة")
                 return
                 
             task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -74,7 +74,7 @@ class PublishingModeManager:
             
         except Exception as e:
             logger.error(f"خطأ في عرض إعدادات وضع النشر: {e}")
-            await event.answer("❌ حدث خطأ في عرض الإعدادات")
+            await self.bot.safe_answer(event, "❌ حدث خطأ في عرض الإعدادات")
     
     async def toggle_publishing_mode(self, event, task_id: int):
         """تبديل وضع النشر بين تلقائي ويدوي"""
@@ -83,7 +83,7 @@ class PublishingModeManager:
             task = self.db.get_task(task_id, user_id)
             
             if not task:
-                await event.answer("❌ المهمة غير موجودة")
+                await self.bot.safe_answer(event, "❌ المهمة غير موجودة")
                 return
                 
             # الحصول على الوضع الحالي
@@ -101,7 +101,7 @@ class PublishingModeManager:
                 }
                 
                 # رسالة التأكيد
-                await event.answer(f"✅ تم تغيير وضع النشر إلى: {mode_names[new_mode]}")
+                await self.bot.safe_answer(event, f"✅ تم تغيير وضع النشر إلى: {mode_names[new_mode]}")
                 
                 # تحديث UserBot
                 await self.bot._refresh_userbot_tasks(user_id)
@@ -111,12 +111,12 @@ class PublishingModeManager:
                 
                 logger.info(f"✅ تم تغيير وضع النشر للمهمة {task_id} إلى {new_mode} بواسطة المستخدم {user_id}")
             else:
-                await event.answer("❌ فشل في تغيير وضع النشر")
+                await self.bot.safe_answer(event, "❌ فشل في تغيير وضع النشر")
                 logger.error(f"❌ فشل في تغيير وضع النشر للمهمة {task_id}")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل وضع النشر: {e}")
-            await event.answer("❌ حدث خطأ في تبديل الوضع")
+            await self.bot.safe_answer(event, "❌ حدث خطأ في تبديل الوضع")
     
     async def show_pending_messages(self, event, task_id: int):
         """عرض الرسائل المعلقة"""

@@ -186,12 +186,35 @@ class SimpleTelegramBot:
         logger.info("✅ Bot started successfully!")
         return True
 
+    async def safe_answer(self, event, text: str, *, alert: bool = False, buttons=None):
+        """Reply appropriately based on event type: use answer for callbacks, reply/respond for messages."""
+        try:
+            # CallbackQuery events have 'answer' to show a toast/alert
+            if hasattr(event, 'answer') and callable(getattr(event, 'answer', None)):
+                await event.answer(text, alert=alert)
+                return
+        except Exception as e:
+            # Fallback to sending a message if answering fails
+            logger = globals().get('logger')
+            if logger:
+                logger.debug(f"safe_answer: answer() failed, falling back to reply/respond: {e}")
+        # NewMessage events: use reply/respond
+        try:
+            if hasattr(event, 'reply') and callable(getattr(event, 'reply', None)):
+                await event.reply(text, buttons=buttons)
+            else:
+                await event.respond(text, buttons=buttons)
+        except Exception as e:
+            logger = globals().get('logger')
+            if logger:
+                logger.error(f"safe_answer: failed to send message: {e}")
+
     # ===== Audio Metadata method wrappers (inside class) =====
     async def audio_metadata_settings(self, event, task_id):
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         task_name = task.get('task_name', 'مهمة بدون اسم')
         audio_settings = self.db.get_audio_metadata_settings(task_id)
@@ -227,7 +250,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         current = self.db.get_audio_metadata_settings(task_id)
         new_status = not bool(current.get('enabled', False))
@@ -240,7 +263,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -369,16 +392,16 @@ class SimpleTelegramBot:
         
         success = self.db.reset_audio_template_settings(task_id)
         if success:
-            await event.answer("✅ تم إعادة تعيين قالب الوسوم للقيم الافتراضية")
+            await self.safe_answer(event, "✅ تم إعادة تعيين قالب الوسوم للقيم الافتراضية")
             await self.audio_template_settings(event, task_id)
         else:
-            await event.answer("❌ فشل في إعادة تعيين القالب")
+            await self.safe_answer(event, "❌ فشل في إعادة تعيين القالب")
 
     async def set_audio_template(self, event, task_id, template_name):
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         self.db.update_audio_metadata_template(task_id, template_name)
         template_display_name = {
@@ -388,7 +411,7 @@ class SimpleTelegramBot:
             'professional': 'احترافي',
             'custom': 'مخصص'
         }.get(template_name, template_name)
-        await event.answer(f"✅ تم اختيار قالب '{template_display_name}'")
+        await self.safe_answer(event, f"✅ تم اختيار قالب '{template_display_name}'")
         await self.audio_metadata_settings(event, task_id)
 
     async def album_art_settings(self, event, task_id):
