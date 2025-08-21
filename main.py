@@ -80,7 +80,10 @@ class TelegramBotSystem:
         # Set thread as daemon to ensure main bot continues if this fails
         import threading
         current_thread = threading.current_thread()
-        current_thread.daemon = True
+        try:
+            current_thread.daemon = True
+        except RuntimeError:
+            pass
         
         try:
             # Create new event loop for this thread
