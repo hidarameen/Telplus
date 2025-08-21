@@ -1107,7 +1107,8 @@ class UserbotService:
                                 text_cleaning_settings = {}
                             remove_caption_flag = bool(text_cleaning_settings.get('remove_caption', False))
 
-                            no_media_change = (processed_media is None or processed_media == event.message.media) and (processed_filename is None)
+                            # CRITICAL FIX: Consider processed media as a change
+                            no_media_change = (processed_media is None) and (processed_filename is None)
                             no_caption_change = (final_text == original_text)
                             no_buttons_change = (inline_buttons is None and not should_remove_buttons)
                             is_album_message = album_collector.should_collect_album(event.message, forward_mode, split_album_enabled)
@@ -1194,15 +1195,35 @@ class UserbotService:
                                         if text_cleaning_settings and text_cleaning_settings.get("remove_caption", False):
                                             caption_text = None
                                         
-                                        # Send media with caption
-                                        forwarded_msg = await client.send_file(
-                                            target_entity,
-                                            file=event.message.media,
-                                            caption=caption_text,
-                                            silent=forwarding_settings["silent_notifications"],
-                                            parse_mode="HTML" if caption_text else None,
-                                            buttons=original_reply_markup or inline_buttons
-                                        )
+                                        # CRITICAL FIX: Use processed media if available, otherwise original media
+                                        media_to_send = processed_media if processed_media else event.message.media
+                                        
+                                        if isinstance(processed_media, (bytes, bytearray)) and processed_filename:
+                                            # Send processed media with proper filename
+                                            logger.info(f"🎵 إرسال الوسائط المعالجة (مُحسّنة مرة واحدة): {processed_filename}")
+                                            from send_file_helper import TelethonFileSender
+                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
+                                                client,
+                                                target_entity,
+                                                processed_media,
+                                                processed_filename,
+                                                caption=caption_text,
+                                                silent=forwarding_settings["silent_notifications"],
+                                                parse_mode="HTML" if caption_text else None,
+                                                force_document=False,
+                                                buttons=original_reply_markup or inline_buttons,
+                                            )
+                                        else:
+                                            # Send original media
+                                            logger.info("📁 إرسال الوسائط الأصلية")
+                                            forwarded_msg = await client.send_file(
+                                                target_entity,
+                                                file=media_to_send,
+                                                caption=caption_text,
+                                                silent=forwarding_settings["silent_notifications"],
+                                                parse_mode="HTML" if caption_text else None,
+                                                buttons=original_reply_markup or inline_buttons
+                                            )
                                 else:
                                     # Regular media message with caption handling
                                     # Check if caption should be removed
@@ -1220,12 +1241,20 @@ class UserbotService:
                                         # Split album: send each media individually
                                         logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
                                         
-                                        # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                        # ===== CRITICAL FIX: استخدام الوسائط المعالجة مسبقاً =====
                                         # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
-                                        # هذا يحسن الأداء ويقلل من استهلاك الموارد
-                                        media_to_send = processed_media if processed_media else event.message.media
-                                        filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
-                                        logger.info(f"📁 سيتم إرسال الملف باسم: {filename_to_send}")
+                                        if isinstance(processed_media, (bytes, bytearray)) and processed_filename:
+                                            # Use the pre-processed media - CRITICAL OPTIMIZATION
+                                            logger.info(f"🎯 استخدام الوسائط المُعالجة مسبقاً (محسّن): {processed_filename}")
+                                            media_to_send = processed_media
+                                            filename_to_send = processed_filename
+                                        else:
+                                            # Use original media if no processing was done
+                                            logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
+                                            media_to_send = event.message.media
+                                            filename_to_send = "media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg"
+                                        
+                                        logger.info(f"📤 إرسال الملف: {filename_to_send}")
                                         
                                         from send_file_helper import TelethonFileSender
                                         forwarded_msg = await TelethonFileSender.send_file_with_name(
