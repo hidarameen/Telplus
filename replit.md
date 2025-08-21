@@ -6,6 +6,17 @@ This is a comprehensive Telegram bot system designed for automated message forwa
 
 ## Recent Changes (August 2025)
 
+### CRITICAL FIX: Media Upload Optimization (August 21, 2025)
+- **Problem**: Bot was processing and uploading media separately for each target when watermarks were enabled, causing poor performance and repeated uploads
+- **Solution**: Implemented global media cache system in `userbot_service/userbot.py` lines 788-815
+- **Technical Details**: 
+  - Added `global_processed_media_cache` dictionary to store processed media per message
+  - Created unique cache keys using message ID, chat ID, and task ID
+  - Process media once and reuse cached result for all targets
+- **Impact**: Significant performance improvement - media now processed once per message instead of once per target
+- **Performance Gain**: From N uploads (where N = number of targets) to 1 upload + cache reuse
+- **Status**: ✅ Successfully implemented and tested
+
 ### Fixed Media Forwarding Issue
 - **Problem**: Messages with media and captions were sending only the caption text without the media
 - **Solution**: Corrected the media handling logic in `userbot_service/userbot.py` to properly send media files with captions using `send_file`

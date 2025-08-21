@@ -785,14 +785,34 @@ class UserbotService:
                             logger.warning(f"⚠️ فشل فحص إعدادات الوسوم الصوتية لجميع المهام: {_e}")
                             audio_tags_enabled_for_all = False
 
+                    # CRITICAL FIX: Initialize global media cache for message-based reuse
+                    if not hasattr(self, 'global_processed_media_cache'):
+                        self.global_processed_media_cache = {}
+                    
+                    # Create unique cache key for this message and settings
+                    import hashlib
+                    message_hash = f"{event.message.id}_{event.chat_id}_{first_task['id']}_watermark"
+                    media_cache_key = hashlib.md5(message_hash.encode()).hexdigest()
+                    
                     try:
                         if watermark_enabled_for_all:
                             logger.info("🏷️ العلامة المائية مفعلة لكل المهام → سيتم تطبيقها مرة واحدة وإعادة الاستخدام")
-                            processed_media, processed_filename = await self.apply_watermark_to_media(event, first_task['id'])
-                            if processed_media and processed_media != event.message.media:
-                                logger.info(f"✅ تم معالجة الوسائط بنجاح: {processed_filename}")
+                            
+                            # CRITICAL OPTIMIZATION: Check cache before processing
+                            if media_cache_key in self.global_processed_media_cache:
+                                processed_media, processed_filename = self.global_processed_media_cache[media_cache_key]
+                                logger.info(f"🎯 استخدام الوسائط المعالجة من التخزين المؤقت: {processed_filename}")
                             else:
-                                logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
+                                # Process media ONLY ONCE and cache for all targets
+                                logger.info("🔧 بدء معالجة الوسائط لأول مرة - سيتم حفظها للاستخدام المتكرر")
+                                processed_media, processed_filename = await self.apply_watermark_to_media(event, first_task['id'])
+                                
+                                if processed_media and processed_media != event.message.media:
+                                    # Store in global cache for ALL future targets of this message
+                                    self.global_processed_media_cache[media_cache_key] = (processed_media, processed_filename)
+                                    logger.info(f"✅ تم معالجة الوسائط مرة واحدة وحفظها للاستخدام المتكرر: {processed_filename}")
+                                else:
+                                    logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
                         elif audio_tags_enabled_for_all and is_audio_message:
                             # تطبيق الوسوم الصوتية فقط (علامة مائية غير مفعلة)
                             logger.info("🎵 الوسوم الصوتية مفعلة لكل المهام والرسالة صوتية → تطبيق الوسوم فقط")
