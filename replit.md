@@ -6,16 +6,18 @@ This is a comprehensive Telegram bot system designed for automated message forwa
 
 ## Recent Changes (August 2025)
 
-### CRITICAL FIX: Media Upload Optimization (August 21, 2025)
-- **Problem**: Bot was processing and uploading media separately for each target when watermarks were enabled, causing poor performance and repeated uploads
-- **Solution**: Implemented global media cache system in `userbot_service/userbot.py` lines 788-815
-- **Technical Details**: 
-  - Added `global_processed_media_cache` dictionary to store processed media per message
-  - Created unique cache keys using message ID, chat ID, and task ID
-  - Process media once and reuse cached result for all targets
-- **Impact**: Significant performance improvement - media now processed once per message instead of once per target
-- **Performance Gain**: From N uploads (where N = number of targets) to 1 upload + cache reuse
-- **Status**: ✅ Successfully implemented and tested
+### CRITICAL FIX: Media Upload Optimization (August 21, 2025) - COMPLETED
+- **Problem**: Bot was processing and uploading media separately for each target when watermarks OR audio tags were enabled, causing poor performance and repeated uploads
+- **Solution**: Implemented comprehensive global media cache system for both watermarks AND audio processing
+- **Technical Implementation**: 
+  - **Watermark Caching** (lines 788-818): Process watermarks once and cache for all targets
+  - **Audio Tags Caching** (lines 819-863): Process audio metadata once and cache for all targets  
+  - Separate cache keys for watermark vs audio processing (`_watermark` vs `_audio` suffix)
+  - Smart cache lookup before any processing to avoid duplicate work
+- **Impact**: Massive performance improvement for both watermarks and audio tags
+- **Performance Gain**: From N uploads per message to 1 upload + cache reuse across all targets
+- **Arabic Logs**: Added Arabic logging to show cache usage vs first-time processing
+- **Status**: ✅ FULLY IMPLEMENTED - Both watermark and audio caching working
 
 ### Fixed Media Forwarding Issue
 - **Problem**: Messages with media and captions were sending only the caption text without the media

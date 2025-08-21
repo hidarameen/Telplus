@@ -814,35 +814,51 @@ class UserbotService:
                                 else:
                                     logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
                         elif audio_tags_enabled_for_all and is_audio_message:
-                            # تطبيق الوسوم الصوتية فقط (علامة مائية غير مفعلة)
-                            logger.info("🎵 الوسوم الصوتية مفعلة لكل المهام والرسالة صوتية → تطبيق الوسوم فقط")
-                            # تحميل الوسائط واستخراج اسم مناسب
-                            media_bytes = await event.message.download_media(bytes)
-                            if not media_bytes:
-                                logger.warning("⚠️ فشل تحميل الوسائط - سيتم استخدام الوسائط الأصلية")
-                                processed_media = event.message.media
-                                processed_filename = None
+                            # CRITICAL FIX: Apply audio tags optimization similar to watermark
+                            logger.info("🎵 الوسوم الصوتية مفعلة لكل المهام والرسالة صوتية → تطبيق الوسوم مرة واحدة وإعادة الاستخدام")
+                            
+                            # Create audio cache key (different from watermark key)
+                            audio_cache_key = hashlib.md5(
+                                f"{event.message.id}_{event.chat_id}_{first_task['id']}_audio".encode()
+                            ).hexdigest()
+                            
+                            # Check audio cache first - CRITICAL OPTIMIZATION
+                            if audio_cache_key in self.global_processed_media_cache:
+                                processed_media, processed_filename = self.global_processed_media_cache[audio_cache_key]
+                                logger.info(f"🎯 استخدام المقطع الصوتي المعالج من التخزين المؤقت: {processed_filename}")
                             else:
-                                file_name = "media_file"
-                                file_ext = ""
-                                if hasattr(event.message.media, 'document') and event.message.media.document:
-                                    doc = event.message.media.document
-                                    if hasattr(doc, 'attributes'):
-                                        for attr in doc.attributes:
-                                            if hasattr(attr, 'file_name') and attr.file_name:
-                                                file_name = attr.file_name
-                                                if '.' in file_name:
-                                                    file_ext = '.' + file_name.split('.')[-1].lower()
-                                                    file_name = file_name.rsplit('.', 1)[0]
-                                                break
-                                full_name = file_name + (file_ext or '')
-                                processed_media, processed_filename = await self.apply_audio_metadata(event, first_task['id'], media_bytes, full_name)
-                                try:
-                                    pm_type = type(processed_media).__name__
-                                    pm_size = len(processed_media) if isinstance(processed_media, (bytes, bytearray)) else None
-                                    logger.info(f"🧪 نتيجة معالجة الصوت: type={pm_type}, size={pm_size}, filename={processed_filename}")
-                                except Exception:
-                                    pass
+                                # Process audio ONCE and cache for all targets
+                                logger.info("🔧 بدء معالجة المقطع الصوتي لأول مرة - سيتم حفظه للاستخدام المتكرر")
+                                
+                                # تحميل الوسائط واستخراج اسم مناسب
+                                media_bytes = await event.message.download_media(bytes)
+                                if not media_bytes:
+                                    logger.warning("⚠️ فشل تحميل الوسائط - سيتم استخدام الوسائط الأصلية")
+                                    processed_media = event.message.media
+                                    processed_filename = None
+                                else:
+                                    file_name = "media_file"
+                                    file_ext = ""
+                                    if hasattr(event.message.media, 'document') and event.message.media.document:
+                                        doc = event.message.media.document
+                                        if hasattr(doc, 'attributes'):
+                                            for attr in doc.attributes:
+                                                if hasattr(attr, 'file_name') and attr.file_name:
+                                                    file_name = attr.file_name
+                                                    if '.' in file_name:
+                                                        file_ext = '.' + file_name.split('.')[-1].lower()
+                                                        file_name = file_name.rsplit('.', 1)[0]
+                                                    break
+                                    full_name = file_name + (file_ext or '')
+                                    processed_media, processed_filename = await self.apply_audio_metadata(event, first_task['id'], media_bytes, full_name)
+                                    
+                                    # Cache the processed audio for reuse across ALL targets
+                                    if processed_media and processed_media != media_bytes:
+                                        self.global_processed_media_cache[audio_cache_key] = (processed_media, processed_filename)
+                                        logger.info(f"✅ تم معالجة المقطع الصوتي مرة واحدة وحفظه للاستخدام المتكرر: {processed_filename}")
+                                    else:
+                                        logger.info("🔄 لم يتم تعديل المقطع الصوتي، استخدام الملف الأصلي")
+
                         else:
                             # لا علامة مائية ولا وسوم صوتية: لا تنزيل/معالجة - سيتم الإرسال كنسخ خادم إن أمكن
                             logger.info("⏭️ لا علامة مائية ولا وسوم صوتية مطلوبة → إرسال كوسائط عادية دون تنزيل/رفع")
