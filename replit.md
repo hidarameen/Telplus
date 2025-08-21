@@ -6,18 +6,24 @@ This is a comprehensive Telegram bot system designed for automated message forwa
 
 ## Recent Changes (August 2025)
 
-### CRITICAL FIX: Media Upload Optimization (August 21, 2025) - COMPLETED
-- **Problem**: Bot was processing and uploading media separately for each target when watermarks OR audio tags were enabled, causing poor performance and repeated uploads
-- **Solution**: Implemented comprehensive global media cache system for both watermarks AND audio processing
-- **Technical Implementation**: 
-  - **Watermark Caching** (lines 788-818): Process watermarks once and cache for all targets
-  - **Audio Tags Caching** (lines 819-863): Process audio metadata once and cache for all targets  
-  - Separate cache keys for watermark vs audio processing (`_watermark` vs `_audio` suffix)
-  - Smart cache lookup before any processing to avoid duplicate work
-- **Impact**: Massive performance improvement for both watermarks and audio tags
-- **Performance Gain**: From N uploads per message to 1 upload + cache reuse across all targets
-- **Arabic Logs**: Added Arabic logging to show cache usage vs first-time processing
-- **Status**: ✅ FULLY IMPLEMENTED - Both watermark and audio caching working
+### CRITICAL FIX: Audio Upload Optimization (August 21, 2025) - COMPLETED ✅
+- **Problem**: Audio files with metadata tags were being uploaded separately for each target instead of once for all targets, causing poor performance and network waste
+- **Root Cause**: Media download cache was missing, causing repeated downloads and processing for the same audio file
+- **Solution**: Implemented comprehensive three-tier cache system:
+  1. **Global Processed Media Cache**: Caches final processed media for reuse across all targets
+  2. **Local Download Cache**: Prevents downloading same media multiple times per message  
+  3. **Memory Cleanup**: Automatic cleanup after each message to prevent memory leaks
+- **Technical Implementation**:
+  - **Download Cache** (lines 837-868): `_current_media_cache` prevents repeated downloads
+  - **Global Cache**: Separate keys for audio (`_audio`) vs watermark (`_watermark`) processing
+  - **Memory Management**: `finally` block cleans up local cache after each message
+  - **Smart Logic**: Only downloads/processes when needed, reuses cached results
+- **Impact**: 
+  - **Network**: From N uploads per audio message to 1 upload + cache reuse
+  - **Performance**: Eliminated duplicate downloads and processing
+  - **Memory**: Proper cleanup prevents memory accumulation
+- **Arabic Logs**: Added detailed logging to track cache usage vs first-time processing
+- **Status**: ✅ FULLY IMPLEMENTED - Audio caching now working correctly
 
 ### Fixed Media Forwarding Issue
 - **Problem**: Messages with media and captions were sending only the caption text without the media
