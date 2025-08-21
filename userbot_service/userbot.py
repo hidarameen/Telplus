@@ -108,6 +108,7 @@ class UserbotService:
         # CRITICAL FIX: Initialize global cache systems for media processing optimization
         self.global_processed_media_cache = {}  # Cache for processed media to prevent re-upload
         self._current_media_cache = {}  # Temporary cache for download optimization per message
+        self.uploaded_file_cache = {}  # CRITICAL: Cache for uploaded file handles to prevent re-upload
         self.session_health_status: Dict[int, bool] = {}  # user_id -> health status
         self.session_locks: Dict[int, bool] = {}  # user_id -> is_locked (prevent multiple usage)
         self.max_reconnect_attempts = 3
@@ -1153,19 +1154,17 @@ class UserbotService:
                                 # إذا كان لدينا ملف صوتي مُعالج كبايتات، أرسله مباشرة لتفادي أي التباس كرسالة نصية
                                 if isinstance(processed_media, (bytes, bytearray)) and ((processed_filename and processed_filename.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.wma', '.opus'))) or True):
                                     try:
-                                        from send_file_helper import TelethonFileSender
                                         audio_filename = processed_filename or "audio.mp3"
                                         logger.info(f"🎵 إرسال الملف الصوتي المعالج بالرفع المباشر: {audio_filename}")
-                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                            client,
-                                            target_entity,
-                                            processed_media,
-                                            audio_filename,
-                                            caption=final_text,
+                                        
+                                        # CRITICAL FIX: Upload once and reuse file handle
+                                        forwarded_msg = await self._send_processed_media_optimized(
+                                            client, target_entity, processed_media, audio_filename,
+                                            caption=final_text, 
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if final_text else None,
-                                            force_document=False,
                                             buttons=original_reply_markup or inline_buttons,
+                                            task=task, event=event
                                         )
                                     except Exception as direct_audio_err:
                                         logger.error(f"❌ فشل الرفع المباشر للملف الصوتي المعالج: {direct_audio_err}")
@@ -1201,17 +1200,15 @@ class UserbotService:
                                         if isinstance(processed_media, (bytes, bytearray)) and processed_filename:
                                             # Send processed media with proper filename
                                             logger.info(f"🎵 إرسال الوسائط المعالجة (مُحسّنة مرة واحدة): {processed_filename}")
-                                            from send_file_helper import TelethonFileSender
-                                            forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                                client,
-                                                target_entity,
-                                                processed_media,
-                                                processed_filename,
+                                            
+                                            # CRITICAL FIX: Upload once and reuse file handle
+                                            forwarded_msg = await self._send_processed_media_optimized(
+                                                client, target_entity, processed_media, processed_filename,
                                                 caption=caption_text,
                                                 silent=forwarding_settings["silent_notifications"],
                                                 parse_mode="HTML" if caption_text else None,
-                                                force_document=False,
                                                 buttons=original_reply_markup or inline_buttons,
+                                                task=task, event=event
                                             )
                                         else:
                                             # Send original media
@@ -1246,51 +1243,56 @@ class UserbotService:
                                         if isinstance(processed_media, (bytes, bytearray)) and processed_filename:
                                             # Use the pre-processed media - CRITICAL OPTIMIZATION
                                             logger.info(f"🎯 استخدام الوسائط المُعالجة مسبقاً (محسّن): {processed_filename}")
-                                            media_to_send = processed_media
-                                            filename_to_send = processed_filename
+                                            
+                                            # CRITICAL FIX: Upload once and reuse file handle  
+                                            forwarded_msg = await self._send_processed_media_optimized(
+                                                client, target_entity, processed_media, processed_filename,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                buttons=original_reply_markup or inline_buttons,
+                                                task=task, event=event
+                                            )
                                         else:
                                             # Use original media if no processing was done
                                             logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
-                                            media_to_send = event.message.media
-                                            filename_to_send = "media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg"
-                                        
-                                        logger.info(f"📤 إرسال الملف: {filename_to_send}")
-                                        
-                                        from send_file_helper import TelethonFileSender
-                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                            client,
-                                            target_entity,
-                                            media_to_send,
-                                            filename_to_send,
-                                            caption=caption_text,
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML' if caption_text else None,
-                                            force_document=False,
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
+                                            forwarded_msg = await client.send_file(
+                                                target_entity,
+                                                file=event.message.media,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                buttons=original_reply_markup or inline_buttons
+                                            )
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
                                         logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
                                         
                                         # ===== استخدام الوسائط المعالجة مسبقاً =====
-                                        # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
-                                        # هذا يحسن الأداء ويقلل من استهلاك الموارد
-                                        media_to_send = processed_media if processed_media else event.message.media
-                                        filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
-                                        
-                                        # In copy mode, we always send as new media, not forward
-                                        from send_file_helper import TelethonFileSender
-                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                            client,
-                                            target_entity,
-                                            media_to_send,
-                                            filename_to_send,
-                                            caption=caption_text,
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML' if caption_text else None,
-                                            force_document=False,
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
+                                        if isinstance(processed_media, (bytes, bytearray)) and processed_filename:
+                                            # Use the pre-processed media with file handle optimization
+                                            logger.info(f"🎯 استخدام الوسائط المُعالجة مسبقاً (محسّن): {processed_filename}")
+                                            
+                                            # CRITICAL FIX: Upload once and reuse file handle
+                                            forwarded_msg = await self._send_processed_media_optimized(
+                                                client, target_entity, processed_media, processed_filename,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                buttons=original_reply_markup or inline_buttons,
+                                                task=task, event=event
+                                            )
+                                        else:
+                                            # Use original media if no processing was done
+                                            logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
+                                            forwarded_msg = await client.send_file(
+                                                target_entity,
+                                                file=event.message.media,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                buttons=original_reply_markup or inline_buttons
+                                            )
                         else:
                             # No media
                             if (event.message.text or final_text):
@@ -2165,6 +2167,57 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في معالجة الوسوم الصوتية: {e}")
             return media_bytes, file_name
+
+    async def _send_processed_media_optimized(self, client, target_entity, media_bytes, filename, task=None, event=None, **kwargs):
+        """
+        CRITICAL OPTIMIZATION: Upload processed media once and reuse file handle for all targets
+        This prevents redundant uploads and dramatically improves performance
+        """
+        import hashlib
+        import io
+        
+        # Create unique cache key for this media
+        media_hash = hashlib.md5(media_bytes).hexdigest()
+        cache_key = f"{media_hash}_{filename}"
+        
+        # Check if file already uploaded
+        if cache_key in self.uploaded_file_cache:
+            file_handle = self.uploaded_file_cache[cache_key]
+            logger.info(f"🎯 استخدام معرف الملف المرفوع مسبقاً (محسّن): {filename}")
+            
+            # Send using cached file handle - NO RE-UPLOAD
+            return await client.send_file(target_entity, file_handle, **kwargs)
+        else:
+            # First time upload: upload and cache file handle
+            logger.info(f"📤 رفع الملف لأول مرة وحفظ المعرف للأهداف التالية: {filename}")
+            
+            # Upload file and get handle for reuse
+            try:
+                from send_file_helper import TelethonFileSender
+                
+                # Use TelethonFileSender to upload with proper attributes but cache result
+                result = await TelethonFileSender.send_file_with_name(
+                    client, target_entity, media_bytes, filename, **kwargs
+                )
+                
+                # Try to extract file handle from the sent message for caching
+                try:
+                    if hasattr(result, 'media') and hasattr(result.media, 'document'):
+                        file_handle = result.media.document
+                        self.uploaded_file_cache[cache_key] = file_handle
+                        logger.info(f"✅ تم حفظ معرف الملف للاستخدام المتكرر: {filename}")
+                except Exception as cache_err:
+                    logger.warning(f"⚠️ لم يتم حفظ معرف الملف: {cache_err}")
+                
+                return result
+                
+            except Exception as e:
+                logger.error(f"❌ فشل في رفع الملف المُحسّن: {e}")
+                # Fallback to normal method
+                from send_file_helper import TelethonFileSender
+                return await TelethonFileSender.send_file_with_name(
+                    client, target_entity, media_bytes, filename, **kwargs
+                )
 
     def apply_message_formatting(self, text: str, settings: dict) -> str:
         """Apply header and footer formatting to message text"""

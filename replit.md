@@ -129,12 +129,25 @@ After these optimizations, the media processing flow should work as follows:
 
 **Performance Improvement:**
 - **Before**: N downloads + N processing + N uploads (for N targets)
-- **After**: 1 download + 1 processing + N uploads (cached reuse)
+- **After**: 1 download + 1 processing + 1 upload + N handle reuse (true optimization)
+
+#### 7. Upload Optimization System ✅ IMPLEMENTED (August 21, 2025)
+- **Problem**: Even with media processing cache, each target was triggering a separate upload of the same processed media
+- **Root Cause**: `TelethonFileSender.send_file_with_name` always uploads bytes data, no file handle reuse
+- **Solution**: Created `_send_processed_media_optimized` method with upload handle caching:
+  1. **Upload Once**: First target uploads and caches file handle
+  2. **Reuse Handle**: Subsequent targets use cached file handle (no re-upload)
+  3. **Hash-Based Cache**: Uses MD5 hash + filename as cache key
+  4. **Memory Efficient**: Caches only file handles, not raw bytes
+- **Location**: `userbot_service/userbot.py` lines 2174-2223
+- **Integration**: Replaced all `TelethonFileSender.send_file_with_name` calls with optimized method
+- **Impact**: True "upload once, send many times" for all processed media (audio, video, images)
 
 **Log Indicators to Watch:**
 - First processing: "🔧 بدء معالجة المقطع الصوتي لأول مرة"
 - Cache reuse: "🎯 استخدام المقطع الصوتي المعالج من التخزين المؤقت"
-- Processed media use: "🎯 استخدام الوسائط المُعالجة مسبقاً (محسّن)"
+- **Upload optimization**: "📤 رفع الملف لأول مرة وحفظ المعرف للأهداف التالية"
+- **Handle reuse**: "🎯 استخدام معرف الملف المرفوع مسبقاً (محسّن)"
 
 ## User Preferences
 
