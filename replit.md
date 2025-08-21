@@ -13,6 +13,12 @@ This is a comprehensive Telegram bot system designed for automated message forwa
 - **Mode Support**: Both forward and copy modes now respect user preferences from control panel
 - **Media Processing**: Only downloads/processes media when watermarks or audio tags are enabled, otherwise uses server-side forwarding
 
+### Fixed Duplicate Message Sending Issue  
+- **Problem**: When forward mode was selected, bot was sending messages twice (once as forward and once as copy)
+- **Solution**: Changed `if final_send_mode == 'copy'` to `elif final_send_mode == 'copy'` in the message sending logic
+- **Impact**: Now properly sends messages only once per mode - forward mode shows "Forwarded from" header, copy mode appears as new message
+- **Result**: Clean mode switching without duplicate messages
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.

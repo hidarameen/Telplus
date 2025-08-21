@@ -1027,7 +1027,7 @@ class UserbotService:
                                 # Fallback to copy mode if forward fails
                                 final_send_mode = 'copy'
 
-                        if final_send_mode == 'copy':
+                        elif final_send_mode == 'copy':
                             # Optimization: use server-side copy when no modifications are required
                             try:
                                 text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
