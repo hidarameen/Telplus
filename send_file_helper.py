@@ -149,6 +149,88 @@ def _extract_video_info_from_bytes(video_bytes: bytes, filename: str) -> Tuple[O
     
     return width, height, int(duration) if duration else None, thumbnail
 
+def _extract_video_info_from_bytes(video_bytes: bytes, filename: str) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    """استخراج مدة وأبعاد الفيديو من البايتات"""
+    duration = None
+    width = None
+    height = None
+    try:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=("." + filename.split(".")[-1] if "." in filename else ".mp4"))
+        temp_file.write(video_bytes)
+        temp_file.close()
+        
+        try:
+            # Try using OpenCV first
+            import cv2
+            cap = cv2.VideoCapture(temp_file.name)
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                
+                if fps > 0 and frame_count > 0:
+                    duration = int(frame_count / fps)
+                    if duration > 0:
+                        logger.info(f"✅ OpenCV استخرج معلومات الفيديو: مدة={duration}s, أبعاد={width}x{height}")
+                
+                cap.release()
+        except Exception as e:
+            # Fallback: try with ffprobe if available
+            if duration is None or duration <= 0:
+                try:
+                    import subprocess
+                    import json
+                    result = subprocess.run([
+                        'ffprobe', '-v', 'quiet', '-print_format', 'json',
+                        '-show_format', '-show_streams', temp_file.name
+                    ], capture_output=True, text=True, timeout=15)
+                    
+                    if result.returncode == 0:
+                        info = json.loads(result.stdout)
+                        # Get format duration first
+                        if 'format' in info and 'duration' in info['format']:
+                            duration = int(float(info['format']['duration']))
+                            logger.info(f"✅ FFprobe استخرج مدة الفيديو من المعلومات العامة: {duration}s")
+                        
+                        # Get video stream info
+                        video_stream = next((s for s in info['streams'] if s['codec_type'] == 'video'), None)
+                        if video_stream:
+                            if duration is None or duration <= 0:
+                                stream_duration = video_stream.get('duration')
+                                if stream_duration:
+                                    duration = int(float(stream_duration))
+                                    logger.info(f"✅ FFprobe استخرج مدة الفيديو من Stream: {duration}s")
+                            
+                            if width is None or width <= 0:
+                                width = int(video_stream.get('width', 0))
+                            if height is None or height <= 0:
+                                height = int(video_stream.get('height', 0))
+                except Exception as e:
+                    logger.warning(f"⚠️ فشل في استخدام FFprobe: {e}")
+        
+        finally:
+            try:
+                import os
+                os.unlink(temp_file.name)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    
+    # Final fallback values if extraction completely failed
+    if duration is None or duration <= 0:
+        duration = 1  # At least 1 second to avoid 00:00 display
+        logger.warning("⚠️ لم يتم استخراج مدة الفيديو - استخدام القيمة الافتراضية 1 ثانية")
+    
+    if width is None or width <= 0:
+        width = 640
+    if height is None or height <= 0:
+        height = 480
+    
+    logger.info(f"🎬 معلومات الفيديو النهائية: مدة={duration}s, أبعاد={width}x{height}")
+    return duration, width, height
+
 def _extract_audio_cover_thumbnail(audio_bytes: bytes) -> Optional[bytes]:
     """استخراج صورة غلاف كصورة مصغّرة (JPEG) من ملف صوتي بايتات إن أمكن"""
     try:
@@ -246,16 +328,26 @@ class TelethonFileSender:
                         logger.warning(f"⚠️ تعذر إضافة سمات الصوت: {e_attr}")
 
 
-                # CRITICAL FIX: Video handling
+                # CRITICAL FIX: Video handling with proper duration and dimensions
                 elif filename and filename.lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v")):
                     try:
                         from telethon.tl.types import DocumentAttributeVideo, DocumentAttributeFilename
                         attributes = list(kwargs.pop("attributes", []) or [])
-                        attributes.append(DocumentAttributeVideo(duration=0, w=320, h=240, round_message=False, supports_streaming=True))
+                        
+                        # Try to get actual video info
+                        duration, width, height = _extract_video_info_from_bytes(file_data, filename)
+                        
+                        attributes.append(DocumentAttributeVideo(
+                            duration=duration or 1,  # Use actual duration or at least 1 second to avoid 00:00
+                            w=width or 640,
+                            h=height or 480,
+                            round_message=False,
+                            supports_streaming=True
+                        ))
                         attributes.append(DocumentAttributeFilename(file_name=filename))
                         kwargs["attributes"] = attributes
                         kwargs.setdefault("force_document", False)
-                        logger.info(f"🎬 إضافة سمات فيديو للملف: {filename}")
+                        logger.info(f"🎬 إضافة سمات فيديو للملف: {filename} (مدة: {duration}s, أبعاد: {width}x{height})")
                     except Exception as e_attr:
                         logger.warning(f"⚠️ تعذر إضافة سمات الفيديو: {e_attr}")
                 # إرسال الملف مع stream

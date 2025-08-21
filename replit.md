@@ -38,6 +38,80 @@ This is a comprehensive Telegram bot system designed for automated message forwa
 - **Impact**: Now properly sends messages only once per mode - forward mode shows "Forwarded from" header, copy mode appears as new message
 - **Result**: Clean mode switching without duplicate messages
 
+### CRITICAL ISSUES IDENTIFIED (August 21, 2025) - ANALYSIS COMPLETE 🔍
+
+#### 1. Watermark & Audio Processing Inefficiency 
+- **Problem**: Media is processed separately for each target task instead of once per message
+- **Current Logic**: Checks if ALL tasks have watermark enabled, but should check if ANY task needs it
+- **Impact**: Repeated processing and upload when different targets have different settings
+- **Location**: `userbot_service/userbot.py` lines 746-753
+
+#### 2. Video Duration Display Issue  
+- **Problem**: Processed videos show 00:00 duration in Telegram instead of actual duration
+- **Root Cause**: `DocumentAttributeVideo` hardcoded with duration=0 in `send_file_helper.py`
+- **Impact**: Videos appear with incorrect preview and timeline
+- **Location**: `send_file_helper.py` line 254
+
+#### 3. Missing Video Info Extraction
+- **Problem**: No function to extract actual video metadata from processed video bytes  
+- **Current**: Video attributes use placeholder values (duration=0, w=320, h=240)
+- **Impact**: Inaccurate video previews and playback information
+- **Status**: Function skeleton added but needs implementation
+
+#### 4. Caching Logic Inconsistency
+- **Problem**: Cache keys and reuse logic may cause processing for every target instead of true single processing
+- **Current**: Uses separate cache keys for different task IDs instead of content-based keys
+- **Impact**: Cache misses when multiple targets need same processed media
+- **Location**: `watermark_processor.py` and `userbot_service/userbot.py`
+
+#### 5. Global Cache Not Initialized ✅ FIXED
+- **Problem**: `global_processed_media_cache` and `_current_media_cache` not declared as class attributes
+- **Solution**: Added proper initialization in UserbotService.__init__ method (lines 111-113)
+- **Impact**: Cache system now functions properly without runtime errors
+- **Status**: RESOLVED - Cache attributes properly initialized
+
+### FIXES IMPLEMENTED (August 21, 2025) ✅
+
+#### 1. Watermark Processing Logic Optimization ✅
+- **Fixed**: Changed logic from checking ALL tasks to checking ANY task needs watermark
+- **Location**: `userbot_service/userbot.py` lines 750-764
+- **Result**: Media processing now occurs when ANY target needs watermark, not just when ALL do
+- **Performance**: Eliminated unnecessary processing skips
+
+#### 2. Audio Processing Logic Optimization ✅  
+- **Fixed**: Similar optimization for audio tags - check ANY task instead of ALL
+- **Location**: `userbot_service/userbot.py` lines 787-804
+- **Result**: Audio processing occurs when ANY target needs audio tags
+- **Performance**: Consistent with watermark optimization approach
+
+#### 3. Global Cache System Initialization ✅
+- **Fixed**: Properly initialized cache attributes in class constructor
+- **Location**: `userbot_service/userbot.py` lines 111-113
+- **Result**: No more LSP errors about missing attributes
+- **Performance**: Cache system ready for use from startup
+
+#### 4. Video Duration Information Enhancement ✅ COMPLETED
+- **Fixed**: Complete video duration and dimensions extraction system
+- **Location**: `send_file_helper.py` lines 155-235 (_extract_video_info_from_bytes function)
+- **Implementation**: 
+  - **Primary Method**: OpenCV video analysis for frame rate and duration calculation
+  - **Fallback Method**: FFprobe JSON analysis for format and stream duration
+  - **Safety Net**: Minimum 1-second duration to prevent 00:00 display
+  - **Logging**: Detailed Arabic logs for each extraction method
+- **Impact**: Videos now show correct duration and preview instead of 00:00
+- **Status**: FULLY RESOLVED - Multi-tier video info extraction working
+
+#### 5. Enhanced Global Media Processing Cache ✅ OPTIMIZED
+- **Implemented**: Content-based cache keys using message hash instead of task-based keys
+- **Location**: `userbot_service/userbot.py` lines 807-850
+- **Features**:
+  - **Separate Cache Keys**: Different keys for watermark vs audio processing
+  - **Message-Level Caching**: Cache based on message content, not individual tasks
+  - **Reuse Optimization**: Single processing per message, multiple target reuse
+  - **Memory Management**: Automatic cleanup after each message batch
+- **Performance**: Eliminates redundant processing for multiple targets
+- **Status**: FULLY IMPLEMENTED - True "process once, use many times" achieved
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.

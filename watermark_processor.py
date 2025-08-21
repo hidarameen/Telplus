@@ -85,10 +85,10 @@ class WatermarkProcessor:
         try:
             if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp')):
                 processed_media = self.apply_watermark_to_image(media_bytes, watermark_settings)
-                logger.info(f"🖼️ تمت معالجة الصورة: {filename}")
+                logger.info(f"🖼️ تمت معالجة الصورة مرة واحدة: {filename}")
             elif filename.lower().endswith(('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm')):
                 processed_media = self.apply_watermark_to_video(media_bytes, watermark_settings, task_id)
-                logger.info(f"🎬 تمت معالجة الفيديو: {filename}")
+                logger.info(f"🎬 تمت معالجة الفيديو مرة واحدة: {filename}")
             else:
                 processed_media = media_bytes
                 logger.info(f"📄 ملف غير مدعوم للعلامة المائية: {filename}")
@@ -97,10 +97,10 @@ class WatermarkProcessor:
             logger.error(f"خطأ في معالجة الوسائط {filename}: {e}")
             processed_media = media_bytes
         
-        # Store in cache for reuse across all targets
+        # Store in cache for reuse across all targets - CRITICAL FOR PERFORMANCE
         if processed_media:
             self.global_media_cache[cache_key] = processed_media
-            logger.info(f"💾 تم حفظ الوسائط المعالجة في التخزين المؤقت: {filename}")
+            logger.info(f"💾 تم حفظ الوسائط المعالجة في التخزين المؤقت لإعادة الاستخدام عبر جميع الأهداف: {filename}")
         
         return processed_media if processed_media else media_bytes
     

@@ -104,6 +104,10 @@ class UserbotService:
         self.album_collectors: Dict[int, AlbumCollector] = {}  # user_id -> collector
         self.watermark_processor = WatermarkProcessor()  # معالج العلامة المائية
         self.audio_processor = AudioProcessor()  # معالج الوسوم الصوتية
+        
+        # CRITICAL FIX: Initialize global cache systems for media processing optimization
+        self.global_processed_media_cache = {}  # Cache for processed media to prevent re-upload
+        self._current_media_cache = {}  # Temporary cache for download optimization per message
         self.session_health_status: Dict[int, bool] = {}  # user_id -> health status
         self.session_locks: Dict[int, bool] = {}  # user_id -> is_locked (prevent multiple usage)
         self.max_reconnect_attempts = 3
@@ -740,17 +744,23 @@ class UserbotService:
                     first_task = matching_tasks[0]
                     logger.info(f"🎬 تهيئة معالجة الوسائط مرة واحدة (أول مهمة: {first_task['id']})")
 
-                    # فحص تجميعي: هل العلامة المائية مفعلة لكل المهام المطابقة؟
-                    watermark_enabled_for_all = True
+                    # CRITICAL FIX: فحص تجميعي: هل العلامة المائية مفعلة لأي مهمة من المهام المطابقة؟
+                    watermark_enabled_for_any = False
+                    watermark_settings = None
                     try:
                         for _t in matching_tasks:
                             _wm = self.db.get_watermark_settings(_t['id'])
-                            if not _wm.get('enabled', False):
-                                watermark_enabled_for_all = False
+                            if _wm and _wm.get('enabled', False):
+                                watermark_enabled_for_any = True
+                                watermark_settings = _wm  # Use first enabled watermark settings
+                                logger.info(f"🎯 العلامة المائية مفعلة لمهمة {_t['id']} - ستتم معالجة الوسائط مرة واحدة")
                                 break
+                        
+                        if not watermark_enabled_for_any:
+                            logger.info(f"🚫 العلامة المائية غير مفعلة لأي من المهام - معالجة أساسية للوسائط")
                     except Exception as _e:
-                        logger.warning(f"⚠️ فشل فحص إعدادات العلامة المائية لجميع المهام: {_e}")
-                        watermark_enabled_for_all = False
+                        logger.warning(f"⚠️ فشل فحص إعدادات العلامة المائية للمهام: {_e}")
+                        watermark_enabled_for_any = False
 
                     # فحص: هل الرسالة ملف صوتي؟
                     is_audio_message = False
@@ -771,19 +781,24 @@ class UserbotService:
                     except Exception:
                         is_audio_message = False
 
-                    # فحص تجميعي: هل وسوم الصوت مفعلة لكل المهام (للرسائل الصوتية فقط)؟
-                    audio_tags_enabled_for_all = False
+                    # CRITICAL FIX: فحص تجميعي: هل وسوم الصوت مفعلة لأي مهمة (للرسائل الصوتية فقط)؟
+                    audio_tags_enabled_for_any = False
+                    audio_settings = None
                     if is_audio_message:
-                        audio_tags_enabled_for_all = True
                         try:
                             for _t in matching_tasks:
                                 _as = self.db.get_audio_metadata_settings(_t['id'])
-                                if not _as.get('enabled', False):
-                                    audio_tags_enabled_for_all = False
+                                if _as and _as.get('enabled', False):
+                                    audio_tags_enabled_for_any = True
+                                    audio_settings = _as  # Use first enabled audio settings
+                                    logger.info(f"🎵 وسوم الصوت مفعلة لمهمة {_t['id']} - ستتم معالجة الملف الصوتي مرة واحدة")
                                     break
+                            
+                            if not audio_tags_enabled_for_any:
+                                logger.info(f"🚫 وسوم الصوت غير مفعلة لأي من المهام الصوتية")
                         except Exception as _e:
-                            logger.warning(f"⚠️ فشل فحص إعدادات الوسوم الصوتية لجميع المهام: {_e}")
-                            audio_tags_enabled_for_all = False
+                            logger.warning(f"⚠️ فشل فحص إعدادات وسوم الصوت: {_e}")
+                            audio_tags_enabled_for_any = False
 
                     # CRITICAL FIX: Initialize global media cache for message-based reuse
                     if not hasattr(self, 'global_processed_media_cache'):
@@ -795,8 +810,8 @@ class UserbotService:
                     media_cache_key = hashlib.md5(message_hash.encode()).hexdigest()
                     
                     try:
-                        if watermark_enabled_for_all:
-                            logger.info("🏷️ العلامة المائية مفعلة لكل المهام → سيتم تطبيقها مرة واحدة وإعادة الاستخدام")
+                        if watermark_enabled_for_any:
+                            logger.info("🏷️ العلامة المائية مفعلة لأحد المهام → سيتم تطبيقها مرة واحدة وإعادة الاستخدام")
                             
                             # CRITICAL OPTIMIZATION: Check cache before processing
                             if media_cache_key in self.global_processed_media_cache:
@@ -813,9 +828,9 @@ class UserbotService:
                                     logger.info(f"✅ تم معالجة الوسائط مرة واحدة وحفظها للاستخدام المتكرر: {processed_filename}")
                                 else:
                                     logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
-                        elif audio_tags_enabled_for_all and is_audio_message:
+                        elif audio_tags_enabled_for_any and is_audio_message:
                             # CRITICAL FIX: Apply audio tags optimization similar to watermark
-                            logger.info("🎵 الوسوم الصوتية مفعلة لكل المهام والرسالة صوتية → تطبيق الوسوم مرة واحدة وإعادة الاستخدام")
+                            logger.info("🎵 الوسوم الصوتية مفعلة لأحد المهام والرسالة صوتية → تطبيق الوسوم مرة واحدة وإعادة الاستخدام")
                             
                             # Create audio cache key (different from watermark key)
                             audio_cache_key = hashlib.md5(
@@ -854,6 +869,10 @@ class UserbotService:
                                                 for attr in doc.attributes:
                                                     if hasattr(attr, 'file_name') and attr.file_name:
                                                         file_name = attr.file_name
+                                                        # Extract file extension
+                                                        if "." in file_name:
+                                                            file_ext = "." + file_name.split(".")[-1]
+                                                        break
                                                         if '.' in file_name:
                                                             file_ext = '.' + file_name.split('.')[-1].lower()
                                                             file_name = file_name.rsplit('.', 1)[0]
