@@ -12684,4 +12684,213 @@ async def run_simple_bot():
         ]
         await self.edit_or_send_message(event, f"⚙️ موضع المقدمة الحالي: {pos_text}", buttons=buttons)
 
+    # ===== Audio Text Processing Methods =====
+    async def audio_text_cleaning(self, event, task_id):
+        """Show audio text cleaning settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get text cleaning settings for audio tags
+        try:
+            audio_cleaning = self.db.get_audio_text_cleaning_settings(task_id)
+            status_text = "🟢 مفعل" if audio_cleaning.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_cleaning_{task_id}")],
+            [Button.inline("🧹 حذف الروابط", f"audio_clean_links_{task_id}"),
+             Button.inline("😀 حذف الرموز التعبيرية", f"audio_clean_emojis_{task_id}")],
+            [Button.inline("# حذف الهاشتاج", f"audio_clean_hashtags_{task_id}"),
+             Button.inline("📞 حذف أرقام الهاتف", f"audio_clean_phones_{task_id}")],
+            [Button.inline("📝 حذف السطور الفارغة", f"audio_clean_empty_{task_id}"),
+             Button.inline("🔤 حذف كلمات محددة", f"audio_clean_keywords_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للتنظيف", f"audio_clean_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🧹 تنظيف نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **خيارات التنظيف المتاحة:**\n"
+            f"• حذف الروابط من الوسوم\n"
+            f"• حذف الرموز التعبيرية\n"
+            f"• حذف علامات الهاشتاج\n"
+            f"• حذف أرقام الهاتف\n"
+            f"• حذف السطور الفارغة\n"
+            f"• حذف كلمات وعبارات محددة\n\n"
+            f"💡 **ملاحظة:** سيتم تطبيق التنظيف على الوسوم المحددة فقط\n"
+            f"(العنوان، الفنان، التعليق، كلمات الأغنية، إلخ)"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+    
+    async def audio_text_replacements(self, event, task_id):
+        """Show audio text replacements settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        try:
+            audio_replacements = self.db.get_audio_text_replacements_settings(task_id)
+            status_text = "🟢 مفعل" if audio_replacements.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_replacements_{task_id}")],
+            [Button.inline("➕ إضافة استبدال جديد", f"add_audio_replacement_{task_id}")],
+            [Button.inline("📋 عرض الاستبدالات", f"view_audio_replacements_{task_id}")],
+            [Button.inline("🗑️ حذف جميع الاستبدالات", f"clear_audio_replacements_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للاستبدال", f"audio_replace_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🔄 استبدال نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **وظائف الاستبدال:**\n"
+            f"• استبدال كلمات أو عبارات محددة\n"
+            f"• دعم البحث الحساس/غير الحساس للأحرف\n"
+            f"• استبدال الكلمات الكاملة فقط\n"
+            f"• تطبيق على وسوم محددة\n\n"
+            f"💡 **مثال:** استبدال 'ft.' بـ 'featuring' في وسم الفنان"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+    
+    async def audio_word_filters(self, event, task_id):
+        """Show audio word filters settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        try:
+            audio_filters = self.db.get_audio_word_filters_settings(task_id)
+            status_text = "🟢 مفعل" if audio_filters.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_word_filters_{task_id}")],
+            [Button.inline("✅ الكلمات المقبولة", f"audio_whitelist_{task_id}"),
+             Button.inline("❌ الكلمات المرفوضة", f"audio_blacklist_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للفلترة", f"audio_filter_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"📝 فلاتر كلمات الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **أنواع الفلاتر:**\n"
+            f"• **القائمة البيضاء:** الكلمات المسموحة فقط\n"
+            f"• **القائمة السوداء:** الكلمات الممنوعة\n\n"
+            f"💡 **الاستخدام:** فلترة محتوى الوسوم حسب كلمات محددة\n"
+            f"مثل السماح بأسماء فنانين معينين فقط أو منع كلمات غير مرغوبة"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+    
+    async def audio_header_footer(self, event, task_id):
+        """Show audio header/footer settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        try:
+            audio_header_footer = self.db.get_audio_header_footer_settings(task_id)
+            status_text = "🟢 مفعل" if audio_header_footer.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_header_footer_{task_id}")],
+            [Button.inline("📄 إعداد الهيدر", f"audio_header_settings_{task_id}"),
+             Button.inline("📝 إعداد الفوتر", f"audio_footer_settings_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للهيدر/فوتر", f"audio_hf_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"📄 هيدر وفوتر الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **الوظائف:**\n"
+            f"• إضافة نص في بداية الوسوم (هيدر)\n"
+            f"• إضافة نص في نهاية الوسوم (فوتر)\n"
+            f"• تطبيق على وسوم محددة\n\n"
+            f"💡 **مثال:** إضافة اسم القناة في بداية عنوان الأغنية\n"
+            f"أو إضافة حقوق الطبع في نهاية التعليق"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+    
+    async def audio_tag_selection(self, event, task_id):
+        """Show audio tag selection for text processing"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get current tag selection settings
+        try:
+            selected_tags = self.db.get_audio_selected_tags(task_id)
+        except (AttributeError, KeyError):
+            selected_tags = []
+        
+        available_tags = [
+            ('title', 'العنوان'),
+            ('artist', 'الفنان'),
+            ('album_artist', 'فنان الألبوم'),
+            ('album', 'الألبوم'),
+            ('composer', 'الملحن'),
+            ('comment', 'التعليق'),
+            ('lyrics', 'كلمات الأغنية'),
+            ('genre', 'النوع')
+        ]
+        
+        buttons = []
+        for tag_key, tag_name in available_tags:
+            status = "✅" if tag_key in selected_tags else "⬜"
+            buttons.append([Button.inline(f"{status} {tag_name}", f"toggle_audio_tag_{task_id}_{tag_key}")])
+        
+        buttons.extend([
+            [Button.inline("✅ تحديد الكل", f"select_all_audio_tags_{task_id}"),
+             Button.inline("❌ إلغاء الكل", f"deselect_all_audio_tags_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ])
+        
+        message_text = (
+            f"🎯 اختيار الوسوم للمعالجة - المهمة: {task_name}\n\n"
+            f"📝 **اختر الوسوم التي تريد تطبيق معالجة النصوص عليها:**\n\n"
+            f"✅ = مُحدد للمعالجة\n"
+            f"⬜ = غير مُحدد\n\n"
+            f"💡 **ملاحظة:** ستطبق جميع عمليات معالجة النصوص\n"
+            f"(التنظيف، الاستبدال، الفلاتر، الهيدر/فوتر) على الوسوم المحددة فقط"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    # ===== Audio Metadata Enhanced Interface =====
+    async def update_audio_metadata_interface(self):
+        """Update audio metadata interface to show new buttons"""
+        # This function can be called to refresh the interface with new text processing buttons
+        pass
+
     # ===== Advanced Features Menu =====
