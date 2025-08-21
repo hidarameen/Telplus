@@ -3503,11 +3503,11 @@ class SimpleTelegramBot:
                         channels_list.append(added)
                         refreshed_data['channels'] = channels_list
                         self.db.set_conversation_state(user_id, 'waiting_multiple_channels', json.dumps(refreshed_data))
-                        await event.answer("✅ تم إضافة القناة. أرسل رابطاً آخر أو اضغط 'إنهاء الإضافة'.")
+                        await event.reply("✅ تم إضافة القناة. أرسل رابطاً آخر أو اضغط 'إنهاء الإضافة'.")
                     return
                 except Exception as e:
                     logger.error(f"خطأ في إضافة قنوات متعددة للمستخدم {user_id}: {e}")
-                    await event.answer("❌ حدث خطأ أثناء إضافة القناة.")
+                    await event.reply("❌ حدث خطأ أثناء إضافة القناة.")
                     return
             elif state == 'adding_multiple_words': # Handle adding multiple words state
                 await self.handle_adding_multiple_words(event, state_data)
