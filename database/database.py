@@ -5777,3 +5777,663 @@ class Database:
             conn.commit()
             return cursor.rowcount > 0
 
+    # ===== Audio Tags Advanced Processing Functions =====
+
+    def create_audio_tags_advanced_tables(self):
+        """Create audio tags advanced processing tables (text cleaning, word filters, replacements, headers/footers)"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Audio tags text cleaning settings
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_tag_text_cleaning_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    remove_links BOOLEAN DEFAULT FALSE,
+                    remove_emojis BOOLEAN DEFAULT FALSE,
+                    remove_hashtags BOOLEAN DEFAULT FALSE,
+                    remove_phone_numbers BOOLEAN DEFAULT FALSE,
+                    remove_empty_lines BOOLEAN DEFAULT FALSE,
+                    remove_lines_with_keywords BOOLEAN DEFAULT FALSE,
+                    apply_to_title BOOLEAN DEFAULT TRUE,
+                    apply_to_artist BOOLEAN DEFAULT TRUE,
+                    apply_to_album_artist BOOLEAN DEFAULT TRUE,
+                    apply_to_album BOOLEAN DEFAULT TRUE,
+                    apply_to_year BOOLEAN DEFAULT TRUE,
+                    apply_to_genre BOOLEAN DEFAULT TRUE,
+                    apply_to_composer BOOLEAN DEFAULT TRUE,
+                    apply_to_comment BOOLEAN DEFAULT TRUE,
+                    apply_to_track BOOLEAN DEFAULT TRUE,
+                    apply_to_lyrics BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Audio tags text cleaning keywords table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_tag_text_cleaning_keywords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    keyword TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, keyword)
+                )
+            ''')
+
+            # Audio tags word filters
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_tag_word_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    filter_type TEXT NOT NULL CHECK (filter_type IN ('whitelist', 'blacklist')),
+                    is_enabled BOOLEAN DEFAULT FALSE,
+                    apply_to_title BOOLEAN DEFAULT TRUE,
+                    apply_to_artist BOOLEAN DEFAULT TRUE,
+                    apply_to_album_artist BOOLEAN DEFAULT TRUE,
+                    apply_to_album BOOLEAN DEFAULT TRUE,
+                    apply_to_year BOOLEAN DEFAULT TRUE,
+                    apply_to_genre BOOLEAN DEFAULT TRUE,
+                    apply_to_composer BOOLEAN DEFAULT TRUE,
+                    apply_to_comment BOOLEAN DEFAULT TRUE,
+                    apply_to_track BOOLEAN DEFAULT TRUE,
+                    apply_to_lyrics BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id, filter_type)
+                )
+            ''')
+
+            # Audio tags word filter entries table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS audio_tag_word_filter_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    filter_id INTEGER NOT NULL,
+                    word_or_phrase TEXT NOT NULL,
+                    is_case_sensitive BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (filter_id) REFERENCES task_audio_tag_word_filters (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Audio tags text replacements
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_tag_text_replacements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    is_enabled BOOLEAN DEFAULT FALSE,
+                    apply_to_title BOOLEAN DEFAULT TRUE,
+                    apply_to_artist BOOLEAN DEFAULT TRUE,
+                    apply_to_album_artist BOOLEAN DEFAULT TRUE,
+                    apply_to_album BOOLEAN DEFAULT TRUE,
+                    apply_to_year BOOLEAN DEFAULT TRUE,
+                    apply_to_genre BOOLEAN DEFAULT TRUE,
+                    apply_to_composer BOOLEAN DEFAULT TRUE,
+                    apply_to_comment BOOLEAN DEFAULT TRUE,
+                    apply_to_track BOOLEAN DEFAULT TRUE,
+                    apply_to_lyrics BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+                    UNIQUE(task_id)
+                )
+            ''')
+
+            # Audio tags text replacement entries table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS audio_tag_text_replacement_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    replacement_id INTEGER NOT NULL,
+                    find_text TEXT NOT NULL,
+                    replace_text TEXT NOT NULL,
+                    is_case_sensitive BOOLEAN DEFAULT FALSE,
+                    is_whole_word BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (replacement_id) REFERENCES task_audio_tag_text_replacements (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Audio tags header/footer settings
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_tag_header_footer_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL UNIQUE,
+                    header_enabled BOOLEAN DEFAULT FALSE,
+                    header_text TEXT DEFAULT '',
+                    footer_enabled BOOLEAN DEFAULT FALSE,
+                    footer_text TEXT DEFAULT '',
+                    apply_to_title BOOLEAN DEFAULT TRUE,
+                    apply_to_artist BOOLEAN DEFAULT TRUE,
+                    apply_to_album_artist BOOLEAN DEFAULT TRUE,
+                    apply_to_album BOOLEAN DEFAULT TRUE,
+                    apply_to_year BOOLEAN DEFAULT FALSE,
+                    apply_to_genre BOOLEAN DEFAULT TRUE,
+                    apply_to_composer BOOLEAN DEFAULT TRUE,
+                    apply_to_comment BOOLEAN DEFAULT TRUE,
+                    apply_to_track BOOLEAN DEFAULT FALSE,
+                    apply_to_lyrics BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            conn.commit()
+            logger.info("✅ تم إنشاء جداول الوسوم الصوتية المتقدمة بنجاح")
+            return True
+        except Exception as e:
+            logger.error(f"خطأ في إنشاء جداول الوسوم الصوتية المتقدمة: {e}")
+            return False
+
+    # === Audio Tags Text Cleaning Functions ===
+
+    def get_audio_tag_text_cleaning_settings(self, task_id: int) -> dict:
+        """Get audio tag text cleaning settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM task_audio_tag_text_cleaning_settings WHERE task_id = ?
+            ''', (task_id,))
+            row = cursor.fetchone()
+        
+        if row:
+            return {
+                'enabled': bool(row['enabled']),
+                'remove_links': bool(row['remove_links']),
+                'remove_emojis': bool(row['remove_emojis']),
+                'remove_hashtags': bool(row['remove_hashtags']),
+                'remove_phone_numbers': bool(row['remove_phone_numbers']),
+                'remove_empty_lines': bool(row['remove_empty_lines']),
+                'remove_lines_with_keywords': bool(row['remove_lines_with_keywords']),
+                'apply_to_title': bool(row['apply_to_title']),
+                'apply_to_artist': bool(row['apply_to_artist']),
+                'apply_to_album_artist': bool(row['apply_to_album_artist']),
+                'apply_to_album': bool(row['apply_to_album']),
+                'apply_to_year': bool(row['apply_to_year']),
+                'apply_to_genre': bool(row['apply_to_genre']),
+                'apply_to_composer': bool(row['apply_to_composer']),
+                'apply_to_comment': bool(row['apply_to_comment']),
+                'apply_to_track': bool(row['apply_to_track']),
+                'apply_to_lyrics': bool(row['apply_to_lyrics'])
+            }
+        else:
+            # Create default settings
+            self.create_default_audio_tag_text_cleaning_settings(task_id)
+            return self.get_default_audio_tag_text_cleaning_settings()
+
+    def create_default_audio_tag_text_cleaning_settings(self, task_id: int):
+        """Create default audio tag text cleaning settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_text_cleaning_settings (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            conn.commit()
+
+    def get_default_audio_tag_text_cleaning_settings(self) -> dict:
+        """Get default audio tag text cleaning settings"""
+        return {
+            'enabled': False,
+            'remove_links': False,
+            'remove_emojis': False,
+            'remove_hashtags': False,
+            'remove_phone_numbers': False,
+            'remove_empty_lines': False,
+            'remove_lines_with_keywords': False,
+            'apply_to_title': True,
+            'apply_to_artist': True,
+            'apply_to_album_artist': True,
+            'apply_to_album': True,
+            'apply_to_year': True,
+            'apply_to_genre': True,
+            'apply_to_composer': True,
+            'apply_to_comment': True,
+            'apply_to_track': True,
+            'apply_to_lyrics': True
+        }
+
+    def update_audio_tag_text_cleaning_setting(self, task_id: int, setting_name: str, enabled: bool) -> bool:
+        """Update specific audio tag text cleaning setting"""
+        valid_settings = {
+            'enabled', 'remove_links', 'remove_emojis', 'remove_hashtags',
+            'remove_phone_numbers', 'remove_empty_lines', 'remove_lines_with_keywords',
+            'apply_to_title', 'apply_to_artist', 'apply_to_album_artist',
+            'apply_to_album', 'apply_to_year', 'apply_to_genre',
+            'apply_to_composer', 'apply_to_comment', 'apply_to_track', 'apply_to_lyrics'
+        }
+        
+        if setting_name not in valid_settings:
+            logger.error(f"Invalid audio tag text cleaning setting: {setting_name}")
+            return False
+
+        cursor = self.conn.cursor()
+        # Create default record if doesn't exist
+        cursor.execute('''
+            INSERT OR IGNORE INTO task_audio_tag_text_cleaning_settings (task_id)
+            VALUES (?)
+        ''', (task_id,))
+        
+        # Update the specific setting
+        cursor.execute(f'''
+            UPDATE task_audio_tag_text_cleaning_settings
+            SET {setting_name} = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE task_id = ?
+        ''', (enabled, task_id))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def add_audio_tag_text_cleaning_keyword(self, task_id: int, keyword: str) -> bool:
+        """Add keyword to audio tag text cleaning keywords list"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT INTO task_audio_tag_text_cleaning_keywords (task_id, keyword)
+                    VALUES (?, ?)
+                ''', (task_id, keyword))
+                conn.commit()
+                return cursor.rowcount > 0
+            except sqlite3.IntegrityError:
+                return False  # Keyword already exists
+
+    def remove_audio_tag_text_cleaning_keyword(self, task_id: int, keyword: str) -> bool:
+        """Remove keyword from audio tag text cleaning keywords list"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM task_audio_tag_text_cleaning_keywords
+                WHERE task_id = ? AND keyword = ?
+            ''', (task_id, keyword))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_audio_tag_text_cleaning_keywords(self, task_id: int) -> list:
+        """Get all keywords for audio tag text cleaning"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT keyword FROM task_audio_tag_text_cleaning_keywords
+                WHERE task_id = ?
+                ORDER BY keyword
+            ''', (task_id,))
+            return [row['keyword'] for row in cursor.fetchall()]
+
+    # === Audio Tags Word Filter Functions ===
+
+    def get_audio_tag_word_filter_settings(self, task_id: int, filter_type: str) -> dict:
+        """Get audio tag word filter settings for a task and filter type"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM task_audio_tag_word_filters WHERE task_id = ? AND filter_type = ?
+            ''', (task_id, filter_type))
+            row = cursor.fetchone()
+        
+        if row:
+            return {
+                'id': row['id'],
+                'is_enabled': bool(row['is_enabled']),
+                'apply_to_title': bool(row['apply_to_title']),
+                'apply_to_artist': bool(row['apply_to_artist']),
+                'apply_to_album_artist': bool(row['apply_to_album_artist']),
+                'apply_to_album': bool(row['apply_to_album']),
+                'apply_to_year': bool(row['apply_to_year']),
+                'apply_to_genre': bool(row['apply_to_genre']),
+                'apply_to_composer': bool(row['apply_to_composer']),
+                'apply_to_comment': bool(row['apply_to_comment']),
+                'apply_to_track': bool(row['apply_to_track']),
+                'apply_to_lyrics': bool(row['apply_to_lyrics'])
+            }
+        else:
+            # Create default settings
+            self.create_default_audio_tag_word_filter_settings(task_id, filter_type)
+            return self.get_default_audio_tag_word_filter_settings()
+
+    def create_default_audio_tag_word_filter_settings(self, task_id: int, filter_type: str):
+        """Create default audio tag word filter settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_word_filters (task_id, filter_type)
+                VALUES (?, ?)
+            ''', (task_id, filter_type))
+            conn.commit()
+
+    def get_default_audio_tag_word_filter_settings(self) -> dict:
+        """Get default audio tag word filter settings"""
+        return {
+            'is_enabled': False,
+            'apply_to_title': True,
+            'apply_to_artist': True,
+            'apply_to_album_artist': True,
+            'apply_to_album': True,
+            'apply_to_year': True,
+            'apply_to_genre': True,
+            'apply_to_composer': True,
+            'apply_to_comment': True,
+            'apply_to_track': True,
+            'apply_to_lyrics': True
+        }
+
+    def update_audio_tag_word_filter_setting(self, task_id: int, filter_type: str, setting_name: str, enabled: bool) -> bool:
+        """Update specific audio tag word filter setting"""
+        valid_settings = {
+            'is_enabled', 'apply_to_title', 'apply_to_artist', 'apply_to_album_artist',
+            'apply_to_album', 'apply_to_year', 'apply_to_genre',
+            'apply_to_composer', 'apply_to_comment', 'apply_to_track', 'apply_to_lyrics'
+        }
+        
+        if setting_name not in valid_settings or filter_type not in ['whitelist', 'blacklist']:
+            logger.error(f"Invalid audio tag word filter setting: {setting_name} or filter_type: {filter_type}")
+            return False
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Create default record if doesn't exist
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_word_filters (task_id, filter_type)
+                VALUES (?, ?)
+            ''', (task_id, filter_type))
+            
+            # Update the specific setting
+            cursor.execute(f'''
+                UPDATE task_audio_tag_word_filters
+                SET {setting_name} = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = ? AND filter_type = ?
+            ''', (enabled, task_id, filter_type))
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def add_audio_tag_word_filter_entry(self, task_id: int, filter_type: str, word_or_phrase: str, is_case_sensitive: bool = False) -> bool:
+        """Add word/phrase to audio tag word filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get or create filter record
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_word_filters (task_id, filter_type)
+                VALUES (?, ?)
+            ''', (task_id, filter_type))
+            
+            cursor.execute('''
+                SELECT id FROM task_audio_tag_word_filters WHERE task_id = ? AND filter_type = ?
+            ''', (task_id, filter_type))
+            row = cursor.fetchone()
+            filter_id = row['id']
+            
+            cursor.execute('''
+                INSERT INTO audio_tag_word_filter_entries (filter_id, word_or_phrase, is_case_sensitive)
+                VALUES (?, ?, ?)
+            ''', (filter_id, word_or_phrase, is_case_sensitive))
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def remove_audio_tag_word_filter_entry(self, task_id: int, filter_type: str, word_or_phrase: str) -> bool:
+        """Remove word/phrase from audio tag word filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM audio_tag_word_filter_entries
+                WHERE filter_id IN (
+                    SELECT id FROM task_audio_tag_word_filters 
+                    WHERE task_id = ? AND filter_type = ?
+                ) AND word_or_phrase = ?
+            ''', (task_id, filter_type, word_or_phrase))
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def get_audio_tag_word_filter_entries(self, task_id: int, filter_type: str) -> list:
+        """Get all words/phrases for audio tag word filter"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT word_or_phrase, is_case_sensitive FROM audio_tag_word_filter_entries
+                WHERE filter_id IN (
+                    SELECT id FROM task_audio_tag_word_filters 
+                    WHERE task_id = ? AND filter_type = ?
+                )
+                ORDER BY word_or_phrase
+            ''', (task_id, filter_type))
+            return [{'word_or_phrase': row['word_or_phrase'], 'is_case_sensitive': bool(row['is_case_sensitive'])} for row in cursor.fetchall()]
+
+    # === Audio Tags Text Replacement Functions ===
+
+    def get_audio_tag_text_replacement_settings(self, task_id: int) -> dict:
+        """Get audio tag text replacement settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM task_audio_tag_text_replacements WHERE task_id = ?
+            ''', (task_id,))
+            row = cursor.fetchone()
+        
+        if row:
+            return {
+                'id': row['id'],
+                'is_enabled': bool(row['is_enabled']),
+                'apply_to_title': bool(row['apply_to_title']),
+                'apply_to_artist': bool(row['apply_to_artist']),
+                'apply_to_album_artist': bool(row['apply_to_album_artist']),
+                'apply_to_album': bool(row['apply_to_album']),
+                'apply_to_year': bool(row['apply_to_year']),
+                'apply_to_genre': bool(row['apply_to_genre']),
+                'apply_to_composer': bool(row['apply_to_composer']),
+                'apply_to_comment': bool(row['apply_to_comment']),
+                'apply_to_track': bool(row['apply_to_track']),
+                'apply_to_lyrics': bool(row['apply_to_lyrics'])
+            }
+        else:
+            # Create default settings
+            self.create_default_audio_tag_text_replacement_settings(task_id)
+            return self.get_default_audio_tag_text_replacement_settings()
+
+    def create_default_audio_tag_text_replacement_settings(self, task_id: int):
+        """Create default audio tag text replacement settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_text_replacements (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            conn.commit()
+
+    def get_default_audio_tag_text_replacement_settings(self) -> dict:
+        """Get default audio tag text replacement settings"""
+        return {
+            'is_enabled': False,
+            'apply_to_title': True,
+            'apply_to_artist': True,
+            'apply_to_album_artist': True,
+            'apply_to_album': True,
+            'apply_to_year': True,
+            'apply_to_genre': True,
+            'apply_to_composer': True,
+            'apply_to_comment': True,
+            'apply_to_track': True,
+            'apply_to_lyrics': True
+        }
+
+    def update_audio_tag_text_replacement_setting(self, task_id: int, setting_name: str, enabled: bool) -> bool:
+        """Update specific audio tag text replacement setting"""
+        valid_settings = {
+            'is_enabled', 'apply_to_title', 'apply_to_artist', 'apply_to_album_artist',
+            'apply_to_album', 'apply_to_year', 'apply_to_genre',
+            'apply_to_composer', 'apply_to_comment', 'apply_to_track', 'apply_to_lyrics'
+        }
+        
+        if setting_name not in valid_settings:
+            logger.error(f"Invalid audio tag text replacement setting: {setting_name}")
+            return False
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Create default record if doesn't exist
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_text_replacements (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            
+            # Update the specific setting
+            cursor.execute(f'''
+                UPDATE task_audio_tag_text_replacements
+                SET {setting_name} = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = ?
+            ''', (enabled, task_id))
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def add_audio_tag_text_replacement_entry(self, task_id: int, find_text: str, replace_text: str, is_case_sensitive: bool = False, is_whole_word: bool = False) -> bool:
+        """Add text replacement entry for audio tags"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get or create replacement record
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_text_replacements (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            
+            cursor.execute('''
+                SELECT id FROM task_audio_tag_text_replacements WHERE task_id = ?
+            ''', (task_id,))
+            row = cursor.fetchone()
+            replacement_id = row['id']
+            
+            cursor.execute('''
+                INSERT INTO audio_tag_text_replacement_entries (replacement_id, find_text, replace_text, is_case_sensitive, is_whole_word)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (replacement_id, find_text, replace_text, is_case_sensitive, is_whole_word))
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def remove_audio_tag_text_replacement_entry(self, task_id: int, find_text: str) -> bool:
+        """Remove text replacement entry from audio tags"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM audio_tag_text_replacement_entries
+                WHERE replacement_id IN (
+                    SELECT id FROM task_audio_tag_text_replacements 
+                    WHERE task_id = ?
+                ) AND find_text = ?
+            ''', (task_id, find_text))
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def get_audio_tag_text_replacement_entries(self, task_id: int) -> list:
+        """Get all text replacement entries for audio tags"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT find_text, replace_text, is_case_sensitive, is_whole_word 
+                FROM audio_tag_text_replacement_entries
+                WHERE replacement_id IN (
+                    SELECT id FROM task_audio_tag_text_replacements 
+                    WHERE task_id = ?
+                )
+                ORDER BY find_text
+            ''', (task_id,))
+            return [{
+                'find_text': row['find_text'],
+                'replace_text': row['replace_text'],
+                'is_case_sensitive': bool(row['is_case_sensitive']),
+                'is_whole_word': bool(row['is_whole_word'])
+            } for row in cursor.fetchall()]
+
+    # === Audio Tags Header/Footer Functions ===
+
+    def get_audio_tag_header_footer_settings(self, task_id: int) -> dict:
+        """Get audio tag header/footer settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM task_audio_tag_header_footer_settings WHERE task_id = ?
+            ''', (task_id,))
+            row = cursor.fetchone()
+        
+        if row:
+            return {
+                'header_enabled': bool(row['header_enabled']),
+                'header_text': row['header_text'] or '',
+                'footer_enabled': bool(row['footer_enabled']),
+                'footer_text': row['footer_text'] or '',
+                'apply_to_title': bool(row['apply_to_title']),
+                'apply_to_artist': bool(row['apply_to_artist']),
+                'apply_to_album_artist': bool(row['apply_to_album_artist']),
+                'apply_to_album': bool(row['apply_to_album']),
+                'apply_to_year': bool(row['apply_to_year']),
+                'apply_to_genre': bool(row['apply_to_genre']),
+                'apply_to_composer': bool(row['apply_to_composer']),
+                'apply_to_comment': bool(row['apply_to_comment']),
+                'apply_to_track': bool(row['apply_to_track']),
+                'apply_to_lyrics': bool(row['apply_to_lyrics'])
+            }
+        else:
+            # Create default settings
+            self.create_default_audio_tag_header_footer_settings(task_id)
+            return self.get_default_audio_tag_header_footer_settings()
+
+    def create_default_audio_tag_header_footer_settings(self, task_id: int):
+        """Create default audio tag header/footer settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_header_footer_settings (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            conn.commit()
+
+    def get_default_audio_tag_header_footer_settings(self) -> dict:
+        """Get default audio tag header/footer settings"""
+        return {
+            'header_enabled': False,
+            'header_text': '',
+            'footer_enabled': False,
+            'footer_text': '',
+            'apply_to_title': True,
+            'apply_to_artist': True,
+            'apply_to_album_artist': True,
+            'apply_to_album': True,
+            'apply_to_year': False,
+            'apply_to_genre': True,
+            'apply_to_composer': True,
+            'apply_to_comment': True,
+            'apply_to_track': False,
+            'apply_to_lyrics': True
+        }
+
+    def update_audio_tag_header_footer_setting(self, task_id: int, setting_name: str, value) -> bool:
+        """Update specific audio tag header/footer setting"""
+        valid_text_settings = {'header_text', 'footer_text'}
+        valid_bool_settings = {
+            'header_enabled', 'footer_enabled', 'apply_to_title', 'apply_to_artist', 
+            'apply_to_album_artist', 'apply_to_album', 'apply_to_year', 'apply_to_genre',
+            'apply_to_composer', 'apply_to_comment', 'apply_to_track', 'apply_to_lyrics'
+        }
+        
+        if setting_name not in valid_text_settings and setting_name not in valid_bool_settings:
+            logger.error(f"Invalid audio tag header/footer setting: {setting_name}")
+            return False
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Create default record if doesn't exist
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_header_footer_settings (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            
+            # Update the specific setting
+            cursor.execute(f'''
+                UPDATE task_audio_tag_header_footer_settings
+                SET {setting_name} = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = ?
+            ''', (value, task_id))
+            conn.commit()
+        return cursor.rowcount > 0
