@@ -1012,6 +1012,21 @@ class UserbotService:
                         processed_text = (final_text or (event.message.text if hasattr(event.message, 'text') else None) or "رسالة")
 
                         # إرسال الرسالة بالوضع المحدد
+                        if final_send_mode == 'forward':
+                            # وضع التوجيه - إرسال الرسالة كما هي مع رأس التوجيه
+                            logger.info("🔀 استخدام وضع التوجيه - إرسال الرسالة مع رأس التوجيه")
+                            try:
+                                forwarded_msg = await client.forward_messages(
+                                    target_entity,
+                                    event.message,
+                                    silent=forwarding_settings['silent_notifications']
+                                )
+                                logger.info(f"✅ تم توجيه الرسالة بنجاح في وضع التوجيه")
+                            except Exception as forward_err:
+                                logger.error(f"❌ فشل التوجيه المباشر، التبديل للنسخ: {forward_err}")
+                                # Fallback to copy mode if forward fails
+                                final_send_mode = 'copy'
+
                         if final_send_mode == 'copy':
                             # Optimization: use server-side copy when no modifications are required
                             try:
