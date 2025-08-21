@@ -125,7 +125,7 @@ class PublishingModeManager:
             task = self.db.get_task(task_id, user_id)
             
             if not task:
-                await event.answer("❌ المهمة غير موجودة")
+                await self.bot.safe_answer(event, "❌ المهمة غير موجودة")
                 return
             
             # الحصول على الرسائل المعلقة
@@ -171,7 +171,7 @@ class PublishingModeManager:
             
         except Exception as e:
             logger.error(f"خطأ في عرض الرسائل المعلقة: {e}")
-            await event.answer("❌ حدث خطأ في عرض الرسائل المعلقة")
+            await self.bot.safe_answer(event, "❌ حدث خطأ في عرض الرسائل المعلقة")
     
     async def show_pending_message_details(self, event, pending_id: int):
         """عرض تفاصيل الرسالة المعلقة"""
@@ -181,17 +181,17 @@ class PublishingModeManager:
             # الحصول على تفاصيل الرسالة المعلقة
             pending_message = self.db.get_pending_message(pending_id)
             if not pending_message or pending_message['user_id'] != user_id:
-                await event.answer("❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
+                await self.bot.safe_answer(event, "❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
                 return
             
             if pending_message['status'] != 'pending':
-                await event.answer("❌ هذه الرسالة تم التعامل معها بالفعل")
+                await self.bot.safe_answer(event, "❌ هذه الرسالة تم التعامل معها بالفعل")
                 return
             
             # الحصول على تفاصيل المهمة
             task = self.db.get_task(pending_message['task_id'], user_id)
             if not task:
-                await event.answer("❌ المهمة غير موجودة")
+                await self.bot.safe_answer(event, "❌ المهمة غير موجودة")
                 return
             
             # تحليل بيانات الرسالة
@@ -228,7 +228,7 @@ class PublishingModeManager:
             
         except Exception as e:
             logger.error(f"خطأ في عرض تفاصيل الرسالة المعلقة: {e}")
-            await event.answer("❌ حدث خطأ في عرض التفاصيل")
+            await self.bot.safe_answer(event, "❌ حدث خطأ في عرض التفاصيل")
     
     async def handle_message_approval(self, event, pending_id: int, approved: bool):
         """معالجة الموافقة على الرسالة"""
@@ -238,25 +238,25 @@ class PublishingModeManager:
             # الحصول على تفاصيل الرسالة المعلقة
             pending_message = self.db.get_pending_message(pending_id)
             if not pending_message or pending_message['user_id'] != user_id:
-                await event.answer("❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
+                await self.bot.safe_answer(event, "❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
                 return
             
             if pending_message['status'] != 'pending':
-                await event.answer("❌ هذه الرسالة تم التعامل معها بالفعل")
+                await self.bot.safe_answer(event, "❌ هذه الرسالة تم التعامل معها بالفعل")
                 return
             
             task_id = pending_message['task_id']
             task = self.db.get_task(task_id, user_id)
             
             if not task:
-                await event.answer("❌ المهمة غير موجودة")
+                await self.bot.safe_answer(event, "❌ المهمة غير موجودة")
                 return
             
             if approved:
                 # تحديث حالة الرسالة إلى موافق عليها
                 success = self.db.update_pending_message_status(pending_id, 'approved')
                 if not success:
-                    await event.answer("❌ فشل في تحديث حالة الرسالة")
+                    await self.bot.safe_answer(event, "❌ فشل في تحديث حالة الرسالة")
                     return
                 
                 # معالجة الرسالة الموافق عليها
@@ -269,7 +269,7 @@ class PublishingModeManager:
                         "هذه الرسالة تمت الموافقة عليها وتم إرسالها إلى الأهداف بنجاح."
                     )
                     await event.edit(new_text, buttons=None)
-                    await event.answer("✅ تمت الموافقة على الرسالة وتم إرسالها بنجاح")
+                    await self.bot.safe_answer(event, "✅ تمت الموافقة على الرسالة وتم إرسالها بنجاح")
                 else:
                     # تحديث الرسالة لإظهار الموافقة مع تحذير
                     new_text = (
@@ -277,7 +277,7 @@ class PublishingModeManager:
                         "تمت الموافقة على الرسالة ولكن فشل في إرسالها إلى بعض الأهداف."
                     )
                     await event.edit(new_text, buttons=None)
-                    await event.answer("⚠️ تمت الموافقة ولكن فشل في إرسال الرسالة")
+                    await self.bot.safe_answer(event, "⚠️ تمت الموافقة ولكن فشل في إرسال الرسالة")
                 
                 logger.info(f"✅ تمت الموافقة على الرسالة المعلقة {pending_id} للمستخدم {user_id}")
                 
@@ -285,7 +285,7 @@ class PublishingModeManager:
                 # تحديث حالة الرسالة إلى مرفوضة
                 success = self.db.update_pending_message_status(pending_id, 'rejected')
                 if not success:
-                    await event.answer("❌ فشل في تحديث حالة الرسالة")
+                    await self.bot.safe_answer(event, "❌ فشل في تحديث حالة الرسالة")
                     return
                 
                 # تحديث الرسالة لإظهار الرفض
@@ -294,13 +294,13 @@ class PublishingModeManager:
                     "هذه الرسالة تم رفضها ولن يتم إرسالها إلى الأهداف."
                 )
                 await event.edit(new_text, buttons=None)
-                await event.answer("❌ تم رفض الرسالة")
+                await self.bot.safe_answer(event, "❌ تم رفض الرسالة")
                 
                 logger.info(f"❌ تم رفض الرسالة المعلقة {pending_id} للمستخدم {user_id}")
                 
         except Exception as e:
             logger.error(f"خطأ في معالجة الموافقة: {e}")
-            await event.answer("❌ حدث خطأ في معالجة الطلب")
+            await self.bot.safe_answer(event, "❌ حدث خطأ في معالجة الطلب")
     
     async def _process_approved_message(self, pending_message: Dict, task: Dict) -> bool:
         """معالجة الرسالة الموافق عليها وإرسالها للأهداف"""

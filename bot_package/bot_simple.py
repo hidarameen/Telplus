@@ -191,7 +191,7 @@ class SimpleTelegramBot:
         try:
             # CallbackQuery events have 'answer' to show a toast/alert
             if hasattr(event, 'answer') and callable(getattr(event, 'answer', None)):
-                await event.answer(text, alert=alert)
+                await self.safe_answer(event, text, alert=alert)
                 return
         except Exception as e:
             # Fallback to sending a message if answering fails
@@ -255,7 +255,7 @@ class SimpleTelegramBot:
         current = self.db.get_audio_metadata_settings(task_id)
         new_status = not bool(current.get('enabled', False))
         self.db.update_audio_metadata_enabled(task_id, new_status)
-        await event.answer(f"✅ تم {'تفعيل' if new_status else 'تعطيل'} الوسوم الصوتية")
+        await self.safe_answer(event, f"✅ تم {'تفعيل' if new_status else 'تعطيل'} الوسوم الصوتية")
         await self.audio_metadata_settings(event, task_id)
 
     async def audio_template_settings(self, event, task_id):
@@ -324,7 +324,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -387,7 +387,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         success = self.db.reset_audio_template_settings(task_id)
@@ -418,7 +418,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         task_name = task.get('task_name', 'مهمة بدون اسم')
         audio_settings = self.db.get_audio_metadata_settings(task_id)
@@ -449,7 +449,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         task_name = task.get('task_name', 'مهمة بدون اسم')
         audio_settings = self.db.get_audio_metadata_settings(task_id)
@@ -484,7 +484,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         task_name = task.get('task_name', 'مهمة بدون اسم')
         audio_settings = self.db.get_audio_metadata_settings(task_id)
@@ -702,7 +702,7 @@ class SimpleTelegramBot:
                         await self.toggle_task(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة للتبديل: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("task_delete_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -711,7 +711,7 @@ class SimpleTelegramBot:
                         await self.delete_task(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة للحذف: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("task_manage_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -720,7 +720,7 @@ class SimpleTelegramBot:
                         await self.show_task_details(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة للإدارة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("task_settings_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -729,7 +729,7 @@ class SimpleTelegramBot:
                         await self.show_task_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة للإعدادات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_forward_mode_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -738,7 +738,7 @@ class SimpleTelegramBot:
                         await self.toggle_forward_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع التوجيه: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_sources_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -747,7 +747,7 @@ class SimpleTelegramBot:
                         await self.manage_task_sources(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة المصادر: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data == "choose_sources":
                 await self.start_choose_sources(event)
             elif data == "choose_targets":
@@ -759,7 +759,7 @@ class SimpleTelegramBot:
                         task_id = int(parts[3])
                         await self.start_choose_sources_for_task(event, task_id)
                     except ValueError:
-                        await event.answer("❌ خطأ")
+                        await self.safe_answer(event, "❌ خطأ")
             elif data.startswith("choose_add_targets_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -767,7 +767,7 @@ class SimpleTelegramBot:
                         task_id = int(parts[3])
                         await self.start_choose_targets_for_task(event, task_id)
                     except ValueError:
-                        await event.answer("❌ خطأ")
+                        await self.safe_answer(event, "❌ خطأ")
             elif data.startswith("toggle_sel_source_"):
                 chat_id = data.replace("toggle_sel_source_", "", 1)
                 await self.toggle_channel_selection(event, "source", chat_id)
@@ -786,7 +786,7 @@ class SimpleTelegramBot:
                         await self.manage_task_targets(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة الأهداف: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("add_source_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -795,7 +795,7 @@ class SimpleTelegramBot:
                         await self.start_add_source(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة مصدر: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("add_target_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -804,7 +804,7 @@ class SimpleTelegramBot:
                         await self.start_add_target(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة هدف: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("remove_source_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -814,7 +814,7 @@ class SimpleTelegramBot:
                         await self.remove_source(event, source_id, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المصدر/المهمة لحذف المصدر: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("remove_target_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -824,7 +824,7 @@ class SimpleTelegramBot:
                         await self.remove_target(event, target_id, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف الهدف/المهمة لحذف الهدف: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data == "settings":
                 await self.show_settings(event)
             elif data == "check_userbot":
@@ -857,7 +857,7 @@ class SimpleTelegramBot:
                         await self.show_advanced_filters(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة للفلاتر المتقدمة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("advanced_features_"): # Handler for advanced features
                 try:
                     # Extract task_id from data like "advanced_features_123"
@@ -865,7 +865,7 @@ class SimpleTelegramBot:
                     await self.show_advanced_features(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للميزات المتقدمة: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("character_limit_"): # Handler for character limit settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -874,7 +874,7 @@ class SimpleTelegramBot:
                         await self.show_character_limit_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات حد الأحرف: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("rate_limit_"): # Handler for rate limit settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -883,7 +883,7 @@ class SimpleTelegramBot:
                         await self.show_rate_limit_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات حد الرسائل: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("forwarding_delay_"): # Handler for forwarding delay settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -892,7 +892,7 @@ class SimpleTelegramBot:
                         await self.show_forwarding_delay_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات تأخير التوجيه: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("sending_interval_"): # Handler for sending interval settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -901,7 +901,7 @@ class SimpleTelegramBot:
                         await self.show_sending_interval_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات فاصل الإرسال: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             # ===== Audio Metadata Event Handlers =====
             elif data.startswith("audio_metadata_settings_"):
                 try:
@@ -909,21 +909,21 @@ class SimpleTelegramBot:
                     await self.audio_metadata_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الوسوم الصوتية: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_audio_metadata_"):
                 try:
                     task_id = int(data.replace("toggle_audio_metadata_", ""))
                     await self.toggle_audio_metadata(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الوسوم الصوتية: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("audio_template_settings_"):
                 try:
                     task_id = int(data.replace("audio_template_settings_", ""))
                     await self.audio_template_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات قالب الوسوم: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_audio_tag_"):
                 try:
                     # Extract task_id and tag_name from "edit_audio_tag_7_title"
@@ -934,17 +934,17 @@ class SimpleTelegramBot:
                         tag_name = parts[1]
                         await self.start_edit_audio_tag(event, task_id, tag_name)
                     else:
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتحرير وسم الصوت: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("reset_audio_template_"):
                 try:
                     task_id = int(data.replace("reset_audio_template_", ""))
                     await self.reset_audio_template(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعادة تعيين قالب الوسوم: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_audio_template_"):
                 try:
                     # Extract task_id and template_name from "set_audio_template_7_default"
@@ -955,17 +955,17 @@ class SimpleTelegramBot:
                         template_name = parts[1]
                         await self.set_audio_template(event, task_id, template_name)
                     else:
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتعيين قالب الوسوم: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("album_art_settings_"):
                 try:
                     task_id = int(data.replace("album_art_settings_", ""))
                     await self.album_art_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات صورة الغلاف: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("album_art_options_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -973,134 +973,134 @@ class SimpleTelegramBot:
                         task_id = int(parts[3])
                         await self.show_album_art_options(event, task_id)
                     except ValueError:
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("upload_album_art_"):
                 try:
                     task_id = int(data.replace("upload_album_art_", ""))
                     self.set_user_state(user_id, 'awaiting_album_art_upload', {'task_id': task_id})
                     await self.force_new_message(event, "🖼️ أرسل الآن صورة الغلاف كصورة أو ملف.")
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_album_art_enabled_"):
                 try:
                     task_id = int(data.replace("toggle_album_art_enabled_", ""))
                     settings = self.db.get_audio_metadata_settings(task_id)
                     self.db.set_album_art_settings(task_id, enabled=not bool(settings.get('album_art_enabled')))
-                    await event.answer("✅ تم التبديل")
+                    await self.safe_answer(event, "✅ تم التبديل")
                     await self.album_art_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_apply_art_to_all_"):
                 try:
                     task_id = int(data.replace("toggle_apply_art_to_all_", ""))
                     settings = self.db.get_audio_metadata_settings(task_id)
                     self.db.set_album_art_settings(task_id, apply_to_all=not bool(settings.get('apply_art_to_all')))
-                    await event.answer("✅ تم التبديل")
+                    await self.safe_answer(event, "✅ تم التبديل")
                     await self.album_art_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_preserve_quality_"):
                 try:
                     task_id = int(data.replace("toggle_preserve_quality_", ""))
                     settings = self.db.get_audio_metadata_settings(task_id)
                     current_state = settings.get('preserve_quality', True)
                     self.db.update_audio_metadata_setting(task_id, 'preserve_quality', not current_state)
-                    await event.answer("✅ تم التبديل")
+                    await self.safe_answer(event, "✅ تم التبديل")
                     await self.advanced_audio_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_convert_to_mp3_"):
                 try:
                     task_id = int(data.replace("toggle_convert_to_mp3_", ""))
                     settings = self.db.get_audio_metadata_settings(task_id)
                     current_state = settings.get('convert_to_mp3', False)
                     self.db.update_audio_metadata_setting(task_id, 'convert_to_mp3', not current_state)
-                    await event.answer("✅ تم التبديل")
+                    await self.safe_answer(event, "✅ تم التبديل")
                     await self.advanced_audio_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("delete_channel_"):
                 try:
                     channel_id = int(data.replace("delete_channel_", ""))
                     await self.delete_channel(event, channel_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_channel_"):
                 try:
                     channel_id = int(data.replace("edit_channel_", ""))
                     await self.edit_channel(event, channel_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("refresh_channel_"):
                 try:
                     channel_id = int(data.replace("refresh_channel_", ""))
                     await self.refresh_channel_info(event, channel_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("audio_merge_settings_"):
                 try:
                     task_id = int(data.replace("audio_merge_settings_", ""))
                     await self.audio_merge_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات دمج المقاطع: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_audio_merge_"):
                 try:
                     task_id = int(data.replace("toggle_audio_merge_", ""))
                     settings = self.db.get_audio_metadata_settings(task_id)
                     self.db.set_audio_merge_settings(task_id, enabled=not bool(settings.get('audio_merge_enabled')))
-                    await event.answer("✅ تم التبديل")
+                    await self.safe_answer(event, "✅ تم التبديل")
                     await self.audio_merge_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("intro_audio_settings_"):
                 try:
                     task_id = int(data.replace("intro_audio_settings_", ""))
                     await self.show_intro_audio_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("outro_audio_settings_"):
                 try:
                     task_id = int(data.replace("outro_audio_settings_", ""))
                     await self.show_outro_audio_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("upload_intro_audio_"):
                 try:
                     task_id = int(data.replace("upload_intro_audio_", ""))
                     self.set_user_state(user_id, 'awaiting_intro_audio_upload', {'task_id': task_id})
                     await self.force_new_message(event, "🎵 أرسل الآن ملف المقدمة (Audio)")
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("remove_intro_audio_"):
                 try:
                     task_id = int(data.replace("remove_intro_audio_", ""))
                     self.db.set_audio_merge_settings(task_id, intro_path='')
-                    await event.answer("✅ تم حذف مقطع المقدمة")
+                    await self.safe_answer(event, "✅ تم حذف مقطع المقدمة")
                     await self.audio_merge_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("upload_outro_audio_"):
                 try:
                     task_id = int(data.replace("upload_outro_audio_", ""))
                     self.set_user_state(user_id, 'awaiting_outro_audio_upload', {'task_id': task_id})
                     await self.force_new_message(event, "🎵 أرسل الآن ملف الخاتمة (Audio)")
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("remove_outro_audio_"):
                 try:
                     task_id = int(data.replace("remove_outro_audio_", ""))
                     self.db.set_audio_merge_settings(task_id, outro_path='')
-                    await event.answer("✅ تم حذف مقطع الخاتمة")
+                    await self.safe_answer(event, "✅ تم حذف مقطع الخاتمة")
                     await self.audio_merge_settings(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("merge_options_"):
                 try:
                     task_id = int(data.replace("merge_options_", ""))
                     await self.show_merge_options(event, task_id)
                 except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_intro_position_"):
                 try:
                     remaining = data.replace("set_intro_position_", "")
@@ -1108,19 +1108,19 @@ class SimpleTelegramBot:
                     task_id = int(task_id_str)
                     if pos in ['start', 'end']:
                         self.db.set_audio_merge_settings(task_id, intro_position=pos)
-                        await event.answer("✅ تم تحديث موضع المقدمة")
+                        await self.safe_answer(event, "✅ تم تحديث موضع المقدمة")
                         await self.audio_merge_settings(event, task_id)
                     else:
-                        await event.answer("❌ موقع غير صحيح")
+                        await self.safe_answer(event, "❌ موقع غير صحيح")
                 except Exception:
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("advanced_audio_settings_"):
                 try:
                     task_id = int(data.replace("advanced_audio_settings_", ""))
                     await self.advanced_audio_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للإعدادات المتقدمة للوسوم: {e}")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_char_limit_"): # Toggle character limit
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1129,7 +1129,7 @@ class SimpleTelegramBot:
                         await self.toggle_character_limit(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حد الأحرف: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("cycle_char_mode_"): # Cycle character limit mode
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1138,7 +1138,7 @@ class SimpleTelegramBot:
                         await self.cycle_character_limit_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتدوير وضع حد الأحرف: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_char_min_"): # Edit character minimum limit
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1147,7 +1147,7 @@ class SimpleTelegramBot:
                         await self.start_edit_char_min(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الحد الأدنى: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_char_max_"): # Edit character maximum limit
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1156,7 +1156,7 @@ class SimpleTelegramBot:
                         await self.start_edit_char_max(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الحد الأقصى: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_rate_limit_"): # Toggle rate limit
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1165,7 +1165,7 @@ class SimpleTelegramBot:
                         await self.toggle_rate_limit(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حد الرسائل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_forwarding_delay_"): # Toggle forwarding delay
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1174,7 +1174,7 @@ class SimpleTelegramBot:
                         await self.toggle_forwarding_delay(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تأخير التوجيه: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_settings_"): # Handler for watermark settings
                 try:
                     # Extract task_id from data like "watermark_settings_123"
@@ -1182,7 +1182,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_"): # Toggle watermark
                 try:
                     # Extract task_id from data like "toggle_watermark_123"
@@ -1190,7 +1190,7 @@ class SimpleTelegramBot:
                     await self.toggle_watermark(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_appearance_"): # Watermark appearance settings
                 try:
                     # Extract task_id from data like "watermark_appearance_123"
@@ -1198,7 +1198,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_appearance(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات مظهر العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_type_"): # Watermark type settings
                 try:
                     # Extract task_id from data like "watermark_type_123"
@@ -1206,7 +1206,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_type(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات نوع العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_media_"): # Watermark media types
                 try:
                     # Extract task_id from data like "watermark_media_123"
@@ -1214,7 +1214,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_media_types(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لأنواع الوسائط للعلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_size_up_"): # Increase watermark size
                 try:
                     # Extract task_id from data like "watermark_size_up_123"
@@ -1222,7 +1222,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_size(event, task_id, increase=True)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة حجم العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_size_down_"): # Decrease watermark size
                 try:
                     # Extract task_id from data like "watermark_size_down_123"
@@ -1230,7 +1230,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_size(event, task_id, increase=False)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل حجم العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_opacity_up_"): # Increase watermark opacity
                 try:
                     # Extract task_id from data like "watermark_opacity_up_123"
@@ -1238,7 +1238,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_opacity(event, task_id, increase=True)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة شفافية العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_opacity_down_"): # Decrease watermark opacity
                 try:
                     # Extract task_id from data like "watermark_opacity_down_123"
@@ -1246,7 +1246,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_opacity(event, task_id, increase=False)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل شفافية العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_font_up_"): # Increase watermark font size
                 try:
                     # Extract task_id from data like "watermark_font_up_123"
@@ -1254,7 +1254,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_font_size(event, task_id, increase=True)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة حجم خط العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_font_down_"): # Decrease watermark font size
                 try:
                     # Extract task_id from data like "watermark_font_down_123"
@@ -1262,7 +1262,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_font_size(event, task_id, increase=False)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل حجم خط العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_default_up_"): # Increase default watermark size
                 try:
                     # Extract task_id from data like "watermark_default_up_123"
@@ -1270,7 +1270,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_default_size(event, task_id, increase=True)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لزيادة الحجم الافتراضي: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_default_down_"): # Decrease default watermark size
                 try:
                     # Extract task_id from data like "watermark_default_down_123"
@@ -1278,7 +1278,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_default_size(event, task_id, increase=False)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتقليل الحجم الافتراضي: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_apply_default_"): # Apply default size
                 try:
                     # Extract task_id from data like "watermark_apply_default_123"
@@ -1286,7 +1286,7 @@ class SimpleTelegramBot:
                     await self.apply_default_watermark_size(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتطبيق الحجم الافتراضي: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_offset_left_"): # Move watermark left
                 try:
                     # Extract task_id from data like "watermark_offset_left_123"
@@ -1294,7 +1294,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_offset(event, task_id, axis='x', increase=False)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة يساراً: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_offset_right_"): # Move watermark right
                 try:
                     # Extract task_id from data like "watermark_offset_right_123"
@@ -1302,7 +1302,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_offset(event, task_id, axis='x', increase=True)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة يميناً: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_offset_up_"): # Move watermark up
                 try:
                     # Extract task_id from data like "watermark_offset_up_123"
@@ -1310,7 +1310,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_offset(event, task_id, axis='y', increase=False)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة أعلى: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_offset_down_"): # Move watermark down
                 try:
                     # Extract task_id from data like "watermark_offset_down_123"
@@ -1318,7 +1318,7 @@ class SimpleTelegramBot:
                     await self.adjust_watermark_offset(event, task_id, axis='y', increase=True)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للإزاحة أسفل: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_reset_offset_"): # Reset watermark offset
                 try:
                     # Extract task_id from data like "watermark_reset_offset_123"
@@ -1326,7 +1326,7 @@ class SimpleTelegramBot:
                     await self.reset_watermark_offset(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعادة تعيين الإزاحة: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_position_selector_"): # Show watermark position selector
                 try:
                     # Extract task_id from data like "watermark_position_selector_123"
@@ -1334,7 +1334,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_position_selector(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض أختيار موضع العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_watermark_position_"): # Set watermark position
                 try:
                     # Extract task_id and position from data like "set_watermark_position_top_left_123"
@@ -1353,13 +1353,13 @@ class SimpleTelegramBot:
                             await self.set_watermark_position(event, task_id, position)
                         else:
                             logger.error(f"❌ موقع غير صحيح: {position}")
-                            await event.answer("❌ موقع غير صحيح")
+                            await self.safe_answer(event, "❌ موقع غير صحيح")
                     else:
                         logger.error(f"❌ تنسيق بيانات غير صحيح: {data}")
-                        await event.answer("❌ خطأ في تنسيق البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تنسيق البيانات")
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتعيين موضع العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_watermark_type_"): # Set watermark type
                 try:
                     # Extract watermark_type and task_id from data like "set_watermark_type_text_123"
@@ -1378,13 +1378,13 @@ class SimpleTelegramBot:
                             await self.set_watermark_type(event, task_id, watermark_type)
                         else:
                             logger.error(f"❌ نوع علامة مائية غير صحيح: {watermark_type}")
-                            await event.answer("❌ نوع علامة مائية غير صحيح")
+                            await self.safe_answer(event, "❌ نوع علامة مائية غير صحيح")
                     else:
                         logger.error(f"❌ تنسيق بيانات غير صحيح: {data}")
-                        await event.answer("❌ خطأ في تنسيق البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تنسيق البيانات")
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل نوع العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
 
             elif data.startswith("toggle_sending_interval_"): # Toggle sending interval
                 parts = data.split("_")
@@ -1394,7 +1394,7 @@ class SimpleTelegramBot:
                         await self.toggle_sending_interval(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فاصل الإرسال: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_char_range_"): # Handler for editing character range
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1403,7 +1403,7 @@ class SimpleTelegramBot:
                         await self.start_edit_character_range(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل نطاق الأحرف: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_rate_count_"): # Handler for editing rate count
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1412,7 +1412,7 @@ class SimpleTelegramBot:
                         await self.start_edit_rate_count(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل عدد الرسائل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_rate_period_"): # Handler for editing rate period
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1421,7 +1421,7 @@ class SimpleTelegramBot:
                         await self.start_edit_rate_period(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل فترة الرسائل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_rate_limit_count_"): # Handler for editing rate limit count
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -1430,7 +1430,7 @@ class SimpleTelegramBot:
                         await self.start_edit_rate_count(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل عدد الرسائل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_rate_limit_period_"): # Handler for editing rate limit period
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -1439,7 +1439,7 @@ class SimpleTelegramBot:
                         await self.start_edit_rate_period(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل فترة الرسائل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_forwarding_delay_"): # Handler for editing forwarding delay
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1448,7 +1448,7 @@ class SimpleTelegramBot:
                         await self.start_edit_forwarding_delay(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل تأخير التوجيه: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_sending_interval_"): # Handler for editing sending interval
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1457,7 +1457,7 @@ class SimpleTelegramBot:
                         await self.start_edit_sending_interval(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل فاصل الإرسال: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("day_filters_"): # Handler for day filters
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1466,7 +1466,7 @@ class SimpleTelegramBot:
                         await self.show_day_filters(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر الأيام: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("working_hours_filter_"): # Handler for working hours
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1475,7 +1475,7 @@ class SimpleTelegramBot:
                         await self.show_working_hours_filter(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلتر ساعات العمل: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("language_filters_"): # Handler for language filters
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1484,7 +1484,7 @@ class SimpleTelegramBot:
                         await self.show_language_filters(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر اللغات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_languages_"): # Handler for managing languages
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1493,7 +1493,7 @@ class SimpleTelegramBot:
                         await self.show_language_management(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة اللغات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("admin_filters_"): # Handler for admin filters
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1502,7 +1502,7 @@ class SimpleTelegramBot:
                         await self.show_admin_filters(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر المشرفين: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("admin_list_"): # Handler for admin list
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1511,7 +1511,7 @@ class SimpleTelegramBot:
                         await self.show_admin_list(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لقائمة المشرفين: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_settings_"): # Handler for watermark settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1520,7 +1520,7 @@ class SimpleTelegramBot:
                         await self.show_watermark_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_") and not data.startswith("toggle_watermark_photos_") and not data.startswith("toggle_watermark_videos_") and not data.startswith("toggle_watermark_documents_"): # Handler for toggle watermark
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1529,7 +1529,7 @@ class SimpleTelegramBot:
                         await self.toggle_watermark(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_config_"): # Handler for watermark config
                 try:
                     # Extract task_id from data like "watermark_config_123"
@@ -1537,7 +1537,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_config(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتكوين العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_media_"): # Handler for watermark media settings
                 try:
                     # Extract task_id from data like "watermark_media_123"
@@ -1545,7 +1545,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_media_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وسائط العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_text_"): # Handler for watermark text setting
                 try:
                     # Extract task_id from data like "watermark_text_123"
@@ -1553,7 +1553,7 @@ class SimpleTelegramBot:
                     await self.start_set_watermark_text(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل نص العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_image_"): # Handler for watermark image setting
                 try:
                     # Extract task_id from data like "watermark_image_123"
@@ -1561,7 +1561,7 @@ class SimpleTelegramBot:
                     await self.start_set_watermark_image(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل صورة العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_position_"): # Handler for watermark position setting
                 try:
                     # Extract task_id from data like "watermark_position_123"
@@ -1569,7 +1569,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_position_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل موقع العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_appearance_"): # Handler for watermark appearance setting
                 try:
                     # Extract task_id from data like "watermark_appearance_123"
@@ -1577,7 +1577,7 @@ class SimpleTelegramBot:
                     await self.show_watermark_appearance_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل مظهر العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_photos_"): # Handler for toggle watermark photos
                 try:
                     # Extract task_id from data like "toggle_watermark_photos_123"
@@ -1585,7 +1585,7 @@ class SimpleTelegramBot:
                     await self.toggle_watermark_media_type(event, task_id, 'photos')
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للصور: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_videos_"): # Handler for toggle watermark videos
                 try:
                     # Extract task_id from data like "toggle_watermark_videos_123"
@@ -1593,7 +1593,7 @@ class SimpleTelegramBot:
                     await self.toggle_watermark_media_type(event, task_id, 'videos')
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للفيديوهات: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_documents_"): # Handler for toggle watermark documents
                 try:
                     # Extract task_id from data like "toggle_watermark_documents_123"
@@ -1601,7 +1601,7 @@ class SimpleTelegramBot:
                     await self.toggle_watermark_media_type(event, task_id, 'documents')
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية للمستندات: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_watermark_position_"): # Handler for set watermark position
                 try:
                     # Extract task_id and position from data like "set_watermark_position_top_left_123"
@@ -1620,13 +1620,13 @@ class SimpleTelegramBot:
                             await self.set_watermark_position(event, task_id, position)
                         else:
                             logger.error(f"❌ موقع غير صحيح: {position}")
-                            await event.answer("❌ موقع غير صحيح")
+                            await self.safe_answer(event, "❌ موقع غير صحيح")
                     else:
                         logger.error(f"❌ تنسيق بيانات غير صحيح: {data}")
-                        await event.answer("❌ خطأ في تنسيق البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تنسيق البيانات")
                 except (ValueError, IndexError) as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد موقع العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_watermark_"): # Handler for editing watermark appearance
                 try:
                     # Extract setting_type and task_id from data like "edit_watermark_size_123"
@@ -1645,13 +1645,13 @@ class SimpleTelegramBot:
                             await self.start_edit_watermark_setting(event, task_id, setting_type)
                         else:
                             logger.error(f"❌ نوع إعداد غير صحيح: {setting_type}")
-                            await event.answer("❌ نوع إعداد غير صحيح")
+                            await self.safe_answer(event, "❌ نوع إعداد غير صحيح")
                     else:
                         logger.error(f"❌ تنسيق بيانات غير صحيح: {data}")
-                        await event.answer("❌ خطأ في تنسيق البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تنسيق البيانات")
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لتحرير العلامة المائية: {e}, data='{data}'")
-                    await event.answer("❌ خطأ في تحليل البيانات")
+                    await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("source_admins_"): # Handler for source admins
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1661,7 +1661,7 @@ class SimpleTelegramBot:
                         await self.show_source_admins(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر لمشرفي المصدر: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("refresh_source_admins_"): # Handler for refreshing source admins
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1671,10 +1671,10 @@ class SimpleTelegramBot:
                         await self.refresh_source_admin_list(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر لتحديث المشرفين: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
                     except IndexError as e:
                         logger.error(f"❌ خطأ في تحليل البيانات لتحديث المشرفين: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_admin_"): # Handler for toggle admin
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1685,7 +1685,7 @@ class SimpleTelegramBot:
                         await self.toggle_admin(event, task_id, admin_user_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المشرف للتبديل: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("duplicate_filter_"): # Handler for duplicate filter
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1694,7 +1694,7 @@ class SimpleTelegramBot:
                         await self.show_duplicate_filter(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلتر التكرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("duplicate_settings_"): # Handler for duplicate settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1703,7 +1703,7 @@ class SimpleTelegramBot:
                         await self.show_duplicate_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التكرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("inline_button_filter_"): # Handler for inline button filter
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1712,7 +1712,7 @@ class SimpleTelegramBot:
                         await self.show_inline_button_filter(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلتر الأزرار الشفافة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("forwarded_msg_filter_"): # Handler for forwarded message filter
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1721,7 +1721,7 @@ class SimpleTelegramBot:
                         await self.show_forwarded_message_filter(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلتر الرسائل المعاد توجيهها: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_settings_"): # Handler for watermark settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1730,7 +1730,7 @@ class SimpleTelegramBot:
                         await self.show_watermark_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_"): # Handler for toggle watermark
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1739,7 +1739,7 @@ class SimpleTelegramBot:
                         await self.toggle_watermark(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_config_"): # Handler for watermark configuration
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1748,7 +1748,7 @@ class SimpleTelegramBot:
                         await self.show_watermark_config(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات العلامة المائية: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("watermark_media_"): # Handler for watermark media settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1757,7 +1757,7 @@ class SimpleTelegramBot:
                         await self.show_watermark_media_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وسائط العلامة المائية: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_photos_"): # Handler for toggle watermark photos
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1766,7 +1766,7 @@ class SimpleTelegramBot:
                         await self.toggle_watermark_media_type(event, task_id, 'photos')
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_videos_"): # Handler for toggle watermark videos
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1775,7 +1775,7 @@ class SimpleTelegramBot:
                         await self.toggle_watermark_media_type(event, task_id, 'videos')
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_watermark_documents_"): # Handler for toggle watermark documents
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1784,7 +1784,7 @@ class SimpleTelegramBot:
                         await self.toggle_watermark_media_type(event, task_id, 'documents')
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل العلامة المائية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_inline_block_"): # Handler for toggle inline button block
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1793,7 +1793,7 @@ class SimpleTelegramBot:
                         await self.toggle_inline_button_block_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الأزرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("clear_text_clean_keywords_"):
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -1802,7 +1802,7 @@ class SimpleTelegramBot:
                         await self.clear_text_cleaning_keywords(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لمسح كلمات التنظيف: {e}, data='{data}'")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("text_formatting_"): # Handler for text formatting
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1811,7 +1811,7 @@ class SimpleTelegramBot:
                         await self.show_text_formatting(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتنسيق النصوص: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_text_formatting_"): # Handler for toggling text formatting
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1820,7 +1820,7 @@ class SimpleTelegramBot:
                         await self.toggle_text_formatting(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تنسيق النص: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_text_format_"): # Handler for setting text format type
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -1830,7 +1830,7 @@ class SimpleTelegramBot:
                         await self.set_text_format_type(event, task_id, format_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد نوع التنسيق: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_hyperlink_"): # Handler for editing hyperlink settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1839,7 +1839,7 @@ class SimpleTelegramBot:
                         await self.start_edit_hyperlink_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل إعدادات الرابط: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_forwarded_block_"): # Handler for toggle forwarded message block
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1848,7 +1848,7 @@ class SimpleTelegramBot:
                         await self.toggle_forwarded_message_block(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الرسائل المعاد توجيهها: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_advanced_filter_"): # Handler for toggling advanced filters
                 parts = data.split("_")
                 logger.info(f"🔍 Processing toggle_advanced_filter: data='{data}', parts={parts}")
@@ -1864,7 +1864,7 @@ class SimpleTelegramBot:
                         await self.toggle_advanced_filter(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الفلتر المتقدم: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_day_"): # Handler for day filter toggles
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1876,10 +1876,10 @@ class SimpleTelegramBot:
                             await self.toggle_day_filter(event, task_id, day_number)
                         else:
                             logger.error(f"❌ رقم اليوم خارج النطاق المسموح: {day_number}")
-                            await event.answer("❌ رقم اليوم غير صحيح")
+                            await self.safe_answer(event, "❌ رقم اليوم غير صحيح")
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فلتر اليوم: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("select_all_days_"): # Handler for select all days
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1888,7 +1888,7 @@ class SimpleTelegramBot:
                         await self.select_all_days(event, task_id, True)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد كل الأيام: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("deselect_all_days_"): # Handler for deselect all days
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1897,7 +1897,7 @@ class SimpleTelegramBot:
                         await self.select_all_days(event, task_id, False)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإلغاء تحديد كل الأيام: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("media_filters_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1906,7 +1906,7 @@ class SimpleTelegramBot:
                         await self.show_media_filters(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر الوسائط: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_media_check_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1915,7 +1915,7 @@ class SimpleTelegramBot:
                         await self.toggle_media_check(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فحص الوسائط: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_text_check_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1924,7 +1924,7 @@ class SimpleTelegramBot:
                         await self.toggle_text_check(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فحص النص: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_threshold_"):
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -1933,7 +1933,7 @@ class SimpleTelegramBot:
                         await self.set_duplicate_threshold(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد نسبة التشابه: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_time_window_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1942,7 +1942,7 @@ class SimpleTelegramBot:
                         await self.set_duplicate_time_window(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد النافذة الزمنية: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_media_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1952,7 +1952,7 @@ class SimpleTelegramBot:
                         await self.toggle_media_filter(event, task_id, media_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فلتر الوسائط: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("allow_all_media_"):
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1976,7 +1976,7 @@ class SimpleTelegramBot:
                         await self.show_word_filters(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلاتر الكلمات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_word_filter_"): # Handler for toggling word filter
                 parts = data.split("_")
                 logger.info(f"🔍 Toggle word filter callback: data='{data}', parts={parts}")
@@ -1987,7 +1987,7 @@ class SimpleTelegramBot:
                         await self.toggle_word_filter(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_words_"): # Handler for managing words in a filter
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1997,7 +1997,7 @@ class SimpleTelegramBot:
                         await self.manage_words(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة الكلمات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("add_word_"): # Handler for adding a word to a filter
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2007,7 +2007,7 @@ class SimpleTelegramBot:
                         await self.start_add_word(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة كلمة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("remove_word_"): # Handler for removing a word from a filter
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2018,7 +2018,7 @@ class SimpleTelegramBot:
                         await self.remove_word(event, word_id, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف الكلمة/المهمة لحذف الكلمة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("view_filter_"): # Handler for viewing filter words
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2028,7 +2028,7 @@ class SimpleTelegramBot:
                         await self.view_filter_words(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض الفلتر: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_whitelist_"): # Handler for whitelist management
                 await self.handle_manage_whitelist(event)
             elif data.startswith("manage_blacklist_"): # Handler for blacklist management
@@ -2045,7 +2045,7 @@ class SimpleTelegramBot:
                         await self.start_add_multiple_words(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة كلمات متعددة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("clear_filter_"): # Handler for clearing filter with confirmation
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2055,7 +2055,7 @@ class SimpleTelegramBot:
                         await self.clear_filter_with_confirmation(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لمسح الفلتر: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("confirm_clear_replacements_"): # Handler for confirming clear replacements
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2064,7 +2064,7 @@ class SimpleTelegramBot:
                         await self.clear_replacements_execute(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الاستبدالات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("confirm_clear_inline_buttons_"): # Handler for confirming clear inline buttons
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2074,7 +2074,7 @@ class SimpleTelegramBot:
                         await self.clear_inline_buttons_execute(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد حذف الأزرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("confirm_clear_"): # Handler for confirming filter clear
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2084,7 +2084,7 @@ class SimpleTelegramBot:
                         await self.confirm_clear_filter(event, task_id, filter_type)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتأكيد المسح: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("text_replacements_"): # Handler for text replacements
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2093,7 +2093,7 @@ class SimpleTelegramBot:
                         await self.show_text_replacements(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لاستبدال النصوص: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("text_cleaning_"): # Handler for text cleaning
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2102,7 +2102,7 @@ class SimpleTelegramBot:
                         await self.show_text_cleaning(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتنظيف النصوص: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("translation_settings_"): # Handler for translation settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2111,7 +2111,7 @@ class SimpleTelegramBot:
                         await self.show_translation_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الترجمة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_text_clean_"): # Handler for toggling text cleaning settings
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2122,10 +2122,10 @@ class SimpleTelegramBot:
                             await self.toggle_text_cleaning_setting(event, task_id, setting_type)
                         else:
                             logger.error(f"نوع إعداد تنظيف النص غير صالح: {setting_type}")
-                            await event.answer("❌ نوع إعداد غير صالح")
+                            await self.safe_answer(event, "❌ نوع إعداد غير صالح")
                     except (ValueError, IndexError) as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تنظيف النص: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_translation_"): # Handler for toggling translation
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2134,7 +2134,7 @@ class SimpleTelegramBot:
                         await self.toggle_translation(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الترجمة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_translation_"): # Handler for setting translation languages
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2144,7 +2144,7 @@ class SimpleTelegramBot:
                         await self.set_translation_language(event, task_id, setting)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل لغة الترجمة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_lang_"): # Handler for setting specific language
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2155,7 +2155,7 @@ class SimpleTelegramBot:
                         await self.set_specific_language(event, task_id, setting, language_code)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل لغة محددة: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_text_clean_keywords_"): # Handler for managing text cleaning keywords
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2164,7 +2164,7 @@ class SimpleTelegramBot:
                         await self.manage_text_cleaning_keywords(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإدارة كلمات التنظيف: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("add_text_clean_keywords_"): # Handler for adding text cleaning keywords
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2173,7 +2173,7 @@ class SimpleTelegramBot:
                         await self.start_adding_text_cleaning_keywords(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة كلمات تنظيف: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_replacement_"): # Handler for toggling text replacements
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2182,7 +2182,7 @@ class SimpleTelegramBot:
                         await self.toggle_text_replacement(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الاستبدال: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("add_replacement_"): # Handler for adding replacements
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2191,7 +2191,7 @@ class SimpleTelegramBot:
                         await self.start_add_replacement(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة الاستبدال: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("view_replacements_"): # Handler for viewing replacements
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2200,7 +2200,7 @@ class SimpleTelegramBot:
                         await self.view_replacements(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض الاستبدالات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("clear_replacements_"): # Handler for clearing replacements
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2209,7 +2209,7 @@ class SimpleTelegramBot:
                         await self.clear_replacements_confirm(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لحذف الاستبدالات: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("header_settings_"): # Handler for header settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2218,7 +2218,7 @@ class SimpleTelegramBot:
                         await self.show_header_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الرأس: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("footer_settings_"): # Handler for footer settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2227,7 +2227,7 @@ class SimpleTelegramBot:
                         await self.show_footer_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الذيل: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("inline_buttons_"): # Handler for inline buttons
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2236,7 +2236,7 @@ class SimpleTelegramBot:
                         await self.show_inline_buttons_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الأزرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_header_"): # Handler for toggling header
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2245,7 +2245,7 @@ class SimpleTelegramBot:
                         await self.toggle_header(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الرأس: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_footer_"): # Handler for toggling footer
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2254,7 +2254,7 @@ class SimpleTelegramBot:
                         await self.toggle_footer(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الذيل: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_header_"): # Handler for editing header
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2263,7 +2263,7 @@ class SimpleTelegramBot:
                         await self.start_edit_header(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الرأس: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_footer_"): # Handler for editing footer
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2272,7 +2272,7 @@ class SimpleTelegramBot:
                         await self.start_edit_footer(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الذيل: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_inline_buttons_"): # Handler for toggling inline buttons
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2281,7 +2281,7 @@ class SimpleTelegramBot:
                         await self.toggle_inline_buttons(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الأزرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("add_inline_button_"): # Handler for adding inline button
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2290,7 +2290,7 @@ class SimpleTelegramBot:
                         await self.start_add_inline_button(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة زر: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("view_inline_buttons_"): # Handler for viewing inline buttons
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2299,7 +2299,7 @@ class SimpleTelegramBot:
                         await self.view_inline_buttons(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض الأزرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("clear_inline_buttons_"): # Handler for clearing inline buttons
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2308,7 +2308,7 @@ class SimpleTelegramBot:
                         await self.clear_inline_buttons_confirm(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لحذف الأزرار: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("forwarding_settings_"): # Handler for forwarding settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2317,7 +2317,7 @@ class SimpleTelegramBot:
                         await self.show_forwarding_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التوجيه: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("approve_"):
                 # Handle message approval
                 try:
@@ -2325,7 +2325,7 @@ class SimpleTelegramBot:
                     await self.handle_message_approval(event, pending_id, True)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف الرسالة المعلقة للموافقة: {e}")
-                    await event.answer("❌ خطأ في معالجة الطلب")
+                    await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("reject_"):
                 # Handle message rejection
                 try:
@@ -2333,7 +2333,7 @@ class SimpleTelegramBot:
                     await self.handle_message_approval(event, pending_id, False)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف الرسالة المعلقة للرفض: {e}")
-                    await event.answer("❌ خطأ في معالجة الطلب")
+                    await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("details_"):
                 # Handle showing message details
                 try:
@@ -2341,7 +2341,7 @@ class SimpleTelegramBot:
                     await self.show_pending_message_details(event, pending_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف الرسالة المعلقة للتفاصيل: {e}")
-                    await event.answer("❌ خطأ في معالجة الطلب")
+                    await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("publishing_mode_"):
                 # Handle publishing mode settings
                 parts = data.split("_")
@@ -2351,7 +2351,7 @@ class SimpleTelegramBot:
                         await self.publishing_manager.show_publishing_mode_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات وضع النشر: {e}")
-                        await event.answer("❌ خطأ في معالجة الطلب")
+                        await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("toggle_publishing_mode_"):
                 # Handle publishing mode toggle
                 parts = data.split("_")
@@ -2361,7 +2361,7 @@ class SimpleTelegramBot:
                         await self.publishing_manager.toggle_publishing_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع النشر: {e}")
-                        await event.answer("❌ خطأ في معالجة الطلب")
+                        await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("show_pending_messages_"):
                 # Handle showing pending messages
                 parts = data.split("_")
@@ -2371,7 +2371,7 @@ class SimpleTelegramBot:
                         await self.publishing_manager.show_pending_messages(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لعرض الرسائل المعلقة: {e}")
-                        await event.answer("❌ خطأ في معالجة الطلب")
+                        await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("show_pending_details_"):
                 # Handle showing pending message details
                 parts = data.split("_")
@@ -2381,7 +2381,7 @@ class SimpleTelegramBot:
                         await self.publishing_manager.show_pending_message_details(event, pending_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف الرسالة المعلقة: {e}")
-                        await event.answer("❌ خطأ في معالجة الطلب")
+                        await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("approve_message_"):
                 # Handle message approval
                 parts = data.split("_")
@@ -2391,7 +2391,7 @@ class SimpleTelegramBot:
                         await self.publishing_manager.handle_message_approval(event, pending_id, True)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف الرسالة للموافقة: {e}")
-                        await event.answer("❌ خطأ في معالجة الطلب")
+                        await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("reject_message_"):
                 # Handle message rejection
                 parts = data.split("_")
@@ -2401,7 +2401,7 @@ class SimpleTelegramBot:
                         await self.publishing_manager.handle_message_approval(event, pending_id, False)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف الرسالة للرفض: {e}")
-                        await event.answer("❌ خطأ في معالجة الطلب")
+                        await self.safe_answer(event, "❌ خطأ في معالجة الطلب")
             elif data.startswith("toggle_split_album_"): # Handler for toggling split album
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2410,7 +2410,7 @@ class SimpleTelegramBot:
                         await self.toggle_split_album(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تقسيم الألبوم: {e}, data='{data}', parts={parts}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_link_preview_"): # Handler for toggling link preview
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2419,7 +2419,7 @@ class SimpleTelegramBot:
                         await self.toggle_link_preview(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل معاينة الرابط: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_pin_message_"): # Handler for toggling pin message
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2428,7 +2428,7 @@ class SimpleTelegramBot:
                         await self.toggle_pin_message(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل تثبيت الرسالة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_silent_notifications_"): # Handler for toggling silent notifications
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2437,7 +2437,7 @@ class SimpleTelegramBot:
                         await self.toggle_silent_notifications(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الإشعارات الصامتة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_auto_delete_"): # Handler for toggling auto delete
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2446,7 +2446,7 @@ class SimpleTelegramBot:
                         await self.toggle_auto_delete(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الحذف التلقائي: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_sync_edit_"): # Handler for toggling sync edit
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2455,7 +2455,7 @@ class SimpleTelegramBot:
                         await self.toggle_sync_edit(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل مزامنة التعديل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_sync_delete_"): # Handler for toggling sync delete
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2464,7 +2464,7 @@ class SimpleTelegramBot:
                         await self.toggle_sync_delete(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل مزامنة الحذف: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_auto_delete_time_"): # Handler for setting auto delete time
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2473,7 +2473,7 @@ class SimpleTelegramBot:
                         await self.start_set_auto_delete_time(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد وقت الحذف التلقائي: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_delete_time_"): # Handler for direct time setting
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2483,7 +2483,7 @@ class SimpleTelegramBot:
                         await self.set_delete_time_direct(event, task_id, seconds)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة أو الوقت: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_inline_block_"): # Handler for toggling inline button block
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2492,7 +2492,7 @@ class SimpleTelegramBot:
                         await self.toggle_inline_button_block_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الأزرار: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_forwarded_block_"): # Handler for toggling forwarded message block
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2501,7 +2501,7 @@ class SimpleTelegramBot:
                         await self.toggle_forwarded_message_block(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل حظر الرسائل المعاد توجيهها: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_working_hours_schedule_"): # Handler for setting working hours schedule
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2510,7 +2510,7 @@ class SimpleTelegramBot:
                         await self.show_working_hours_schedule(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لجدول ساعات العمل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_working_hours_"): # Handler for setting working hours
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2519,7 +2519,7 @@ class SimpleTelegramBot:
                         await self.start_set_working_hours(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد ساعات العمل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_working_hours_") and not data.startswith("toggle_working_hours_mode_"): # Handler for toggling working hours filter
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2528,7 +2528,7 @@ class SimpleTelegramBot:
                         await self.toggle_working_hours(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل ساعات العمل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_working_hours_mode_"): # Handler for toggling working hours mode
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2538,7 +2538,7 @@ class SimpleTelegramBot:
                         await self.toggle_working_hours_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل وضع ساعات العمل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("schedule_working_hours_"): # Handler for schedule working hours
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2547,7 +2547,7 @@ class SimpleTelegramBot:
                         await self.show_working_hours_schedule(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لجدولة ساعات العمل: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_hour_"): # Handler for toggling specific hour
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2557,7 +2557,7 @@ class SimpleTelegramBot:
                         await self.toggle_hour(event, task_id, hour)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة أو الساعة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("select_all_hours_"): # Handler for selecting all hours
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2566,7 +2566,7 @@ class SimpleTelegramBot:
                         await self.select_all_hours(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد جميع الساعات: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("clear_all_hours_"): # Handler for clearing all hours
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2575,7 +2575,7 @@ class SimpleTelegramBot:
                         await self.clear_all_hours(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإلغاء جميع الساعات: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("add_language_") or data.startswith("add_custom_language_"): # Handler for adding language
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2587,7 +2587,7 @@ class SimpleTelegramBot:
                         await self.start_add_language(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإضافة لغة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("quick_add_lang_"): # Handler for quick language addition
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2598,7 +2598,7 @@ class SimpleTelegramBot:
                         await self.quick_add_language(event, task_id, language_code, language_name)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في إضافة اللغة السريعة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("quick_remove_lang_"): # Handler for quick language removal
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2609,7 +2609,7 @@ class SimpleTelegramBot:
                         await self.quick_remove_language(event, task_id, language_code, language_name)
                     except ValueError as e:
                         logger.error(f"خطأ في حذف اللغة السريعة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_lang_selection_"): # Handler for toggling language selection
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2619,7 +2619,7 @@ class SimpleTelegramBot:
                         await self.toggle_language_selection(event, task_id, language_code)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تبديل اللغة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_language_mode_"): # Handler for toggling language mode
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2628,7 +2628,7 @@ class SimpleTelegramBot:
                         await self.toggle_language_mode(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تبديل وضع اللغة: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("clear_all_languages_"): # Handler for clearing all languages
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2637,7 +2637,7 @@ class SimpleTelegramBot:
                         await self.clear_all_languages(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في مسح اللغات: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("quick_add_languages_"): # Handler for quick add languages
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2646,7 +2646,7 @@ class SimpleTelegramBot:
                         await self.show_quick_add_languages(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في الإضافة السريعة للغات: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("duplicate_filter_") and not data.startswith("duplicate_filter_enabled"): # Handler for duplicate filter main page
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2655,7 +2655,7 @@ class SimpleTelegramBot:
                         await self.show_duplicate_filter(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لفلتر التكرار: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("duplicate_settings_"): # Handler for duplicate settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2664,7 +2664,7 @@ class SimpleTelegramBot:
                         await self.show_duplicate_settings(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التكرار: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_duplicate_text_"): # Handler for toggling duplicate text check
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2673,7 +2673,7 @@ class SimpleTelegramBot:
                         await self.toggle_duplicate_text_check(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فحص النص: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_duplicate_media_"): # Handler for toggling duplicate media check
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2682,7 +2682,7 @@ class SimpleTelegramBot:
                         await self.toggle_duplicate_media_check(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل فحص الوسائط: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_duplicate_threshold_"): # Handler for setting duplicate threshold
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2691,7 +2691,7 @@ class SimpleTelegramBot:
                         await self.start_set_duplicate_threshold(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد نسبة التشابه: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("set_duplicate_time_"): # Handler for setting duplicate time window
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2700,7 +2700,7 @@ class SimpleTelegramBot:
                         await self.start_set_duplicate_time(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديد النافذة الزمنية: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("refresh_admins_"): # Handler for refreshing admins
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2709,7 +2709,7 @@ class SimpleTelegramBot:
                         await self.refresh_admin_list(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتحديث المشرفين: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("admin_list_"): # Handler for showing admin list (source channels)
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2718,7 +2718,7 @@ class SimpleTelegramBot:
                         await self.show_admin_list(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لقائمة المشرفين: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("source_admins_"): # Handler for showing specific source admins
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2728,7 +2728,7 @@ class SimpleTelegramBot:
                         await self.show_source_admins(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لمشرفي المصدر: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_source_admin_"): # Handler for toggling specific source admin
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2739,7 +2739,7 @@ class SimpleTelegramBot:
                         await self.toggle_source_admin_filter(event, task_id, admin_user_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المشرف: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("refresh_source_admins_"): # Handler for refreshing source admins
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2749,7 +2749,7 @@ class SimpleTelegramBot:
                         await self.refresh_source_admins(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحديث مشرفي المصدر: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("refresh_all_admins_"): # Handler for refreshing all admins
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2758,7 +2758,7 @@ class SimpleTelegramBot:
                         await self.refresh_all_admins(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحديث جميع المشرفين: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("enable_all_source_admins_"): # Handler for enabling all source admins
                 parts = data.split("_")
                 if len(parts) >= 6:
@@ -2768,7 +2768,7 @@ class SimpleTelegramBot:
                         await self.enable_all_source_admins(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تفعيل جميع المشرفين: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("disable_all_source_admins_"): # Handler for disabling all source admins
                 parts = data.split("_")
                 if len(parts) >= 6:
@@ -2778,7 +2778,7 @@ class SimpleTelegramBot:
                         await self.disable_all_source_admins(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تعطيل جميع المشرفين: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_admin_"): # Handler for toggling individual admin
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2788,7 +2788,7 @@ class SimpleTelegramBot:
                         await self.toggle_admin(event, task_id, admin_user_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المشرف: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("refresh_source_admins_"): # Handler for refreshing specific source admins
                 parts = data.split("_")
                 if len(parts) >= 5:
@@ -2798,7 +2798,7 @@ class SimpleTelegramBot:
                         await self.refresh_source_admin_list(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_signatures_"): # Handler for managing admin signatures
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2808,7 +2808,7 @@ class SimpleTelegramBot:
                         await self.manage_admin_signatures(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_admin_signature_"): # Handler for editing admin signature
                 parts = data.split("_")
                 if len(parts) >= 6:
@@ -2819,7 +2819,7 @@ class SimpleTelegramBot:
                         await self.edit_admin_signature(event, task_id, admin_user_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المشرف/المصدر: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
             elif data.startswith("manage_signatures_"): # Handler for managing admin signatures
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -2829,14 +2829,14 @@ class SimpleTelegramBot:
                         await self.manage_admin_signatures(event, task_id, source_chat_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة/المصدر: {e}")
-                        await event.answer("❌ خطأ في تحليل البيانات")
+                        await self.safe_answer(event, "❌ خطأ في تحليل البيانات")
 
         except Exception as e:
             import traceback
             logger.error(f"خطأ في معالج الأزرار: {e}, data='{data}', user_id={user_id}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             try:
-                await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+                await self.safe_answer(event, "❌ حدث خطأ، حاول مرة أخرى")
             except:
                 pass  # Sometimes event.answer fails if callback is already processed
 
@@ -2846,7 +2846,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -2860,7 +2860,7 @@ class SimpleTelegramBot:
             
             if success:
                 status = "تم التفعيل" if new_value else "تم التعطيل"
-                await event.answer(f"✅ {status}")
+                await self.safe_answer(event, f"✅ {status}")
                 
                 # Force refresh UserBot tasks
                 try:
@@ -2903,11 +2903,11 @@ class SimpleTelegramBot:
                     else:
                         raise e
             else:
-                await event.answer("❌ فشل في تحديث الإعداد")
+                await self.safe_answer(event, "❌ فشل في تحديث الإعداد")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل الفلتر المتقدم: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
             
     async def force_refresh_duplicate_filter(self, event, task_id, timestamp):
         """Force refresh duplicate filter display with timestamp"""
@@ -2955,7 +2955,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings
@@ -3029,7 +3029,7 @@ class SimpleTelegramBot:
             if success:
                 days = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
                 day_name = days[day_number] if 0 <= day_number < len(days) else f"اليوم {day_number}"
-                await event.answer(f"✅ {action} {day_name}")
+                await self.safe_answer(event, f"✅ {action} {day_name}")
                 
                 # Force refresh UserBot tasks
                 try:
@@ -3049,11 +3049,11 @@ class SimpleTelegramBot:
                         logger.error(f"خطأ في تحديث واجهة فلتر الأيام: {refresh_error}")
                         raise refresh_error
             else:
-                await event.answer("❌ فشل في التحديث")
+                await self.safe_answer(event, "❌ فشل في التحديث")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل فلتر اليوم: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def select_all_days(self, event, task_id, select_all=True):
         """Select or deselect all days"""
@@ -3064,12 +3064,12 @@ class SimpleTelegramBot:
                 # Add all days using set_day_filter (0-6 for Monday-Sunday)
                 for day_num in range(0, 7):
                     self.db.set_day_filter(task_id, day_num, True)
-                await event.answer("✅ تم تحديد جميع الأيام")
+                await self.safe_answer(event, "✅ تم تحديد جميع الأيام")
             else:
                 # Remove all days using set_day_filter with False (0-6 for Monday-Sunday)
                 for day_num in range(0, 7):
                     self.db.set_day_filter(task_id, day_num, False)
-                await event.answer("✅ تم إلغاء تحديد جميع الأيام")
+                await self.safe_answer(event, "✅ تم إلغاء تحديد جميع الأيام")
             
             # Force refresh UserBot tasks
             try:
@@ -3090,7 +3090,7 @@ class SimpleTelegramBot:
             
         except Exception as e:
             logger.error(f"خطأ في تحديد/إلغاء جميع الأيام: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def show_advanced_filters(self, event, task_id):
         """Show advanced filters menu"""
@@ -3098,7 +3098,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get all advanced filter settings
@@ -3147,7 +3147,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id) if user_id else self.db.get_task(task_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get settings for status display
@@ -3219,7 +3219,7 @@ class SimpleTelegramBot:
                                     lst.append(added)
                                     data_json['channels'] = lst
                                     self.db.set_conversation_state(user_id, 'waiting_multiple_channels', json.dumps(data_json))
-                                    await event.answer("✅ تم إضافة القناة عبر الرسالة المحولة. أرسل أخرى أو اضغط إنهاء.")
+                                    await self.safe_answer(event, "✅ تم إضافة القناة عبر الرسالة المحولة. أرسل أخرى أو اضغط إنهاء.")
                                 else:
                                     # Single add: clear and show list
                                     self.db.clear_conversation_state(user_id)
@@ -3741,7 +3741,7 @@ class SimpleTelegramBot:
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -3828,7 +3828,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         current_mode = task.get('forward_mode', 'forward')
@@ -3838,7 +3838,7 @@ class SimpleTelegramBot:
 
         if success:
             mode_text = "نسخ" if new_mode == 'copy' else "توجيه"
-            await event.answer(f"✅ تم تغيير وضع التوجيه إلى {mode_text}")
+            await self.safe_answer(event, f"✅ تم تغيير وضع التوجيه إلى {mode_text}")
 
             # Force refresh UserBot tasks
             try:
@@ -3851,7 +3851,7 @@ class SimpleTelegramBot:
 
             await self.show_task_settings(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير وضع التوجيه")
+            await self.safe_answer(event, "❌ فشل في تغيير وضع التوجيه")
 
     async def manage_task_sources(self, event, task_id):
         """Manage task sources"""
@@ -3863,7 +3863,7 @@ class SimpleTelegramBot:
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         sources = task.get('sources', [])
@@ -3920,7 +3920,7 @@ class SimpleTelegramBot:
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         targets = task.get('targets', [])
@@ -3981,7 +3981,7 @@ class SimpleTelegramBot:
             logger.info(f"✅ تم حفظ حالة إضافة مصدر للمستخدم {user_id}: {data_str}")
         except Exception as e:
             logger.error(f"❌ خطأ في حفظ حالة إضافة مصدر: {e}")
-            await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            await self.safe_answer(event, "❌ حدث خطأ، حاول مرة أخرى")
             return
 
         buttons = [
@@ -4014,7 +4014,7 @@ class SimpleTelegramBot:
             logger.info(f"✅ تم حفظ حالة إضافة هدف للمستخدم {user_id}: {data_str}")
         except Exception as e:
             logger.error(f"❌ خطأ في حفظ حالة إضافة هدف: {e}")
-            await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            await self.safe_answer(event, "❌ حدث خطأ، حاول مرة أخرى")
             return
 
         buttons = [
@@ -4052,10 +4052,10 @@ class SimpleTelegramBot:
             except Exception as e:
                 logger.error(f"خطأ في تحديث مهام UserBot: {e}")
 
-            await event.answer("✅ تم حذف المصدر بنجاح")
+            await self.safe_answer(event, "✅ تم حذف المصدر بنجاح")
             await self.manage_task_sources(event, task_id)
         else:
-            await event.answer("❌ فشل في حذف المصدر")
+            await self.safe_answer(event, "❌ فشل في حذف المصدر")
 
     async def remove_target(self, event, target_id, task_id):
         """Remove target from task"""
@@ -4076,10 +4076,10 @@ class SimpleTelegramBot:
             except Exception as e:
                 logger.error(f"خطأ في تحديث مهام UserBot: {e}")
 
-            await event.answer("✅ تم حذف الهدف بنجاح")
+            await self.safe_answer(event, "✅ تم حذف الهدف بنجاح")
             await self.manage_task_targets(event, task_id)
         else:
-            await event.answer("❌ فشل في حذف الهدف")
+            await self.safe_answer(event, "❌ فشل في حذف الهدف")
 
 
     async def show_working_hours_filter(self, event, task_id):
@@ -4088,7 +4088,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings
@@ -4143,7 +4143,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings
@@ -4207,14 +4207,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
             # Enable all hours using database function
             self.db.set_all_working_hours(task_id, True)
             
-            await event.answer("✅ تم تحديد جميع الساعات")
+            await self.safe_answer(event, "✅ تم تحديد جميع الساعات")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -4229,7 +4229,7 @@ class SimpleTelegramBot:
             
         except Exception as e:
             logger.error(f"خطأ في تحديد جميع الساعات للمهمة {task_id}: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def clear_all_hours(self, event, task_id):
         """Clear all working hours"""
@@ -4237,14 +4237,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
             # Disable all hours using database function
             self.db.set_all_working_hours(task_id, False)
             
-            await event.answer("✅ تم إلغاء تحديد جميع الساعات")
+            await self.safe_answer(event, "✅ تم إلغاء تحديد جميع الساعات")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -4259,7 +4259,7 @@ class SimpleTelegramBot:
             
         except Exception as e:
             logger.error(f"خطأ في إلغاء جميع الساعات للمهمة {task_id}: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def toggle_duplicate_text_check(self, event, task_id):
         """Toggle duplicate text checking"""
@@ -4267,7 +4267,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
@@ -4281,16 +4281,16 @@ class SimpleTelegramBot:
             
             if success:
                 status = "تم تفعيل" if new_value else "تم تعطيل"
-                await event.answer(f"✅ {status} فحص النص")
+                await self.safe_answer(event, f"✅ {status} فحص النص")
                 
                 # Refresh the settings page
                 await self.show_duplicate_settings(event, task_id)
             else:
-                await event.answer("❌ فشل في تحديث الإعداد")
+                await self.safe_answer(event, "❌ فشل في تحديث الإعداد")
             
         except Exception as e:
             logger.error(f"خطأ في تبديل فحص النص: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def toggle_duplicate_media_check(self, event, task_id):
         """Toggle duplicate media checking"""
@@ -4298,7 +4298,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
@@ -4312,16 +4312,16 @@ class SimpleTelegramBot:
             
             if success:
                 status = "تم تفعيل" if new_value else "تم تعطيل"
-                await event.answer(f"✅ {status} فحص الوسائط")
+                await self.safe_answer(event, f"✅ {status} فحص الوسائط")
                 
                 # Refresh the settings page
                 await self.show_duplicate_settings(event, task_id)
             else:
-                await event.answer("❌ فشل في تحديث الإعداد")
+                await self.safe_answer(event, "❌ فشل في تحديث الإعداد")
             
         except Exception as e:
             logger.error(f"خطأ في تبديل فحص الوسائط: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def start_set_duplicate_threshold(self, event, task_id):
         """Start setting duplicate threshold conversation"""
@@ -4329,7 +4329,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set conversation state
@@ -4361,7 +4361,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set conversation state
@@ -4393,7 +4393,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings
@@ -4634,7 +4634,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
@@ -4642,7 +4642,7 @@ class SimpleTelegramBot:
             success = self.db.add_language_filter(task_id, language_code, language_name, True)
             
             if success:
-                await event.answer(f"✅ تم إضافة {language_name} ({language_code})")
+                await self.safe_answer(event, f"✅ تم إضافة {language_name} ({language_code})")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -4650,11 +4650,11 @@ class SimpleTelegramBot:
                 # Refresh the quick add languages display
                 await self.show_quick_add_languages(event, task_id)
             else:
-                await event.answer(f"❌ فشل في إضافة {language_name}")
+                await self.safe_answer(event, f"❌ فشل في إضافة {language_name}")
                 
         except Exception as e:
             logger.error(f"خطأ في الإضافة السريعة للغة: {e}")
-            await event.answer("❌ حدث خطأ أثناء إضافة اللغة")
+            await self.safe_answer(event, "❌ حدث خطأ أثناء إضافة اللغة")
 
     async def quick_remove_language(self, event, task_id, language_code, language_name):
         """Quick remove language from predefined list"""
@@ -4662,7 +4662,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
@@ -4670,7 +4670,7 @@ class SimpleTelegramBot:
             success = self.db.remove_language_filter(task_id, language_code)
             
             if success:
-                await event.answer(f"✅ تم حذف {language_name} ({language_code})")
+                await self.safe_answer(event, f"✅ تم حذف {language_name} ({language_code})")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -4678,11 +4678,11 @@ class SimpleTelegramBot:
                 # Refresh the quick add languages display
                 await self.show_quick_add_languages(event, task_id)
             else:
-                await event.answer(f"❌ فشل في حذف {language_name}")
+                await self.safe_answer(event, f"❌ فشل في حذف {language_name}")
                 
         except Exception as e:
             logger.error(f"خطأ في حذف اللغة السريعة: {e}")
-            await event.answer("❌ حدث خطأ أثناء حذف اللغة")
+            await self.safe_answer(event, "❌ حدث خطأ أثناء حذف اللغة")
 
     async def toggle_language_selection(self, event, task_id, language_code):
         """Toggle language selection status"""
@@ -4690,7 +4690,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
@@ -4698,7 +4698,7 @@ class SimpleTelegramBot:
             success = self.db.toggle_language_filter(task_id, language_code)
             
             if success:
-                await event.answer(f"✅ تم تحديث فلتر اللغة {language_code}")
+                await self.safe_answer(event, f"✅ تم تحديث فلتر اللغة {language_code}")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -4706,11 +4706,11 @@ class SimpleTelegramBot:
                 # Refresh the language management display
                 await self.show_language_management(event, task_id)
             else:
-                await event.answer(f"❌ فشل في تحديث فلتر اللغة {language_code}")
+                await self.safe_answer(event, f"❌ فشل في تحديث فلتر اللغة {language_code}")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل اللغة: {e}")
-            await event.answer("❌ حدث خطأ أثناء تحديث اللغة")
+            await self.safe_answer(event, "❌ حدث خطأ أثناء تحديث اللغة")
 
     async def clear_all_languages(self, event, task_id):
         """Clear all languages for a task"""
@@ -4718,7 +4718,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -4727,14 +4727,14 @@ class SimpleTelegramBot:
             languages_count = len(filter_settings.get('languages', []))
             
             if languages_count == 0:
-                await event.answer("❌ لا توجد لغات لحذفها")
+                await self.safe_answer(event, "❌ لا توجد لغات لحذفها")
                 return
                 
             # Clear all languages
             success = self.db.clear_language_filters(task_id)
             
             if success:
-                await event.answer(f"✅ تم حذف {languages_count} لغة")
+                await self.safe_answer(event, f"✅ تم حذف {languages_count} لغة")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -4742,11 +4742,11 @@ class SimpleTelegramBot:
                 # Refresh the language management display
                 await self.show_language_management(event, task_id)
             else:
-                await event.answer("❌ فشل في حذف اللغات")
+                await self.safe_answer(event, "❌ فشل في حذف اللغات")
                 
         except Exception as e:
             logger.error(f"خطأ في حذف جميع اللغات: {e}")
-            await event.answer("❌ حدث خطأ أثناء حذف اللغات")
+            await self.safe_answer(event, "❌ حدث خطأ أثناء حذف اللغات")
 
     async def show_admin_filters(self, event, task_id):
         """Show admin filter settings"""
@@ -4754,7 +4754,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings
@@ -4786,7 +4786,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings from advanced filters
@@ -4847,7 +4847,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings
@@ -4887,7 +4887,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -4899,7 +4899,7 @@ class SimpleTelegramBot:
             
             if success:
                 mode_text = "حظر الرسائل" if new_setting else "حذف الأزرار"
-                await event.answer(f"✅ تم تغيير الوضع إلى: {mode_text}")
+                await self.safe_answer(event, f"✅ تم تغيير الوضع إلى: {mode_text}")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -4907,11 +4907,11 @@ class SimpleTelegramBot:
                 # Refresh the display
                 await self.show_inline_button_filter(event, task_id)
             else:
-                await event.answer("❌ فشل في تغيير الوضع")
+                await self.safe_answer(event, "❌ فشل في تغيير الوضع")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل وضع فلتر الأزرار الإنلاين: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
 
 
@@ -5086,7 +5086,7 @@ class SimpleTelegramBot:
         task = self.db.get_task_with_sources_targets(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         status = "🟢 نشطة" if task['is_active'] else "🔴 متوقفة"
@@ -5174,7 +5174,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_status = not task['is_active']
@@ -5210,7 +5210,7 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 
         status_text = "تم تشغيل" if new_status else "تم إيقاف"
-        await event.answer(f"✅ {status_text} المهمة بنجاح")
+        await self.safe_answer(event, f"✅ {status_text} المهمة بنجاح")
 
         # Refresh task details
         await self.show_task_details(event, task_id)
@@ -5221,7 +5221,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         self.db.delete_task(task_id, user_id)
@@ -5255,7 +5255,7 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"خطأ في تحديث مهام UserBot للمستخدم {user_id}: {e}")
 
-        await event.answer("✅ تم حذف المهمة بنجاح")
+        await self.safe_answer(event, "✅ تم حذف المهمة بنجاح")
         await self.list_tasks(event)
 
     async def handle_conversation_message(self, event):
@@ -5656,7 +5656,7 @@ class SimpleTelegramBot:
         # read user channels from channels management DB
         channels = ChannelsDatabase(self.db).get_user_channels(user_id)
         if not channels:
-            await event.answer("❌ لا توجد قنوات مضافة")
+            await self.safe_answer(event, "❌ لا توجد قنوات مضافة")
             return
         # store temporary selection in state
         sel = {'mode': 'source', 'selected': []}
@@ -5667,7 +5667,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         channels = ChannelsDatabase(self.db).get_user_channels(user_id)
         if not channels:
-            await event.answer("❌ لا توجد قنوات مضافة")
+            await self.safe_answer(event, "❌ لا توجد قنوات مضافة")
             return
         sel = {'mode': 'target', 'selected': []}
         self.set_user_state(user_id, 'choosing_channels', sel)
@@ -5677,7 +5677,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         channels = ChannelsDatabase(self.db).get_user_channels(user_id)
         if not channels:
-            await event.answer("❌ لا توجد قنوات مضافة")
+            await self.safe_answer(event, "❌ لا توجد قنوات مضافة")
             return
         sel = {'mode': 'source_for_task', 'task_id': task_id, 'selected': []}
         self.set_user_state(user_id, 'choosing_channels', sel)
@@ -5687,7 +5687,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         channels = ChannelsDatabase(self.db).get_user_channels(user_id)
         if not channels:
-            await event.answer("❌ لا توجد قنوات مضافة")
+            await self.safe_answer(event, "❌ لا توجد قنوات مضافة")
             return
         sel = {'mode': 'target_for_task', 'task_id': task_id, 'selected': []}
         self.set_user_state(user_id, 'choosing_channels', sel)
@@ -5721,7 +5721,7 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         state_name = self.get_user_state(user_id)
         if state_name != 'choosing_channels':
-            await event.answer("❌ لا توجد عملية اختيار نشطة")
+            await self.safe_answer(event, "❌ لا توجد عملية اختيار نشطة")
             return
         data = self.get_user_data(user_id) or {}
         selected = set(data.get('selected') or [])
@@ -5739,12 +5739,12 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         state_name = self.get_user_state(user_id)
         if state_name != 'choosing_channels':
-            await event.answer("❌ لا توجد عملية اختيار نشطة")
+            await self.safe_answer(event, "❌ لا توجد عملية اختيار نشطة")
             return
         data = self.get_user_data(user_id) or {}
         selected_ids = data.get('selected') or []
         if not selected_ids:
-            await event.answer("❌ لم يتم اختيار أي قناة")
+            await self.safe_answer(event, "❌ لم يتم اختيار أي قناة")
             return
 
         # If during task creation
@@ -5851,7 +5851,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         # Get watermark settings
@@ -5927,7 +5927,7 @@ class SimpleTelegramBot:
         self.db.update_watermark_settings(task_id, enabled=new_enabled)
         
         status = "🟢 مفعل" if new_enabled else "🔴 معطل"
-        await event.answer(f"✅ تم تعديل حالة العلامة المائية: {status}")
+        await self.safe_answer(event, f"✅ تم تعديل حالة العلامة المائية: {status}")
         
         # Refresh the watermark settings display
         await self.show_watermark_settings(event, task_id)
@@ -6010,7 +6010,7 @@ class SimpleTelegramBot:
             new_size = max(5, current_size - 5)    # Min 5%
         
         self.db.update_watermark_settings(task_id, size_percentage=new_size)
-        await event.answer(f"✅ تم تعديل الحجم إلى {new_size}%")
+        await self.safe_answer(event, f"✅ تم تعديل الحجم إلى {new_size}%")
         
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
@@ -6026,7 +6026,7 @@ class SimpleTelegramBot:
             new_default = max(5, current_default - 5)    # Min 5%
         
         self.db.update_watermark_settings(task_id, default_size=new_default)
-        await event.answer(f"✅ تم تعديل الحجم الافتراضي إلى {new_default}%")
+        await self.safe_answer(event, f"✅ تم تعديل الحجم الافتراضي إلى {new_default}%")
         
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
@@ -6037,7 +6037,7 @@ class SimpleTelegramBot:
         default_size = watermark_settings.get('default_size', 50)
         
         self.db.update_watermark_settings(task_id, size_percentage=default_size)
-        await event.answer(f"✅ تم تطبيق الحجم الافتراضي {default_size}%")
+        await self.safe_answer(event, f"✅ تم تطبيق الحجم الافتراضي {default_size}%")
         
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
@@ -6055,7 +6055,7 @@ class SimpleTelegramBot:
             
             self.db.update_watermark_settings(task_id, offset_x=new_offset)
             direction = "يمين" if increase else "يسار"
-            await event.answer(f"✅ تم تحريك العلامة المائية {direction} إلى {new_offset}px")
+            await self.safe_answer(event, f"✅ تم تحريك العلامة المائية {direction} إلى {new_offset}px")
             
         else:  # axis == 'y'
             current_offset = watermark_settings.get('offset_y', 0)
@@ -6066,7 +6066,7 @@ class SimpleTelegramBot:
             
             self.db.update_watermark_settings(task_id, offset_y=new_offset)
             direction = "أسفل" if increase else "أعلى"
-            await event.answer(f"✅ تم تحريك العلامة المائية {direction} إلى {new_offset}px")
+            await self.safe_answer(event, f"✅ تم تحريك العلامة المائية {direction} إلى {new_offset}px")
         
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
@@ -6074,7 +6074,7 @@ class SimpleTelegramBot:
     async def reset_watermark_offset(self, event, task_id):
         """Reset watermark offset to center position"""
         self.db.update_watermark_settings(task_id, offset_x=0, offset_y=0)
-        await event.answer("✅ تم إعادة تعيين الإزاحة إلى المركز")
+        await self.safe_answer(event, "✅ تم إعادة تعيين الإزاحة إلى المركز")
         
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
@@ -6090,7 +6090,7 @@ class SimpleTelegramBot:
             new_opacity = max(10, current_opacity - 10)   # Min 10%
         
         self.db.update_watermark_settings(task_id, opacity=new_opacity)
-        await event.answer(f"✅ تم تعديل الشفافية إلى {new_opacity}%")
+        await self.safe_answer(event, f"✅ تم تعديل الشفافية إلى {new_opacity}%")
         
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
@@ -6106,7 +6106,7 @@ class SimpleTelegramBot:
             new_font = max(12, current_font - 4)   # Min 12px
         
         self.db.update_watermark_settings(task_id, font_size=new_font)
-        await event.answer(f"✅ تم تعديل حجم الخط إلى {new_font}px")
+        await self.safe_answer(event, f"✅ تم تعديل حجم الخط إلى {new_font}px")
         
         # Refresh display
         await self.show_watermark_appearance(event, task_id)
@@ -6154,7 +6154,7 @@ class SimpleTelegramBot:
         }
         
         self.db.update_watermark_settings(task_id, position=position)
-        await event.answer(f"✅ تم تغيير الموقع إلى: {position_map.get(position, position)}")
+        await self.safe_answer(event, f"✅ تم تغيير الموقع إلى: {position_map.get(position, position)}")
         
         # Refresh position selector display
         await self.show_watermark_position_selector(event, task_id)
@@ -6215,7 +6215,7 @@ class SimpleTelegramBot:
         self.db.update_watermark_settings(task_id, watermark_type=watermark_type)
         
         type_display = "📝 نص" if watermark_type == 'text' else "🖼️ صورة"
-        await event.answer(f"✅ تم تعديل نوع العلامة المائية إلى: {type_display}")
+        await self.safe_answer(event, f"✅ تم تعديل نوع العلامة المائية إلى: {type_display}")
         
         # Start input process based on type
         if watermark_type == 'text':
@@ -6422,7 +6422,7 @@ class SimpleTelegramBot:
         
         field = field_map.get(media_type)
         if not field:
-            await event.answer("❌ نوع وسائط غير صحيح")
+            await self.safe_answer(event, "❌ نوع وسائط غير صحيح")
             return
             
         current_value = watermark_settings.get(field, False)
@@ -6439,7 +6439,7 @@ class SimpleTelegramBot:
         }
         
         status = "مفعل" if new_value else "معطل"
-        await event.answer(f"✅ {media_names[media_type]}: {status}")
+        await self.safe_answer(event, f"✅ {media_names[media_type]}: {status}")
         
         # Refresh display
         await self.show_watermark_media_types(event, task_id)
@@ -7049,7 +7049,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
@@ -7063,7 +7063,7 @@ class SimpleTelegramBot:
             
             if success:
                 status = "🟢 مفعل" if new_setting else "🔴 معطل"
-                await event.answer(f"✅ تم تحديث فلتر ساعات العمل: {status}")
+                await self.safe_answer(event, f"✅ تم تحديث فلتر ساعات العمل: {status}")
                 
                 # Force refresh UserBot tasks
                 try:
@@ -7077,11 +7077,11 @@ class SimpleTelegramBot:
                 # Return to working hours filter menu
                 await self.show_working_hours_filter(event, task_id)
             else:
-                await event.answer("❌ فشل في تحديث الإعداد")
+                await self.safe_answer(event, "❌ فشل في تحديث الإعداد")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل فلتر ساعات العمل: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def start_set_working_hours(self, event, task_id):
         """Start setting working hours"""
@@ -7089,7 +7089,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set conversation state for working hours input
@@ -7114,7 +7114,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
@@ -7128,7 +7128,7 @@ class SimpleTelegramBot:
             
             if success:
                 status = "🟢 مفعل" if new_setting else "🔴 معطل"
-                await event.answer(f"✅ تم تحديث فلتر الأزرار الإنلاين: {status}")
+                await self.safe_answer(event, f"✅ تم تحديث فلتر الأزرار الإنلاين: {status}")
                 
                 # Force refresh UserBot tasks
                 try:
@@ -7142,11 +7142,11 @@ class SimpleTelegramBot:
                 # Return to inline button filter menu
                 await self.show_inline_button_filter(event, task_id)
             else:
-                await event.answer("❌ فشل في تحديث الإعداد")
+                await self.safe_answer(event, "❌ فشل في تحديث الإعداد")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل فلتر الأزرار الإنلاين: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
     
     # Add alias for backward compatibility
     async def toggle_inline_button_block(self, event, task_id):
@@ -7159,7 +7159,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         try:
@@ -7173,7 +7173,7 @@ class SimpleTelegramBot:
             
             if success:
                 mode_text = "ساعات العمل فقط" if new_mode == 'work_hours' else "خارج ساعات العمل"
-                await event.answer(f"✅ تم تحديث وضع ساعات العمل: {mode_text}")
+                await self.safe_answer(event, f"✅ تم تحديث وضع ساعات العمل: {mode_text}")
                 
                 # Force refresh UserBot tasks
                 try:
@@ -7187,11 +7187,11 @@ class SimpleTelegramBot:
                 # Return to working hours filter menu
                 await self.show_working_hours_filter(event, task_id)
             else:
-                await event.answer("❌ فشل في تحديث الإعداد")
+                await self.safe_answer(event, "❌ فشل في تحديث الإعداد")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل وضع ساعات العمل: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def handle_task_action(self, event, data):
         """Handle task actions"""
@@ -7444,9 +7444,9 @@ class SimpleTelegramBot:
         
         if success:
             language_name = self.get_language_name(language)
-            await event.answer(f"✅ تم تغيير اللغة إلى {language_name}")
+            await self.safe_answer(event, f"✅ تم تغيير اللغة إلى {language_name}")
         else:
-            await event.answer("❌ فشل في تغيير اللغة")
+            await self.safe_answer(event, "❌ فشل في تغيير اللغة")
         
         await self.show_settings(event)
 
@@ -7456,9 +7456,9 @@ class SimpleTelegramBot:
         success = self.db.update_user_timezone(user_id, timezone)
         
         if success:
-            await event.answer(f"✅ تم تغيير المنطقة الزمنية إلى {timezone}")
+            await self.safe_answer(event, f"✅ تم تغيير المنطقة الزمنية إلى {timezone}")
         else:
-            await event.answer("❌ فشل في تغيير المنطقة الزمنية")
+            await self.safe_answer(event, "❌ فشل في تغيير المنطقة الزمنية")
         
         await self.show_settings(event)
 
@@ -7480,7 +7480,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set user state
@@ -7507,7 +7507,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set user state
@@ -7534,7 +7534,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set user state
@@ -7561,7 +7561,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set user state
@@ -7589,7 +7589,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -7673,7 +7673,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         filters = self.db.get_task_media_filters(task_id)
@@ -7692,14 +7692,14 @@ class SimpleTelegramBot:
             }
             media_name = media_names.get(media_type, media_type)
 
-            await event.answer(f"✅ تم تغيير حالة {media_name} إلى: {status_text}")
+            await self.safe_answer(event, f"✅ تم تغيير حالة {media_name} إلى: {status_text}")
 
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
 
             await self.show_media_filters(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير الفلتر")
+            await self.safe_answer(event, "❌ فشل في تغيير الفلتر")
 
     async def set_all_media_filters(self, event, task_id, is_allowed):
         """Set all media filters to allow or block all"""
@@ -7707,21 +7707,21 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         success = self.db.set_all_media_filters(task_id, is_allowed)
 
         if success:
             action_text = "السماح لجميع" if is_allowed else "منع جميع"
-            await event.answer(f"✅ تم {action_text} أنواع الوسائط")
+            await self.safe_answer(event, f"✅ تم {action_text} أنواع الوسائط")
 
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
 
             await self.show_media_filters(event, task_id)
         else:
-            await event.answer("❌ فشل في تطبيق الفلاتر")
+            await self.safe_answer(event, "❌ فشل في تطبيق الفلاتر")
 
     async def reset_media_filters(self, event, task_id):
         """Reset media filters to default (all allowed)"""
@@ -7729,20 +7729,20 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         success = self.db.reset_task_media_filters(task_id)
 
         if success:
-            await event.answer("✅ تم إعادة تعيين الفلاتر إلى الوضع الافتراضي (السماح للكل)")
+            await self.safe_answer(event, "✅ تم إعادة تعيين الفلاتر إلى الوضع الافتراضي (السماح للكل)")
 
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
 
             await self.show_media_filters(event, task_id)
         else:
-            await event.answer("❌ فشل في إعادة تعيين الفلاتر")
+            await self.safe_answer(event, "❌ فشل في إعادة تعيين الفلاتر")
 
     async def _refresh_userbot_tasks(self, user_id):
         """Helper function to refresh UserBot tasks"""
@@ -7760,7 +7760,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -7848,7 +7848,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -7898,21 +7898,21 @@ class SimpleTelegramBot:
             if len(parts) >= 3:
                 task_id = int(parts[2])
             else:
-                await event.answer("❌ خطأ في تحليل البيانات", alert=True)
+                await self.safe_answer(event, "❌ خطأ في تحليل البيانات", alert=True)
                 return
             
             await self.show_whitelist_management(event, task_id)
             
         except Exception as e:
             logger.error(f"خطأ في إدارة القائمة البيضاء: {e}")
-            await event.answer("❌ حدث خطأ في النظام", alert=True)
+            await self.safe_answer(event, "❌ حدث خطأ في النظام", alert=True)
 
     async def show_whitelist_management(self, event, task_id):
         """Show whitelist management interface"""
         # Get task info
         task = self.db.get_task(task_id, event.sender_id)
         if not task:
-            await event.answer("❌ لم يتم العثور على المهمة", alert=True)
+            await self.safe_answer(event, "❌ لم يتم العثور على المهمة", alert=True)
             return
         
         # Get whitelist info
@@ -7955,21 +7955,21 @@ class SimpleTelegramBot:
             if len(parts) >= 3:
                 task_id = int(parts[2])
             else:
-                await event.answer("❌ خطأ في تحليل البيانات", alert=True)
+                await self.safe_answer(event, "❌ خطأ في تحليل البيانات", alert=True)
                 return
             
             await self.show_blacklist_management(event, task_id)
             
         except Exception as e:
             logger.error(f"خطأ في إدارة القائمة السوداء: {e}")
-            await event.answer("❌ حدث خطأ في النظام", alert=True)
+            await self.safe_answer(event, "❌ حدث خطأ في النظام", alert=True)
 
     async def show_blacklist_management(self, event, task_id):
         """Show blacklist management interface"""
         # Get task info
         task = self.db.get_task(task_id, event.sender_id)
         if not task:
-            await event.answer("❌ لم يتم العثور على المهمة", alert=True)
+            await self.safe_answer(event, "❌ لم يتم العثور على المهمة", alert=True)
             return
         
         # Get blacklist info
@@ -8009,14 +8009,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
         words_count = len(self.db.get_filter_words(task_id, filter_type))
         
         if words_count == 0:
-            await event.answer("❌ القائمة فارغة بالفعل")
+            await self.safe_answer(event, "❌ القائمة فارغة بالفعل")
             return
 
         message = f"⚠️ **تأكيد حذف {filter_name}**\n\n"
@@ -8042,7 +8042,7 @@ class SimpleTelegramBot:
         
         if success:
             filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
-            await event.answer(f"✅ تم حذف جميع كلمات {filter_name}")
+            await self.safe_answer(event, f"✅ تم حذف جميع كلمات {filter_name}")
             
             # Refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -8053,7 +8053,7 @@ class SimpleTelegramBot:
             else:
                 await self.show_blacklist_management(event, task_id)
         else:
-            await event.answer("❌ فشل في حذف الكلمات")
+            await self.safe_answer(event, "❌ فشل في حذف الكلمات")
 
     async def view_filter_words(self, event, task_id, filter_type):
         """View all words in a specific filter"""
@@ -8061,7 +8061,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task['task_name']
@@ -8101,7 +8101,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -8170,7 +8170,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         # Map callback identifiers back to database keys
@@ -8186,7 +8186,7 @@ class SimpleTelegramBot:
 
         db_setting = setting_map.get(setting_type)
         if not db_setting:
-            await event.answer("❌ نوع إعداد غير صالح")
+            await self.safe_answer(event, "❌ نوع إعداد غير صالح")
             return
 
         settings = self.db.get_text_cleaning_settings(task_id)
@@ -8209,14 +8209,14 @@ class SimpleTelegramBot:
             setting_name = setting_names.get(db_setting, db_setting)
             status_text = "مُفعل" if new_status else "مُعطل"
 
-            await event.answer(f"✅ تم تغيير {setting_name} إلى: {status_text}")
+            await self.safe_answer(event, f"✅ تم تغيير {setting_name} إلى: {status_text}")
 
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
 
             await self.show_text_cleaning(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير الإعداد")
+            await self.safe_answer(event, "❌ فشل في تغيير الإعداد")
 
     async def manage_text_cleaning_keywords(self, event, task_id):
         """Manage text cleaning keywords"""
@@ -8224,7 +8224,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -8262,7 +8262,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -8375,7 +8375,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -8467,7 +8467,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         # Toggle the setting
@@ -8477,7 +8477,7 @@ class SimpleTelegramBot:
         await self._refresh_userbot_tasks(user_id)
         
         status_text = "مُفعل" if new_enabled else "معطل"
-        await event.answer(f"✅ تم تحديث تنسيق النصوص: {status_text}")
+        await self.safe_answer(event, f"✅ تم تحديث تنسيق النصوص: {status_text}")
         
         # Show updated settings with force refresh to ensure content changes
         await self.show_text_formatting(event, task_id, force_refresh=True)
@@ -8488,7 +8488,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         # Update format type
@@ -8499,12 +8499,12 @@ class SimpleTelegramBot:
             await self._refresh_userbot_tasks(user_id)
             
             format_name = self._get_format_name(format_type)
-            await event.answer(f"✅ تم تحديد نوع التنسيق: {format_name}")
+            await self.safe_answer(event, f"✅ تم تحديد نوع التنسيق: {format_name}")
             
             # Show updated settings with force refresh to update selected format
             await self.show_text_formatting(event, task_id, force_refresh=True)
         else:
-            await event.answer("❌ فشل في تحديث نوع التنسيق")
+            await self.safe_answer(event, "❌ فشل في تحديث نوع التنسيق")
 
     async def start_add_multiple_words(self, event, task_id, filter_type):
         """Start the process to add multiple words to a filter"""
@@ -8512,7 +8512,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task['task_name']
@@ -8550,7 +8550,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task['task_name']
@@ -8644,7 +8644,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         current_status = self.db.is_word_filter_enabled(task_id, filter_type)
@@ -8655,7 +8655,7 @@ class SimpleTelegramBot:
         if success:
             filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
             status_text = "تم تفعيل" if new_status else "تم تعطيل"
-            await event.answer(f"✅ {status_text} {filter_name}")
+            await self.safe_answer(event, f"✅ {status_text} {filter_name}")
 
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -8666,7 +8666,7 @@ class SimpleTelegramBot:
             else:
                 await self.show_blacklist_management(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير حالة الفلتر")
+            await self.safe_answer(event, "❌ فشل في تغيير حالة الفلتر")
 
     async def manage_words(self, event, task_id, filter_type):
         """Manage words in a specific filter"""
@@ -8674,7 +8674,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
@@ -8730,7 +8730,7 @@ class SimpleTelegramBot:
             logger.info(f"✅ تم حفظ حالة إضافة كلمات للمستخدم {user_id}: {data_str}")
         except Exception as e:
             logger.error(f"❌ خطأ في حفظ حالة إضافة كلمات: {e}")
-            await event.answer("❌ حدث خطأ، حاول مرة أخرى")
+            await self.safe_answer(event, "❌ حدث خطأ، حاول مرة أخرى")
             return
 
         filter_name = "القائمة البيضاء" if filter_type == 'whitelist' else "القائمة السوداء"
@@ -8821,7 +8821,7 @@ class SimpleTelegramBot:
         # Get the word first
         word = self.db.get_word_by_id(word_id)
         if not word:
-            await event.answer("❌ الكلمة غير موجودة")
+            await self.safe_answer(event, "❌ الكلمة غير موجودة")
             return
 
         success = self.db.remove_word_from_filter_by_id(word_id)
@@ -8832,14 +8832,14 @@ class SimpleTelegramBot:
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
 
-            await event.answer(f"✅ تم حذف الكلمة من {filter_name}")
+            await self.safe_answer(event, f"✅ تم حذف الكلمة من {filter_name}")
             # Return to the specific filter management page
             if filter_type == 'whitelist':
                 await self.handle_manage_whitelist(event)
             else:
                 await self.handle_manage_blacklist(event)
         else:
-            await event.answer("❌ فشل في حذف الكلمة")
+            await self.safe_answer(event, "❌ فشل في حذف الكلمة")
 
     # Duplicate function removed - using the one at line 6712
 
@@ -9077,7 +9077,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         # Get replacement settings and count
@@ -9112,7 +9112,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         current_status = self.db.is_text_replacement_enabled(task_id)
@@ -9123,7 +9123,7 @@ class SimpleTelegramBot:
         
         status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
         
-        await event.answer(f"✅ {status_text} استبدال النصوص")
+        await self.safe_answer(event, f"✅ {status_text} استبدال النصوص")
         await self.show_text_replacements(event, task_id)
 
     async def start_add_replacement(self, event, task_id):
@@ -9132,7 +9132,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         # Set conversation state
@@ -9222,7 +9222,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         replacements = self.db.get_text_replacements(task_id)
@@ -9262,7 +9262,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         replacements = self.db.get_text_replacements(task_id)
@@ -9288,7 +9288,7 @@ class SimpleTelegramBot:
         # Clear all replacements
         deleted_count = self.db.clear_text_replacements(task_id)
         
-        await event.answer(f"✅ تم حذف جميع الاستبدالات النصية")
+        await self.safe_answer(event, f"✅ تم حذف جميع الاستبدالات النصية")
         await self.show_text_replacements(event, task_id)
 
     # Header Settings Methods
@@ -9298,7 +9298,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_message_settings(task_id)
@@ -9330,7 +9330,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_message_settings(task_id)
@@ -9339,7 +9339,7 @@ class SimpleTelegramBot:
         self.db.update_header_settings(task_id, new_status, settings['header_text'])
         
         status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} رأس الرسالة")
+        await self.safe_answer(event, f"✅ {status_text} رأس الرسالة")
         await self.show_header_settings(event, task_id)
 
     async def start_edit_header(self, event, task_id):
@@ -9348,7 +9348,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_message_settings(task_id)
@@ -9393,7 +9393,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_message_settings(task_id)
@@ -9425,7 +9425,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_message_settings(task_id)
@@ -9434,7 +9434,7 @@ class SimpleTelegramBot:
         self.db.update_footer_settings(task_id, new_status, settings['footer_text'])
         
         status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} ذيل الرسالة")
+        await self.safe_answer(event, f"✅ {status_text} ذيل الرسالة")
         await self.show_footer_settings(event, task_id)
 
     async def start_edit_footer(self, event, task_id):
@@ -9443,7 +9443,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_message_settings(task_id)
@@ -9488,7 +9488,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_message_settings(task_id)
@@ -9526,7 +9526,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_message_settings(task_id)
@@ -9535,15 +9535,15 @@ class SimpleTelegramBot:
         if current_status:
             # Currently enabled, disable it (but keep the buttons in database)
             self.db.update_inline_buttons_enabled(task_id, False)
-            await event.answer("✅ تم إلغاء تفعيل الأزرار الإنلاين")
+            await self.safe_answer(event, "✅ تم إلغاء تفعيل الأزرار الإنلاين")
         else:
             # Currently disabled, enable it if there are buttons
             buttons_list = self.db.get_inline_buttons(task_id)
             if buttons_list:
                 self.db.update_inline_buttons_enabled(task_id, True)
-                await event.answer("✅ تم تفعيل الأزرار الإنلاين")
+                await self.safe_answer(event, "✅ تم تفعيل الأزرار الإنلاين")
             else:
-                await event.answer("💡 لتفعيل الأزرار، اضغط 'إضافة أزرار' وأضف زر واحد على الأقل")
+                await self.safe_answer(event, "💡 لتفعيل الأزرار، اضغط 'إضافة أزرار' وأضف زر واحد على الأقل")
         
         await self.show_inline_buttons_settings(event, task_id)
 
@@ -9553,7 +9553,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         self.db.set_conversation_state(user_id, 'waiting_button_data', str(task_id))
@@ -9650,7 +9650,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         buttons_list = self.db.get_inline_buttons(task_id)
@@ -9688,7 +9688,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         buttons_list = self.db.get_inline_buttons(task_id)
@@ -9714,7 +9714,7 @@ class SimpleTelegramBot:
         # Clear all buttons
         deleted_count = self.db.clear_inline_buttons(task_id)
         
-        await event.answer(f"✅ تم حذف جميع الأزرار الإنلاين")
+        await self.safe_answer(event, f"✅ تم حذف جميع الأزرار الإنلاين")
         await self.show_inline_buttons_settings(event, task_id)
 
     # Forwarding Settings Methods
@@ -9724,7 +9724,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_forwarding_settings(task_id)
@@ -9811,13 +9811,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_link_preview(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} معاينة الرابط")
+        await self.safe_answer(event, f"✅ {status_text} معاينة الرابط")
         await self.show_forwarding_settings(event, task_id)
 
     async def toggle_pin_message(self, event, task_id):
@@ -9826,13 +9826,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_pin_message(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} تثبيت الرسالة")
+        await self.safe_answer(event, f"✅ {status_text} تثبيت الرسالة")
         await self.show_forwarding_settings(event, task_id)
 
     async def toggle_silent_notifications(self, event, task_id):
@@ -9841,13 +9841,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_silent_notifications(task_id)
         
         status_text = "النشر بصمت" if new_state else "النشر مع إشعار"
-        await event.answer(f"✅ تم تفعيل {status_text}")
+        await self.safe_answer(event, f"✅ تم تفعيل {status_text}")
         await self.show_forwarding_settings(event, task_id)
 
     async def toggle_auto_delete(self, event, task_id):
@@ -9856,13 +9856,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_auto_delete(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} الحذف التلقائي")
+        await self.safe_answer(event, f"✅ {status_text} الحذف التلقائي")
         await self.show_forwarding_settings(event, task_id)
 
     async def toggle_sync_edit(self, event, task_id):
@@ -9871,13 +9871,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_sync_edit(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} مزامنة التعديل")
+        await self.safe_answer(event, f"✅ {status_text} مزامنة التعديل")
         await self.show_forwarding_settings(event, task_id)
 
     async def toggle_sync_delete(self, event, task_id):
@@ -9886,13 +9886,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_sync_delete(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} مزامنة الحذف")
+        await self.safe_answer(event, f"✅ {status_text} مزامنة الحذف")
         await self.show_forwarding_settings(event, task_id)
 
     async def toggle_split_album(self, event, task_id):
@@ -9901,13 +9901,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_split_album(task_id)
         
         status_text = "تم تفعيل تفكيك الألبومات" if new_state else "تم تفعيل إبقاء الألبومات مجمعة"
-        await event.answer(f"✅ {status_text}")
+        await self.safe_answer(event, f"✅ {status_text}")
         
         # Force refresh UserBot tasks
         await self._refresh_userbot_tasks(user_id)
@@ -9922,7 +9922,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -9959,7 +9959,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         settings = self.db.get_translation_settings(task_id)
@@ -9969,14 +9969,14 @@ class SimpleTelegramBot:
 
         if success:
             status_text = "تم تفعيل" if new_status else "تم إلغاء تفعيل"
-            await event.answer(f"✅ {status_text} الترجمة التلقائية")
+            await self.safe_answer(event, f"✅ {status_text} الترجمة التلقائية")
 
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
 
             await self.show_translation_settings(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير إعداد الترجمة")
+            await self.safe_answer(event, "❌ فشل في تغيير إعداد الترجمة")
 
     async def set_translation_language(self, event, task_id, setting):
         """Start setting translation language (source or target)"""
@@ -9984,7 +9984,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -10031,7 +10031,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
 
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         # Update the language setting
@@ -10052,14 +10052,14 @@ class SimpleTelegramBot:
             }
             language_name = languages.get(language_code, language_code)
             
-            await event.answer(f"✅ تم تحديث {setting_name} إلى: {language_name}")
+            await self.safe_answer(event, f"✅ تم تحديث {setting_name} إلى: {language_name}")
 
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
 
             await self.show_translation_settings(event, task_id)
         else:
-            await event.answer("❌ فشل في تحديث اللغة")
+            await self.safe_answer(event, "❌ فشل في تحديث اللغة")
 
     async def start_set_auto_delete_time(self, event, task_id):
         """Start setting auto delete time"""
@@ -10067,7 +10067,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         current_settings = self.db.get_forwarding_settings(task_id)
@@ -10147,7 +10147,7 @@ class SimpleTelegramBot:
         else:
             time_display = f"{seconds} ثانية"
             
-        await event.answer(f"✅ تم تحديد مدة الحذف التلقائي إلى {time_display}")
+        await self.safe_answer(event, f"✅ تم تحديد مدة الحذف التلقائي إلى {time_display}")
         await self.show_forwarding_settings(event, task_id)
 
     # ===== Advanced Filters Management =====
@@ -10161,18 +10161,18 @@ class SimpleTelegramBot:
             # Get pending message details
             pending_message = self.db.get_pending_message(pending_id)
             if not pending_message or pending_message['user_id'] != user_id:
-                await event.answer("❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
+                await self.safe_answer(event, "❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
                 return
             
             if pending_message['status'] != 'pending':
-                await event.answer("❌ هذه الرسالة تم التعامل معها بالفعل")
+                await self.safe_answer(event, "❌ هذه الرسالة تم التعامل معها بالفعل")
                 return
             
             task_id = pending_message['task_id']
             task = self.db.get_task(task_id, user_id)
             
             if not task:
-                await event.answer("❌ المهمة غير موجودة")
+                await self.safe_answer(event, "❌ المهمة غير موجودة")
                 return
             
             if approved:
@@ -10182,14 +10182,14 @@ class SimpleTelegramBot:
                 # Process the message through userbot
                 success = await self._process_approved_message(pending_message, task)
                 if not success:
-                    await event.answer("⚠️ تمت الموافقة ولكن فشل في إرسال الرسالة")
+                    await self.safe_answer(event, "⚠️ تمت الموافقة ولكن فشل في إرسال الرسالة")
                 
                 # Update the message to show approval
                 try:
                     new_text = "✅ **تمت الموافقة**\n\n" + "هذه الرسالة تمت الموافقة عليها وتم إرسالها إلى الأهداف."
                     await event.edit(new_text, buttons=None)
                 except:
-                    await event.answer("✅ تمت الموافقة على الرسالة وتم إرسالها")
+                    await self.safe_answer(event, "✅ تمت الموافقة على الرسالة وتم إرسالها")
                 
             else:
                 # Mark as rejected
@@ -10200,13 +10200,13 @@ class SimpleTelegramBot:
                     new_text = "❌ **تم رفض الرسالة**\n\n" + "هذه الرسالة تم رفضها ولن يتم إرسالها."
                     await event.edit(new_text, buttons=None)
                 except:
-                    await event.answer("❌ تم رفض الرسالة")
+                    await self.safe_answer(event, "❌ تم رفض الرسالة")
                     
             logger.info(f"📋 تم {'قبول' if approved else 'رفض'} الرسالة المعلقة {pending_id} للمستخدم {user_id}")
             
         except Exception as e:
             logger.error(f"خطأ في معالجة الموافقة: {e}")
-            await event.answer("❌ حدث خطأ في معالجة الطلب")
+            await self.safe_answer(event, "❌ حدث خطأ في معالجة الطلب")
 
     async def _process_approved_message(self, pending_message, task):
         """Process approved message by sending it through userbot"""
@@ -10273,7 +10273,7 @@ class SimpleTelegramBot:
         try:
             pending_message = self.db.get_pending_message(pending_id)
             if not pending_message or pending_message['user_id'] != user_id:
-                await event.answer("❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
+                await self.safe_answer(event, "❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
                 return
             
             import json
@@ -10281,7 +10281,7 @@ class SimpleTelegramBot:
             task = self.db.get_task(pending_message['task_id'], user_id)
             
             if not task:
-                await event.answer("❌ المهمة غير موجودة")
+                await self.safe_answer(event, "❌ المهمة غير موجودة")
                 return
                 
             task_name = task.get('task_name', f"مهمة {pending_message['task_id']}")
@@ -10312,7 +10312,7 @@ class SimpleTelegramBot:
             
         except Exception as e:
             logger.error(f"خطأ في عرض تفاصيل الرسالة المعلقة: {e}")
-            await event.answer("❌ حدث خطأ في عرض التفاصيل")
+            await self.safe_answer(event, "❌ حدث خطأ في عرض التفاصيل")
 
     # Duplicate function removed - using the one at line 8362
 
@@ -10324,7 +10324,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -10365,7 +10365,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get publishing mode from forwarding settings
@@ -10381,14 +10381,14 @@ class SimpleTelegramBot:
                 'manual': 'يدوي'
             }
             
-            await event.answer(f"✅ تم تغيير وضع النشر إلى: {mode_names[new_mode]}")
+            await self.safe_answer(event, f"✅ تم تغيير وضع النشر إلى: {mode_names[new_mode]}")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
             
             await self.show_publishing_mode_settings(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير وضع النشر")
+            await self.safe_answer(event, "❌ فشل في تغيير وضع النشر")
 
     async def show_character_limit_settings(self, event, task_id):
         """Show character limit settings"""
@@ -10396,7 +10396,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -10457,13 +10457,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         new_state = self.db.toggle_character_limit(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} حد الأحرف")
+        await self.safe_answer(event, f"✅ {status_text} حد الأحرف")
         
         # Force refresh UserBot tasks
         await self._refresh_userbot_tasks(user_id)
@@ -10477,7 +10477,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         new_mode = self.db.cycle_character_limit_mode(task_id)
@@ -10487,7 +10487,7 @@ class SimpleTelegramBot:
             'block': '❌ الحظر'
         }
         
-        await event.answer(f"✅ تم تغيير الوضع إلى: {mode_names.get(new_mode, new_mode)}")
+        await self.safe_answer(event, f"✅ تم تغيير الوضع إلى: {mode_names.get(new_mode, new_mode)}")
         
         # Force refresh UserBot tasks
         await self._refresh_userbot_tasks(user_id)
@@ -10501,7 +10501,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set user state
@@ -10529,7 +10529,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Set user state
@@ -10557,7 +10557,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -10591,7 +10591,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -10631,7 +10631,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -10671,13 +10671,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_forwarding_delay(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} تأخير التوجيه")
+        await self.safe_answer(event, f"✅ {status_text} تأخير التوجيه")
         await self.show_forwarding_delay_settings(event, task_id)
 
     async def toggle_sending_interval(self, event, task_id):
@@ -10686,13 +10686,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_sending_interval(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} فترات الإرسال")
+        await self.safe_answer(event, f"✅ {status_text} فترات الإرسال")
         await self.show_sending_interval_settings(event, task_id)
 
     async def toggle_rate_limit(self, event, task_id):
@@ -10701,13 +10701,13 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
 
         new_state = self.db.toggle_rate_limit(task_id)
         
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
-        await event.answer(f"✅ {status_text} تحكم المعدل")
+        await self.safe_answer(event, f"✅ {status_text} تحكم المعدل")
         await self.show_rate_limit_settings(event, task_id)
 
     async def show_admin_list(self, event, task_id):
@@ -10716,7 +10716,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -10768,10 +10768,10 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
-        await event.answer("🔄 جاري تحديث قائمة المشرفين...")
+        await self.safe_answer(event, "🔄 جاري تحديث قائمة المشرفين...")
         
         # Force refresh the admin list display
         await self.show_admin_list(event, task_id)
@@ -11139,7 +11139,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current mode and toggle it
@@ -11153,7 +11153,7 @@ class SimpleTelegramBot:
                 'allow': 'السماح فقط للغات المحددة',
                 'block': 'حظر اللغات المحددة'
             }
-            await event.answer(f"✅ تم تغيير وضع الفلتر إلى: {mode_names[new_mode]}")
+            await self.safe_answer(event, f"✅ تم تغيير وضع الفلتر إلى: {mode_names[new_mode]}")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -11161,7 +11161,7 @@ class SimpleTelegramBot:
             # Refresh the language filters display
             await self.show_language_filters(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير وضع الفلتر")
+            await self.safe_answer(event, "❌ فشل في تغيير وضع الفلتر")
 
     async def toggle_admin(self, event, task_id, admin_id, source_chat_id=None):
         """Toggle admin filter status"""
@@ -11169,14 +11169,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Toggle admin filter status
         success = self.db.toggle_admin_filter(task_id, int(admin_id))
         
         if success:
-            await event.answer("✅ تم تحديث إعدادات المشرف")
+            await self.safe_answer(event, "✅ تم تحديث إعدادات المشرف")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -11187,7 +11187,7 @@ class SimpleTelegramBot:
             else:
                 await self.show_admin_list(event, task_id)
         else:
-            await event.answer("❌ فشل في تحديث إعدادات المشرف")
+            await self.safe_answer(event, "❌ فشل في تحديث إعدادات المشرف")
 
     async def toggle_language_filter(self, event, task_id, language_code):
         """Toggle specific language filter"""
@@ -11195,14 +11195,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Toggle language filter status
         success = self.db.toggle_language_filter(task_id, language_code)
         
         if success:
-            await event.answer(f"✅ تم تحديث فلتر اللغة {language_code}")
+            await self.safe_answer(event, f"✅ تم تحديث فلتر اللغة {language_code}")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -11210,7 +11210,7 @@ class SimpleTelegramBot:
             # Refresh the language filters display
             await self.show_language_filters(event, task_id)
         else:
-            await event.answer("❌ فشل في تحديث فلتر اللغة")
+            await self.safe_answer(event, "❌ فشل في تحديث فلتر اللغة")
 
     async def toggle_button_mode(self, event, task_id):
         """Toggle button filter mode"""
@@ -11218,7 +11218,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current mode and toggle it
@@ -11233,7 +11233,7 @@ class SimpleTelegramBot:
                 'remove_buttons': 'حذف الأزرار',
                 'block_message': 'حظر الرسالة'
             }
-            await event.answer(f"✅ تم تغيير الوضع إلى: {mode_names[new_mode]}")
+            await self.safe_answer(event, f"✅ تم تغيير الوضع إلى: {mode_names[new_mode]}")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -11241,7 +11241,7 @@ class SimpleTelegramBot:
             # Refresh the button filters display
             await self.show_button_filters(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير الوضع")
+            await self.safe_answer(event, "❌ فشل في تغيير الوضع")
 
     async def toggle_forwarded_mode(self, event, task_id):
         """Toggle forwarded message filter mode"""
@@ -11249,7 +11249,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current mode and toggle it
@@ -11264,7 +11264,7 @@ class SimpleTelegramBot:
                 'allow': 'السماح بالرسائل المُوجهة',
                 'block': 'حظر الرسائل المُوجهة'
             }
-            await event.answer(f"✅ تم تغيير الوضع إلى: {mode_names[new_mode]}")
+            await self.safe_answer(event, f"✅ تم تغيير الوضع إلى: {mode_names[new_mode]}")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -11272,7 +11272,7 @@ class SimpleTelegramBot:
             # Refresh the forwarded message filter display
             await self.show_forwarded_message_filter(event, task_id)
         else:
-            await event.answer("❌ فشل في تغيير الوضع")
+            await self.safe_answer(event, "❌ فشل في تغيير الوضع")
 
     async def toggle_duplicate_mode(self, event, task_id):
         """Toggle duplicate filter mode"""
@@ -11280,7 +11280,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings and toggle repeat mode
@@ -11292,7 +11292,7 @@ class SimpleTelegramBot:
         
         if success:
             mode_text = "تفعيل وضع التكرار" if new_repeat_mode else "تعطيل وضع التكرار"
-            await event.answer(f"✅ تم {mode_text}")
+            await self.safe_answer(event, f"✅ تم {mode_text}")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -11305,7 +11305,7 @@ class SimpleTelegramBot:
                     raise e
                 logger.debug("المحتوى لم يتغير، وضع التكرار محدث بنجاح")
         else:
-            await event.answer("❌ فشل في تغيير وضع التكرار")
+            await self.safe_answer(event, "❌ فشل في تغيير وضع التكرار")
 
     async def toggle_hour(self, event, task_id, hour):
         """Toggle specific hour in working hours schedule"""
@@ -11313,7 +11313,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -11326,7 +11326,7 @@ class SimpleTelegramBot:
             success = True
             
             action = "تم تفعيل" if new_state else "تم تعطيل"
-            await event.answer(f"✅ {action} الساعة {hour:02d}:00")
+            await self.safe_answer(event, f"✅ {action} الساعة {hour:02d}:00")
             
             # Force refresh UserBot tasks
             await self._refresh_userbot_tasks(user_id)
@@ -11342,7 +11342,7 @@ class SimpleTelegramBot:
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل الساعة {hour} للمهمة {task_id}: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
 
 
@@ -11375,14 +11375,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
             # Get admins from UserBot
             from userbot_service.userbot import userbot_instance
             if user_id not in userbot_instance.clients:
-                await event.answer("❌ UserBot غير متصل")
+                await self.safe_answer(event, "❌ UserBot غير متصل")
                 return
                 
             # Get chat admins
@@ -11526,7 +11526,7 @@ class SimpleTelegramBot:
                 
         except Exception as e:
             logger.error(f"خطأ في عرض مشرفي المصدر: {e}")
-            await event.answer("❌ حدث خطأ")
+            await self.safe_answer(event, "❌ حدث خطأ")
 
     async def toggle_source_admin_filter(self, event, task_id, admin_user_id, source_chat_id):
         """Toggle admin filter for specific source"""
@@ -11534,7 +11534,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -11549,18 +11549,18 @@ class SimpleTelegramBot:
                 if admin_filter:
                     status = "تم تفعيل" if admin_filter['is_allowed'] else "تم تعطيل"
                     admin_name = admin_filter['admin_first_name'] or admin_filter['admin_username'] or f"User {admin_user_id}"
-                    await event.answer(f"✅ {status} المشرف {admin_name}")
+                    await self.safe_answer(event, f"✅ {status} المشرف {admin_name}")
                 else:
-                    await event.answer("❌ لم يتم العثور على المشرف")
+                    await self.safe_answer(event, "❌ لم يتم العثور على المشرف")
                 
                 # Refresh the display
                 await self.show_source_admins(event, task_id, source_chat_id)
             else:
-                await event.answer("❌ فشل في تحديث إعدادات المشرف")
+                await self.safe_answer(event, "❌ فشل في تحديث إعدادات المشرف")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل فلتر المشرف {admin_user_id}: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def refresh_source_admins(self, event, task_id, source_chat_id):
         """Refresh admin list for specific source from Telegram"""
@@ -11568,14 +11568,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
             # Get admins from UserBot
             from userbot_service.userbot import userbot_instance
             if user_id not in userbot_instance.clients:
-                await event.answer("❌ UserBot غير متصل")
+                await self.safe_answer(event, "❌ UserBot غير متصل")
                 return
                 
             await event.edit("🔄 جاري تحديث قائمة المشرفين من التليجرام...")
@@ -11617,9 +11617,9 @@ class SimpleTelegramBot:
                         admin_data.get('custom_title', '')  # Save admin signature
                     )
             
-                await event.answer(f"✅ تم تحديث {len(admins_data)} مشرف")
+                await self.safe_answer(event, f"✅ تم تحديث {len(admins_data)} مشرف")
             else:
-                await event.answer("❌ فشل في جلب المشرفين من التليجرام")
+                await self.safe_answer(event, "❌ فشل في جلب المشرفين من التليجرام")
             
             # Refresh the display
             await self.show_source_admins(event, task_id, source_chat_id)
@@ -11629,7 +11629,7 @@ class SimpleTelegramBot:
             # Handle "Content of the message was not modified" error - this is actually success
             if "Content of the message was not modified" in str(e):
                 logger.info(f"✅ المشرفين محدثين بالفعل للمصدر {source_chat_id}")
-                await event.answer("✅ تم تحديث المشرفين بنجاح", alert=False)
+                await self.safe_answer(event, "✅ تم تحديث المشرفين بنجاح", alert=False)
                 # Always try to refresh display even if content wasn't modified
                 try:
                     await self.show_source_admins(event, task_id, source_chat_id)
@@ -11650,7 +11650,7 @@ class SimpleTelegramBot:
                     )
                 except Exception as edit_error:
                     logger.error(f"خطأ في تحديث رسالة الخطأ: {edit_error}")
-                    await event.answer(f"❌ خطأ: {str(e)}", alert=True)
+                    await self.safe_answer(event, f"❌ خطأ: {str(e)}", alert=True)
 
     async def refresh_all_admins(self, event, task_id):
         """Refresh admin lists for all sources"""
@@ -11658,14 +11658,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
             # Get all sources for this task
             sources = self.db.get_task_sources(task_id)
             if not sources:
-                await event.answer("❌ لا توجد مصادر للمهمة")
+                await self.safe_answer(event, "❌ لا توجد مصادر للمهمة")
                 return
                 
             await event.edit("🔄 جاري تحديث قوائم المشرفين لجميع المصادر...")
@@ -11726,7 +11726,7 @@ class SimpleTelegramBot:
             if failed_sources:
                 message += f"\n\n❌ فشل التحديث من: {', '.join(failed_sources)}"
             
-            await event.answer(message)
+            await self.safe_answer(event, message)
             
             # Refresh the main admin list display
             await self.show_admin_list(event, task_id)
@@ -11735,14 +11735,14 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في تحديث جميع المشرفين: {e}")
             # Handle "Content of the message was not modified" error
             if "Content of the message was not modified" in str(e):
-                await event.answer("✅ تم تحديث جميع المشرفين بنجاح")
+                await self.safe_answer(event, "✅ تم تحديث جميع المشرفين بنجاح")
                 # Refresh the main admin list display
                 await self.show_admin_list(event, task_id)
             else:
                 try:
-                    await event.answer(f"❌ خطأ: {str(e)}")
+                    await self.safe_answer(event, f"❌ خطأ: {str(e)}")
                 except:
-                    await event.answer(f"❌ خطأ: {str(e)}")
+                    await self.safe_answer(event, f"❌ خطأ: {str(e)}")
 
     async def enable_all_source_admins(self, event, task_id, source_chat_id):
         """Enable all admins for specific source"""
@@ -11750,14 +11750,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
             # Get all admins for this source
             admins = self.db.get_admin_filters_by_source(task_id, source_chat_id)
             if not admins:
-                await event.answer("❌ لا يوجد مشرفين في هذا المصدر")
+                await self.safe_answer(event, "❌ لا يوجد مشرفين في هذا المصدر")
                 return
             
             # Create permissions dict for bulk update
@@ -11766,14 +11766,14 @@ class SimpleTelegramBot:
             # Bulk update all admins to allowed
             updated_count = self.db.bulk_update_admin_permissions(task_id, source_chat_id, admin_permissions)
                 
-            await event.answer(f"✅ تم تفعيل {updated_count} مشرف")
+            await self.safe_answer(event, f"✅ تم تفعيل {updated_count} مشرف")
             
             # Refresh the display
             await self.show_source_admins(event, task_id, source_chat_id)
             
         except Exception as e:
             logger.error(f"خطأ في تفعيل جميع المشرفين: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def disable_all_source_admins(self, event, task_id, source_chat_id):
         """Disable all admins for specific source"""
@@ -11781,14 +11781,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
             # Get all admins for this source
             admins = self.db.get_admin_filters_by_source(task_id, source_chat_id)
             if not admins:
-                await event.answer("❌ لا يوجد مشرفين في هذا المصدر")
+                await self.safe_answer(event, "❌ لا يوجد مشرفين في هذا المصدر")
                 return
             
             # Create permissions dict for bulk update
@@ -11797,14 +11797,14 @@ class SimpleTelegramBot:
             # Bulk update all admins to blocked
             updated_count = self.db.bulk_update_admin_permissions(task_id, source_chat_id, admin_permissions)
                 
-            await event.answer(f"❌ تم تعطيل {updated_count} مشرف")
+            await self.safe_answer(event, f"❌ تم تعطيل {updated_count} مشرف")
             
             # Refresh the display
             await self.show_source_admins(event, task_id, source_chat_id)
             
         except Exception as e:
             logger.error(f"خطأ في تعطيل جميع المشرفين: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def refresh_source_admin_list(self, event, task_id, source_chat_id):
         """Refresh the admin list for a source"""
@@ -11816,14 +11816,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
             # Get admins with their signatures
             admins = self.db.get_admin_filters_by_source(task_id, source_chat_id)
             if not admins:
-                await event.answer("❌ لا يوجد مشرفين في هذا المصدر")
+                await self.safe_answer(event, "❌ لا يوجد مشرفين في هذا المصدر")
                 return
             
             # Get source name
@@ -11866,7 +11866,7 @@ class SimpleTelegramBot:
             
         except Exception as e:
             logger.error(f"خطأ في إدارة توقيعات المشرفين: {e}")
-            await event.answer("❌ حدث خطأ")
+            await self.safe_answer(event, "❌ حدث خطأ")
 
     async def edit_admin_signature(self, event, task_id, admin_user_id, source_chat_id):
         """Edit admin signature"""
@@ -11874,14 +11874,14 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
             # Get admin info
             admin = self.db.get_admin_filter_setting(task_id, admin_user_id)
             if not admin:
-                await event.answer("❌ المشرف غير موجود")
+                await self.safe_answer(event, "❌ المشرف غير موجود")
                 return
             
             admin_name = admin['admin_first_name'] or admin['admin_username'] or f"User {admin_user_id}"
@@ -11908,7 +11908,7 @@ class SimpleTelegramBot:
             
         except Exception as e:
             logger.error(f"خطأ في تعديل توقيع المشرف: {e}")
-            await event.answer("❌ حدث خطأ")
+            await self.safe_answer(event, "❌ حدث خطأ")
 
     async def handle_signature_input(self, event, task_id, admin_user_id, source_chat_id):
         """Handle admin signature input"""
@@ -11956,7 +11956,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -11980,7 +11980,7 @@ class SimpleTelegramBot:
                     'tr': 'التركية', 'fa': 'الفارسية', 'ur': 'الأردية'
                 }
                 lang_name = language_names.get(language_code, language_code)
-                await event.answer(f"✅ {action} {lang_name}")
+                await self.safe_answer(event, f"✅ {action} {lang_name}")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -11993,11 +11993,11 @@ class SimpleTelegramBot:
                         raise e
                     logger.debug("المحتوى لم يتغير، اللغة محدثة بنجاح")
             else:
-                await event.answer("❌ فشل في تحديث اللغة")
+                await self.safe_answer(event, "❌ فشل في تحديث اللغة")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل فلتر اللغة {language_code}: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     # Duplicate function removed - using the one at line 9107
 
@@ -12007,7 +12007,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -12019,7 +12019,7 @@ class SimpleTelegramBot:
             
             if success:
                 action = "تم تفعيل" if new_setting else "تم تعطيل"
-                await event.answer(f"✅ {action} فلتر الرسائل المُعاد توجيهها")
+                await self.safe_answer(event, f"✅ {action} فلتر الرسائل المُعاد توجيهها")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -12032,11 +12032,11 @@ class SimpleTelegramBot:
                         raise e
                     logger.debug("المحتوى لم يتغير، فلتر التوجيه محدث بنجاح")
             else:
-                await event.answer("❌ فشل في تغيير الفلتر")
+                await self.safe_answer(event, "❌ فشل في تغيير الفلتر")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل فلتر الرسائل المُعاد توجيهها: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def toggle_transparent_button_filter(self, event, task_id):
         """Toggle transparent button filter"""
@@ -12044,7 +12044,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -12056,7 +12056,7 @@ class SimpleTelegramBot:
             
             if success:
                 action = "تم تفعيل" if new_setting else "تم تعطيل"
-                await event.answer(f"✅ {action} فلتر الأزرار الشفافة")
+                await self.safe_answer(event, f"✅ {action} فلتر الأزرار الشفافة")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -12069,11 +12069,11 @@ class SimpleTelegramBot:
                         raise e
                     logger.debug("المحتوى لم يتغير، فلتر الأزرار الشفافة محدث بنجاح")
             else:
-                await event.answer("❌ فشل في تغيير الفلتر")
+                await self.safe_answer(event, "❌ فشل في تغيير الفلتر")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل فلتر الأزرار الشفافة: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
     
     async def show_inline_button_filter(self, event, task_id):
         """Show inline button filter settings for specific callback"""
@@ -12081,7 +12081,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings
@@ -12122,7 +12122,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         # Get current settings
@@ -12163,7 +12163,7 @@ class SimpleTelegramBot:
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         try:
@@ -12175,7 +12175,7 @@ class SimpleTelegramBot:
             
             if success:
                 mode_text = "حظر الرسائل المُعاد توجيهها" if new_setting else "السماح بالرسائل المُعاد توجيهها"
-                await event.answer(f"✅ تم تغيير الوضع إلى: {mode_text}")
+                await self.safe_answer(event, f"✅ تم تغيير الوضع إلى: {mode_text}")
                 
                 # Force refresh UserBot tasks
                 await self._refresh_userbot_tasks(user_id)
@@ -12188,11 +12188,11 @@ class SimpleTelegramBot:
                         raise e
                     logger.debug("المحتوى لم يتغير، فلتر الرسائل المُعاد توجيهها محدث بنجاح")
             else:
-                await event.answer("❌ فشل في تغيير الوضع")
+                await self.safe_answer(event, "❌ فشل في تغيير الوضع")
                 
         except Exception as e:
             logger.error(f"خطأ في تبديل وضع فلتر الرسائل المُعاد توجيهها: {e}")
-            await event.answer("❌ حدث خطأ في التحديث")
+            await self.safe_answer(event, "❌ حدث خطأ في التحديث")
 
     async def _complete_login_process(self, event, temp_client, result, phone, user_id):
         """Complete the login process for accounts (with or without 2FA)"""
@@ -12408,7 +12408,7 @@ async def run_simple_bot():
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
             
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -12453,7 +12453,7 @@ async def run_simple_bot():
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Toggle and persist
@@ -12462,7 +12462,7 @@ async def run_simple_bot():
         self.db.update_audio_metadata_enabled(task_id, new_status)
         
         status_text = "🟢 مفعل" if new_status else "🔴 معطل"
-        await event.answer(f"✅ تم {'تفعيل' if new_status else 'تعطيل'} الوسوم الصوتية")
+        await self.safe_answer(event, f"✅ تم {'تفعيل' if new_status else 'تعطيل'} الوسوم الصوتية")
         
         # Refresh the settings menu
         await self.audio_metadata_settings(event, task_id)
@@ -12473,7 +12473,7 @@ async def run_simple_bot():
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -12511,7 +12511,7 @@ async def run_simple_bot():
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         # Persist template
@@ -12525,7 +12525,7 @@ async def run_simple_bot():
             'custom': 'مخصص'
         }.get(template_name, template_name)
         
-        await event.answer(f"✅ تم اختيار قالب '{template_display_name}'")
+        await self.safe_answer(event, f"✅ تم اختيار قالب '{template_display_name}'")
         
         # Return to audio metadata settings
         await self.audio_metadata_settings(event, task_id)
@@ -12536,7 +12536,7 @@ async def run_simple_bot():
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -12581,7 +12581,7 @@ async def run_simple_bot():
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         task_name = task.get('task_name', 'مهمة بدون اسم')
@@ -12630,7 +12630,7 @@ async def run_simple_bot():
         task = self.db.get_task(task_id, user_id)
         
         if not task:
-            await event.answer("❌ المهمة غير موجودة")
+            await self.safe_answer(event, "❌ المهمة غير موجودة")
             return
         
         task_name = task.get('task_name', 'مهمة بدون اسم')
