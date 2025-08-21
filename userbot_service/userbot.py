@@ -39,6 +39,15 @@ except ImportError:
     TRANSLATION_AVAILABLE = False
     Translator = None
 
+# استيراد معالج الوسائط في الخلفية
+try:
+    from background_media_processor import background_processor, process_media_in_background, get_processed_media, queue_batch_message
+    BACKGROUND_PROCESSING_AVAILABLE = True
+    
+except ImportError as e:
+    logger.warning(f"⚠️ لم يتم العثور على معالج الوسائط في الخلفية: {e}")
+    BACKGROUND_PROCESSING_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 class AlbumCollector:
@@ -104,6 +113,14 @@ class UserbotService:
         self.album_collectors: Dict[int, AlbumCollector] = {}  # user_id -> collector
         self.watermark_processor = WatermarkProcessor()  # معالج العلامة المائية
         self.audio_processor = AudioProcessor()  # معالج الوسوم الصوتية
+        
+        # بدء معالج الوسائط في الخلفية
+        if BACKGROUND_PROCESSING_AVAILABLE:
+            self.background_media_processing = True
+            logger.info("✅ سيتم استخدام معالجة الوسائط في الخلفية")
+        else:
+            self.background_media_processing = False
+            logger.info("⚠️ سيتم استخدام المعالجة المتزامنة للوسائط")
         
         # CRITICAL FIX: Initialize global cache systems for media processing optimization
         self.global_processed_media_cache = {}  # Cache for processed media to prevent re-upload
@@ -4060,3 +4077,190 @@ async def stop_userbot_service():
     logger.info("⏹️ إيقاف خدمة UserBot...")
     await userbot_instance.stop_all()
     logger.info("✅ تم إيقاف خدمة UserBot")
+
+# ===== معالجة الوسائط في الخلفية والإرسال المجمع =====
+
+async def _process_media_sync(self, event, task_id: int, watermark_enabled: bool, 
+                            audio_enabled: bool, is_audio_message: bool, cache_key: str):
+    """معالجة الوسائط بطريقة متزامنة مع التخزين المؤقت"""
+    try:
+        # فحص التخزين المؤقت أولاً
+        if hasattr(self, 'global_processed_media_cache') and cache_key in self.global_processed_media_cache:
+            processed_media, processed_filename = self.global_processed_media_cache[cache_key]
+            logger.info(f"🎯 استخدام الوسائط المعالجة من التخزين المؤقت: {processed_filename}")
+            return processed_media, processed_filename
+        
+        # بدء المعالجة الفعلية
+        processed_media = None
+        processed_filename = None
+        
+        if watermark_enabled:
+            logger.info("🏷️ تطبيق العلامة المائية مرة واحدة")
+            processed_media, processed_filename = await self.apply_watermark_to_media(event, task_id)
+            
+            if processed_media and processed_media != event.message.media:
+                # حفظ في التخزين المؤقت
+                if not hasattr(self, 'global_processed_media_cache'):
+                    self.global_processed_media_cache = {}
+                self.global_processed_media_cache[cache_key] = (processed_media, processed_filename)
+                logger.info(f"✅ تم تطبيق العلامة المائية وحفظها: {processed_filename}")
+            else:
+                logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
+        
+        elif audio_enabled and is_audio_message:
+            logger.info("🎵 تطبيق وسوم الصوت مرة واحدة")
+            
+            # تحميل الوسائط واستخراج اسم مناسب
+            if not hasattr(self, '_current_media_cache'):
+                self._current_media_cache = {}
+            
+            media_cache_key_download = f"{event.message.id}_{event.chat_id}_download"
+            
+            if media_cache_key_download in self._current_media_cache:
+                media_bytes, file_name, file_ext = self._current_media_cache[media_cache_key_download]
+                logger.info("🔄 استخدام الوسائط المحمّلة من التخزين المؤقت")
+            else:
+                # تحميل مرة واحدة فقط
+                media_bytes = await event.message.download_media(bytes)
+                if not media_bytes:
+                    return event.message.media, None
+                
+                # استخراج اسم الملف وامتداده
+                file_name = "audio"
+                file_ext = ".mp3"
+                
+                if hasattr(event.message.media, 'document') and event.message.media.document:
+                    doc = event.message.media.document
+                    if hasattr(doc, 'attributes'):
+                        for attr in doc.attributes:
+                            if hasattr(attr, 'file_name') and attr.file_name:
+                                if '.' in attr.file_name:
+                                    file_name = attr.file_name.rsplit('.', 1)[0]
+                                    file_ext = '.' + attr.file_name.split('.')[-1].lower()
+                                else:
+                                    file_name = attr.file_name
+                                break
+                
+                # حفظ في التخزين المؤقت للتحميل
+                self._current_media_cache[media_cache_key_download] = (media_bytes, file_name, file_ext)
+            
+            # تطبيق معالجة الصوت
+            processed_media, processed_filename = await self.apply_audio_metadata(
+                event, task_id, media_bytes, f"{file_name}{file_ext}"
+            )
+            
+            if processed_media and isinstance(processed_media, (bytes, bytearray)):
+                # حفظ في التخزين المؤقت
+                if not hasattr(self, 'global_processed_media_cache'):
+                    self.global_processed_media_cache = {}
+                self.global_processed_media_cache[cache_key] = (processed_media, processed_filename)
+                logger.info(f"✅ تم تطبيق وسوم الصوت وحفظها: {processed_filename}")
+            else:
+                logger.info("🔄 لم يتم تطبيق وسوم الصوت، استخدام الوسائط الأصلية")
+        
+        return processed_media, processed_filename
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في المعالجة المتزامنة: {e}")
+        return None, None
+
+async def _apply_batch_send_delay(self, batch_key: str, target_chat_id: str, 
+                                message_data: dict, delay: float = 2.0):
+    """تطبيق تأخير الإرسال المجمع"""
+    try:
+        if BACKGROUND_PROCESSING_AVAILABLE:
+            # استخدام نظام الإرسال المجمع المتقدم
+            await queue_batch_message(batch_key, {
+                'target_chat_id': target_chat_id,
+                'message_data': message_data,
+                'send_callback': self._send_batch_message
+            }, delay)
+            return True
+        else:
+            # تأخير بسيط
+            await asyncio.sleep(delay)
+            return False
+    except Exception as e:
+        logger.error(f"❌ خطأ في تطبيق تأخير الإرسال المجمع: {e}")
+        return False
+
+async def _send_batch_message(self, message_data: dict):
+    """إرسال رسالة مجمعة"""
+    try:
+        # تنفيذ منطق الإرسال الفعلي هنا
+        target_chat_id = message_data.get('target_chat_id')
+        data = message_data.get('message_data', {})
+        
+        logger.info(f"📤 إرسال رسالة مجمعة إلى: {target_chat_id}")
+        # يمكن توسيع هذا لتنفيذ الإرسال الفعلي
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في إرسال رسالة مجمعة: {e}")
+
+async def _apply_enhanced_batch_delay(self, task: dict, media=None, filename=None):
+    """تطبيق تأخير محسن للإرسال المجمع بناءً على نوع الوسائط"""
+    try:
+        base_delay = 1.0  # تأخير أساسي بثانية واحدة
+        
+        # تحديد التأخير بناءً على نوع الوسائط
+        if media and filename:
+            if filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                # فيديو - تأخير أطول
+                delay = base_delay * 2.5
+                logger.info(f"🎬 تأخير إرسال فيديو: {delay}s")
+            elif filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                # صورة - تأخير متوسط
+                delay = base_delay * 1.5
+                logger.info(f"🖼️ تأخير إرسال صورة: {delay}s")
+            elif filename.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav')):
+                # صوت - تأخير قصير
+                delay = base_delay * 1.2
+                logger.info(f"🎵 تأخير إرسال صوت: {delay}s")
+            else:
+                # ملف عادي
+                delay = base_delay
+                logger.info(f"📄 تأخير إرسال ملف: {delay}s")
+        else:
+            # رسالة نصية
+            delay = base_delay * 0.5
+            logger.info(f"📝 تأخير إرسال نص: {delay}s")
+        
+        # تطبيق التأخير
+        await asyncio.sleep(delay)
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في تطبيق التأخير المحسن: {e}")
+        # تأخير بسيط كبديل
+        await asyncio.sleep(1.0)
+        return False
+
+async def _should_use_background_processing(self, event, processing_needed: bool) -> bool:
+    """تحديد ما إذا كان يجب استخدام المعالجة في الخلفية"""
+    try:
+        if not processing_needed or not self.background_media_processing:
+            return False
+        
+        # فحص حجم الملف
+        if hasattr(event.message, 'media') and hasattr(event.message.media, 'document'):
+            doc = event.message.media.document
+            if doc and hasattr(doc, 'size') and doc.size:
+                file_size = doc.size
+                # استخدام المعالجة في الخلفية للملفات أكبر من 3 ميجابايت
+                if file_size > 3 * 1024 * 1024:
+                    logger.info(f"📊 ملف كبير ({file_size / 1024 / 1024:.1f}MB) - يُفضل المعالجة في الخلفية")
+                    return True
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في تحديد نوع المعالجة: {e}")
+        return False
+
+# إضافة الوظائف للصف UserbotService
+UserbotService._process_media_sync = _process_media_sync
+UserbotService._apply_batch_send_delay = _apply_batch_send_delay
+UserbotService._send_batch_message = _send_batch_message
+UserbotService._apply_enhanced_batch_delay = _apply_enhanced_batch_delay
+UserbotService._should_use_background_processing = _should_use_background_processing
