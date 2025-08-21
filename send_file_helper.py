@@ -28,8 +28,8 @@ def _extract_audio_tags_from_bytes(audio_bytes: bytes, filename: str) -> Tuple[O
         temp_file.write(audio_bytes)
         temp_file.close()
         try:
-            import mutagen
-            audio = mutagen.File(temp_file.name)
+            from mutagen import File
+            audio = File(temp_file.name)
             if audio is not None:
                 try:
                     if hasattr(audio, 'info') and hasattr(audio.info, 'length'):
@@ -193,9 +193,13 @@ def _extract_audio_cover_thumbnail(audio_bytes: bytes) -> Optional[bytes]:
         temp_file.close()
         cover_data = None
         try:
-            import mutagen
-            from mutagen.id3 import ID3, APIC
-            audio = mutagen.File(temp_file.name)
+            try:
+                from mutagen import File
+                from mutagen.id3 import ID3
+                from mutagen.id3._frames import APIC
+                audio = File(temp_file.name)
+            except ImportError:
+                return None
             if isinstance(audio, ID3) or hasattr(audio, 'tags'):
                 tags = audio if isinstance(audio, ID3) else getattr(audio, 'tags', None)
                 if tags:
@@ -289,7 +293,11 @@ class TelethonFileSender:
                         attributes = list(kwargs.pop("attributes", []) or [])
                         
                         # Try to get actual video info
-                        duration, width, height = _extract_video_info_from_bytes(file_data, filename)
+                        video_info = _extract_video_info_from_bytes(file_data, filename)
+                        if isinstance(video_info, tuple) and len(video_info) >= 3:
+                            duration, width, height = video_info[:3]
+                        else:
+                            duration, width, height = None, None, None
                         
                         attributes.append(DocumentAttributeVideo(
                             duration=duration or 1,  # Use actual duration or at least 1 second to avoid 00:00
