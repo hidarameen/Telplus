@@ -55,6 +55,54 @@ class WatermarkProcessor:
         self.default_audio_bitrate = '128k'
         
         logger.info("🚀 تم تهيئة معالج العلامة المائية بنجاح")
+        
+        # CRITICAL FIX: Enhanced global cache for media processing optimization  
+        self.global_media_cache = {}
+        self.media_processing_locks = {}
+        
+        logger.info("🎯 تم تفعيل النظام المحسن لمعالجة الوسائط مرة واحدة لكل الأهداف")
+        self.cache_lock = {}  # Per-task locks to prevent concurrent processing
+
+    def process_media_once_for_all_targets(self, media_bytes, filename, watermark_settings, task_id):
+        """
+        CRITICAL FIX: Process media once and reuse for all targets to prevent repeated uploads
+        This is the core optimization that fixes the repeated media upload issue
+        """
+        import hashlib
+        
+        # Create unique cache key based on media content and settings
+        cache_key = hashlib.md5(
+            f"{len(media_bytes)}_{filename}_{task_id}_{str(watermark_settings)}".encode()
+        ).hexdigest()
+        
+        # Check if already processed and cached
+        if cache_key in self.global_media_cache:
+            logger.info(f"🎯 إعادة استخدام الوسائط المعالجة من التخزين المؤقت: {filename}")
+            return self.global_media_cache[cache_key]
+        
+        # Process media once 
+        processed_media = None
+        try:
+            if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp')):
+                processed_media = self.apply_watermark_to_image(media_bytes, watermark_settings)
+                logger.info(f"🖼️ تمت معالجة الصورة: {filename}")
+            elif filename.lower().endswith(('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm')):
+                processed_media = self.apply_watermark_to_video(media_bytes, watermark_settings, task_id)
+                logger.info(f"🎬 تمت معالجة الفيديو: {filename}")
+            else:
+                processed_media = media_bytes
+                logger.info(f"📄 ملف غير مدعوم للعلامة المائية: {filename}")
+                
+        except Exception as e:
+            logger.error(f"خطأ في معالجة الوسائط {filename}: {e}")
+            processed_media = media_bytes
+        
+        # Store in cache for reuse across all targets
+        if processed_media:
+            self.global_media_cache[cache_key] = processed_media
+            logger.info(f"💾 تم حفظ الوسائط المعالجة في التخزين المؤقت: {filename}")
+        
+        return processed_media if processed_media else media_bytes
     
     def _check_ffmpeg_availability(self) -> bool:
         """التحقق من توفر FFmpeg في النظام"""

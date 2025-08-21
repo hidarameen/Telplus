@@ -1889,6 +1889,7 @@ class UserbotService:
             watermarked_media = None
             if apply_wm:
                 logger.info(f"🏷️ تطبيق العلامة المائية على {full_file_name} للمهمة {task_id}")
+                # CRITICAL FIX: Process media ONCE for all targets to prevent multiple uploads
                 watermarked_media = self.watermark_processor.process_media_once_for_all_targets(
                     media_bytes,
                     full_file_name,
@@ -2030,6 +2031,7 @@ class UserbotService:
                     cleaned_lines = [self.apply_text_cleaning(line, task_id) for line in lines]
                     effective_template['lyrics'] = '\n'.join(cleaned_lines)
 
+            # CRITICAL FIX: Process audio ONCE for all targets to prevent multiple uploads
             processed_audio = self.audio_processor.process_audio_once_for_all_targets(
                 media_bytes,
                 file_name,
