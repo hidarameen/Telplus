@@ -8,6 +8,7 @@ import threading
 import time
 import signal
 import sys
+import re
 import os
 import asyncio
 import logging
@@ -50,10 +51,14 @@ class TelegramBotSystem:
                     logger.info(f"🔄 إعادة تشغيل بوت التحكم (المحاولة {retry_count})")
                 
                 bot_instance = await run_simple_bot()
-                logger.info("✅ بوت التحكم جاهز ومعزول عن UserBot")
-                
-                # Keep the bot running
-                await bot_instance.bot.run_until_disconnected()
+                if bot_instance and hasattr(bot_instance, 'bot'):
+                    logger.info("✅ بوت التحكم جاهز ومعزول عن UserBot")
+                    
+                    # Keep the bot running
+                    await bot_instance.bot.run_until_disconnected()
+                else:
+                    logger.error("❌ فشل في إنشاء instance البوت")
+                    raise Exception("Bot instance creation failed")
                 
                 # If we reach here, bot disconnected normally
                 if self.running:
@@ -64,8 +69,22 @@ class TelegramBotSystem:
                 logger.error(f"❌ خطأ في بوت التحكم: {e}")
                 logger.info("🔄 بوت التحكم سيعيد المحاولة - معزول عن مشاكل UserBot")
                 
-                # Progressive delay but max 30 seconds
-                delay = min(5 + (retry_count * 2), 30)
+                # Progressive delay with longer waits to avoid rate limiting
+                # Handle ImportBotAuthorizationRequest specifically
+                error_str = str(e)
+                if "ImportBotAuthorizationRequest" in error_str or "wait" in error_str.lower():
+                    # Extract wait time if mentioned
+                    wait_match = re.search(r'wait of (\d+) seconds', error_str)
+                    if wait_match:
+                        required_wait = int(wait_match.group(1))
+                        # Add 10% buffer to the required wait time
+                        delay = min(required_wait + int(required_wait * 0.1), 900)  # Max 15 minutes
+                        logger.info(f"⏱️ Telegram requires wait: {required_wait}s, using {delay}s with buffer")
+                    else:
+                        delay = min(60 + (retry_count * 30), 900)  # Start with 1 minute, max 15 minutes
+                else:
+                    delay = min(30 + (retry_count * 10), 300)  # Other errors: 30s to 5 minutes
+                
                 logger.info(f"⏱️ انتظار {delay} ثانية قبل إعادة تشغيل بوت التحكم...")
                 await asyncio.sleep(delay)
                 
@@ -167,8 +186,19 @@ class TelegramBotSystem:
                         logger.info("💡 بوت التحكم يعمل بشكل طبيعي")
                         userbot_failures += 1
                         
-                        # Progressive delay with max limit
-                        wait_time = min(60 + (userbot_failures * 15), 300)  # Max 5 minutes
+                        # Progressive delay with better rate limiting handling
+                        if "ImportBotAuthorizationRequest" in str(e) or "wait" in str(e).lower():
+                            # Extract wait time if mentioned
+                            wait_match = re.search(r'wait of (\d+) seconds', str(e))
+                            if wait_match:
+                                required_wait = int(wait_match.group(1))
+                                wait_time = min(required_wait + 60, 1200)  # Add 1 minute buffer, max 20 minutes
+                                logger.info(f"⏱️ Telegram requires wait: {required_wait}s, using {wait_time}s with buffer")
+                            else:
+                                wait_time = min(120 + (userbot_failures * 60), 1200)  # 2 minutes to 20 minutes
+                        else:
+                            wait_time = min(60 + (userbot_failures * 30), 600)  # 1 minute to 10 minutes
+                        
                         logger.info(f"⏱️ انتظار {wait_time} ثانية قبل إعادة المحاولة...")
                         await asyncio.sleep(wait_time)
                         
@@ -180,7 +210,10 @@ class TelegramBotSystem:
                 logger.info("📴 تم إيقاف UserBot بشكل طبيعي")
             
             # Run the userbot service
-            loop.run_until_complete(userbot_main())
+            if 'loop' in locals() and loop:
+                loop.run_until_complete(userbot_main())
+            else:
+                logger.error("❌ Loop not initialized properly")
             
         except KeyboardInterrupt:
             logger.info("🛑 تم إيقاف UserBot بواسطة المستخدم")
@@ -191,7 +224,7 @@ class TelegramBotSystem:
             # Clean shutdown
             try:
                 logger.info("📴 إغلاق خدمة UserBot...")
-                if 'loop' in locals():
+                if 'loop' in locals() and loop:
                     try:
                         loop.run_until_complete(stop_userbot_service())
                     except:
