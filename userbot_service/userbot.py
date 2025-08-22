@@ -1400,11 +1400,12 @@ class UserbotService:
                                             client, target_entity, msg_id, forwarding_settings, task['id']
                                         )
                                 else:
-                                    # Send normally with buttons
+                                    # Send normally with buttons using spoiler support
                                     # Combine original and custom buttons for Telethon
                                     combined_buttons = original_reply_markup or inline_buttons
                                     
-                                    forwarded_msg = await client.send_message(
+                                    forwarded_msg = await self._send_message_with_spoiler_support(
+                                        client,
                                         target_entity,
                                         processed_text,
                                         link_preview=forwarding_settings['link_preview_enabled'],
@@ -3981,6 +3982,23 @@ class UserbotService:
             logger.error(f"خطأ في اختبار تنسيق النص: {e}")
             return message_text
     
+    async def _send_message_with_spoiler_support(self, client, target_entity, text: str, **kwargs) -> any:
+        """
+        إرسال رسالة مع دعم spoiler entities
+        Send message with spoiler entities support
+        """
+        if not text:
+            text = "رسالة"
+            
+        processed_text, spoiler_entities = self._process_spoiler_entities(text)
+        
+        if spoiler_entities:
+            # Remove parse_mode if spoiler entities are present
+            kwargs.pop('parse_mode', None)
+            kwargs['formatting_entities'] = spoiler_entities
+        
+        return await client.send_message(target_entity, processed_text, **kwargs)
+
     def _process_spoiler_entities(self, text: str) -> Tuple[str, List]:
         """
         معالجة علامات spoiler وتحويلها إلى MessageEntitySpoiler
