@@ -6437,3 +6437,199 @@ class Database:
             ''', (value, task_id))
             conn.commit()
         return cursor.rowcount > 0
+
+    # ===== Enhanced Audio Text Processing Methods =====
+    
+    def get_audio_text_processing_settings(self, task_id: int) -> Dict:
+        """Get all audio text processing settings for a task"""
+        try:
+            cleaning_settings = self.get_audio_tag_text_cleaning_settings(task_id)
+            replacements_settings = self.get_audio_text_replacements_settings(task_id)
+            word_filters_settings = self.get_audio_word_filters_settings(task_id)
+            header_footer_settings = self.get_audio_tag_header_footer_settings(task_id)
+            
+            return {
+                'text_cleaning_enabled': cleaning_settings.get('enabled', False),
+                'text_replacements_enabled': replacements_settings.get('enabled', False),
+                'word_filters_enabled': word_filters_settings.get('enabled', False),
+                'header_footer_enabled': header_footer_settings.get('header_enabled', False) or header_footer_settings.get('footer_enabled', False)
+            }
+        except Exception as e:
+            logger.error(f"خطأ في جلب إعدادات معالجة النصوص للوسوم الصوتية: {e}")
+            return {
+                'text_cleaning_enabled': False,
+                'text_replacements_enabled': False,
+                'word_filters_enabled': False,
+                'header_footer_enabled': False
+            }
+    
+    def get_audio_text_replacements_settings(self, task_id: int) -> Dict:
+        """Get audio text replacements settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT is_enabled
+                FROM task_audio_tag_text_replacements
+                WHERE task_id = ?
+            ''', (task_id,))
+            
+            row = cursor.fetchone()
+            return {
+                'enabled': bool(row['is_enabled']) if row else False
+            }
+    
+    def get_audio_word_filters_settings(self, task_id: int) -> Dict:
+        """Get audio word filters settings for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT enabled
+                FROM task_audio_tag_word_filters
+                WHERE task_id = ? 
+                LIMIT 1
+            ''', (task_id,))
+            
+            row = cursor.fetchone()
+            return {
+                'enabled': bool(row['enabled']) if row else False
+            }
+    
+    def get_audio_selected_tags(self, task_id: int) -> List[str]:
+        """Get selected tags for audio text processing"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT selected_tags
+                FROM task_audio_tag_selection_settings
+                WHERE task_id = ?
+            ''', (task_id,))
+            
+            row = cursor.fetchone()
+            if row and row['selected_tags']:
+                try:
+                    import json
+                    return json.loads(row['selected_tags'])
+                except:
+                    return []
+            return []
+    
+    def update_audio_text_cleaning_enabled(self, task_id: int, enabled: bool) -> bool:
+        """Toggle audio text cleaning enabled status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current settings
+                current = self.get_audio_tag_text_cleaning_settings(task_id)
+                
+                # Update enabled status
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_audio_tag_text_cleaning_settings 
+                    (task_id, enabled, remove_links, remove_emojis, remove_hashtags, 
+                     remove_phone_numbers, remove_empty_lines, remove_keywords, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled, 
+                      current.get('remove_links', False),
+                      current.get('remove_emojis', False),
+                      current.get('remove_hashtags', False),
+                      current.get('remove_phone_numbers', False),
+                      current.get('remove_empty_lines', False),
+                      current.get('remove_keywords', False)))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث حالة تنظيف الوسوم الصوتية: {e}")
+            return False
+    
+    def update_audio_text_replacements_enabled(self, task_id: int, enabled: bool) -> bool:
+        """Toggle audio text replacements enabled status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_audio_tag_text_replacements 
+                    (task_id, is_enabled, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث حالة استبدالات الوسوم الصوتية: {e}")
+            return False
+    
+    def update_audio_word_filters_enabled(self, task_id: int, enabled: bool) -> bool:
+        """Toggle audio word filters enabled status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_audio_tag_word_filters 
+                    (task_id, filter_type, enabled, updated_at)
+                    VALUES (?, 'whitelist', ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث حالة فلاتر الوسوم الصوتية: {e}")
+            return False
+    
+    def update_audio_header_footer_enabled(self, task_id: int, enabled: bool) -> bool:
+        """Toggle audio header/footer enabled status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_audio_tag_header_footer_settings 
+                    (task_id, header_enabled, footer_enabled, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث حالة هيدر/فوتر الوسوم الصوتية: {e}")
+            return False
+    
+    def update_audio_selected_tags(self, task_id: int, selected_tags: List[str]) -> bool:
+        """Update selected tags for audio text processing"""
+        try:
+            import json
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if table exists, if not create it
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS task_audio_tag_selection_settings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id INTEGER NOT NULL UNIQUE,
+                        selected_tags TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                    )
+                ''')
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO task_audio_tag_selection_settings 
+                    (task_id, selected_tags, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, json.dumps(selected_tags)))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث الوسوم المحددة للمعالجة: {e}")
+            return False
+    
+    def toggle_audio_tag_selection(self, task_id: int, tag_name: str) -> bool:
+        """Toggle a specific tag in the selection"""
+        try:
+            current_tags = self.get_audio_selected_tags(task_id)
+            if tag_name in current_tags:
+                current_tags.remove(tag_name)
+            else:
+                current_tags.append(tag_name)
+            
+            return self.update_audio_selected_tags(task_id, current_tags)
+        except Exception as e:
+            logger.error(f"خطأ في تبديل اختيار الوسم {tag_name}: {e}")
+            return False
