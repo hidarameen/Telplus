@@ -2779,19 +2779,17 @@ class UserbotService:
 
     async def _edit_message_with_text_and_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
         """Edit message text and add buttons via Bot API"""
+        try:
             # Get original message text first
             message_text = await self._get_message_text_via_api(target_chat_id, message_id)
-            
             # Try method 1: Edit existing message
             if await self._edit_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
                 return True
-            
             # Try method 2: Send new message with buttons and delete old one
             if await self._replace_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
                 return True
             
             return False
-                        
         except Exception as e:
             logger.error(f"❌ خطأ في إضافة الأزرار عبر API: {e}")
             return False
@@ -3151,10 +3149,6 @@ class UserbotService:
                     else:
                         # Username or other format
                         target_entity = normalized_chat_id
-                            target_entity = target_chat_id
-                    else:
-                        # Username or other format
-                        target_entity = target_chat_id
                     
                     # Get target entity
                     target_entity = await bot_client.get_entity(target_entity)

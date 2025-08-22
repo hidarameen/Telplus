@@ -623,7 +623,6 @@ class UserbotService:
                         # Silent processing for non-monitored chats - no logging
                         pass
 
-
                 # Get source chat ID and username first
                 source_username = getattr(event.chat, 'username', None)
 
@@ -2653,6 +2652,15 @@ class UserbotService:
             # Validate chat_id format first
             if not self._validate_chat_id(normalized_chat_id):
                 logger.error(f"❌ معرف القناة غير صحيح: {normalized_chat_id}")
+            logger.info(f"🔧 محاولة إضافة الأزرار عبر API مباشر للرسالة {message_id}")
+            
+            # Validate chat_id format first
+            if not self._validate_chat_id(target_chat_id):
+                return False
+            
+            # Check bot permissions
+            if not await self._check_bot_permissions(target_chat_id):
+                logger.error(f"❌ البوت ليس لديه صلاحيات كافية في القناة {target_chat_id}")
                 return False
             
             # Convert inline_buttons to API format
@@ -2771,6 +2779,23 @@ class UserbotService:
 
     async def _edit_message_with_text_and_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
         """Edit message text and add buttons via Bot API"""
+        try:
+            # Get original message text first
+            message_text = await self._get_message_text_via_api(target_chat_id, message_id)
+            # Try method 1: Edit existing message
+            if await self._edit_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
+                return True
+            # Try method 2: Send new message with buttons and delete old one
+            if await self._replace_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
+                return True
+            
+            return False
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار عبر API: {e}")
+            return False
+
+    async def _edit_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
+        """Try to edit existing message with buttons"""
         try:
             from bot_package.config import BOT_TOKEN
             import aiohttp
@@ -2982,6 +3007,7 @@ class UserbotService:
             elif target_chat_id.isdigit() and int(target_chat_id) > 1000000000:
                 # Large numeric ID (likely a chat ID) - this might be a channel ID without -100 prefix
                 logger.info(f"ℹ️ معرف القناة {target_chat_id} قد يحتاج إلى إضافة -100 في البداية")
+                # Large numeric ID (likely a chat ID)
                 return True
             else:
                 logger.warning(f"⚠️ معرف القناة {target_chat_id} قد لا يكون صحيحاً")
@@ -3106,6 +3132,15 @@ class UserbotService:
                     elif normalized_chat_id.isdigit():
                         # Check if it's a valid chat ID (not a phone number)
                         chat_id_int = int(normalized_chat_id)
+                    if target_chat_id.startswith('-100'):
+                        # Channel ID format
+                        target_entity = int(target_chat_id)
+                    elif target_chat_id.startswith('-'):
+                        # Group ID format
+                        target_entity = int(target_chat_id)
+                    elif target_chat_id.isdigit():
+                        # Check if it's a valid chat ID (not a phone number)
+                        chat_id_int = int(target_chat_id)
                         if chat_id_int > 1000000000:  # Likely a chat ID
                             target_entity = chat_id_int
                         else:
@@ -3114,6 +3149,10 @@ class UserbotService:
                     else:
                         # Username or other format
                         target_entity = normalized_chat_id
+                            target_entity = target_chat_id
+                    else:
+                        # Username or other format
+                        target_entity = target_chat_id
                     
                     # Get target entity
                     target_entity = await bot_client.get_entity(target_entity)
@@ -3133,6 +3172,19 @@ class UserbotService:
                         return False
                     elif "BOT_WAS_BLOCKED" in error_str:
                         logger.error(f"❌ تم حظر البوت من القناة {normalized_chat_id}")
+                    logger.error(f"❌ فشل في الوصول للقناة {target_chat_id}: {entity_err}")
+                    
+                    # Handle specific error for phone numbers
+                    if "Cannot get entity by phone number as a bot" in error_str:
+                        logger.error(f"❌ لا يمكن استخدام رقم الهاتف {target_chat_id} كمعرف قناة للبوت")
+                        logger.error(f"💡 تأكد من استخدام معرف القناة الصحيح (مثال: -1001234567890)")
+                        return False
+                    elif "CHAT_NOT_FOUND" in error_str:
+                        logger.error(f"❌ لم يتم العثور على القناة {target_chat_id}")
+                        logger.error(f"💡 تأكد من أن البوت عضو في القناة")
+                        return False
+                    elif "BOT_WAS_BLOCKED" in error_str:
+                        logger.error(f"❌ تم حظر البوت من القناة {target_chat_id}") 
                         return False
                     else:
                         logger.error(f"❌ خطأ غير معروف في الوصول للقناة: {error_str}")
@@ -3574,13 +3626,10 @@ class UserbotService:
             else:
                 logger.debug(f"👮‍♂️ لا يمكن تحديد هوية المرسل - سيتم السماح")
                 return False
-            
                 
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
             return False
-
-
 
     async def _check_admin_by_signature(self, task_id: int, author_signature: str) -> bool:
         """Check admin filter by Telegram Author Signature"""
@@ -4950,9 +4999,6 @@ class UserbotService:
         else:
             # افتراضي - توجيه
             return 'forward'
-
-
-
 
 # Global userbot instance
 userbot_instance = UserbotService()
