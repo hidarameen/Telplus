@@ -667,6 +667,26 @@ class PostgreSQLDatabase:
                 cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             except Exception:
                 pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ALTER COLUMN created_at TYPE TIMESTAMP USING created_at::timestamp")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ALTER COLUMN updated_at TYPE TIMESTAMP USING updated_at::timestamp")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP")
+            except Exception:
+                pass
+            try:
+                cursor.execute("UPDATE user_sessions SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP")
+            except Exception:
+                pass
 
             try:
                 cursor.execute("ALTER TABLE user_sessions ALTER COLUMN user_id TYPE BIGINT USING user_id::bigint")
@@ -768,8 +788,8 @@ class PostgreSQLDatabase:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT INTO user_sessions (user_id, phone_number, session_string, is_authenticated)
-                    VALUES (%s, %s, %s, TRUE)
+                    INSERT INTO user_sessions (user_id, phone_number, session_string, is_authenticated, created_at, updated_at)
+                    VALUES (%s, %s, %s, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT (user_id) 
                     DO UPDATE SET 
                         phone_number = EXCLUDED.phone_number,
