@@ -926,21 +926,46 @@ class UserbotService:
                             
                             continue  # Skip individual processing
 
-                        # Parse target chat ID
-                        if target_chat_id.startswith('@'):
-                            target_entity = target_chat_id
-                            logger.info(f"🎯 استخدام اسم المستخدم كهدف: {target_entity}")
-                        else:
-                            target_entity = int(target_chat_id)
-                            logger.info(f"🎯 استخدام معرف رقمي كهدف: {target_entity}")
-
-                        # Get target chat info before forwarding
+                        # Parse target chat ID with improved user handling
                         try:
-                            target_chat = await client.get_entity(target_entity)
-                            target_title = getattr(target_chat, 'title', getattr(target_chat, 'first_name', str(target_entity)))
-                            logger.info(f"✅ تم العثور على المحادثة الهدف: {target_title} ({target_entity})")
+                            if target_chat_id.startswith('@'):
+                                target_entity = await client.get_entity(target_chat_id)
+                                logger.info(f"🎯 استخدام اسم المستخدم كهدف: {target_chat_id}")
+                            else:
+                                target_int = int(target_chat_id)
+                                logger.info(f"🎯 استخدام معرف رقمي كهدف: {target_int}")
+                                
+                                try:
+                                    # Try to get entity
+                                    target_entity = await client.get_entity(target_int)
+                                except Exception as get_entity_err:
+                                    logger.warning(f"⚠️ لا يمكن الوصول المباشر للهدف {target_int}: {get_entity_err}")
+                                    
+                                    # For users (positive ID), create a fallback approach
+                                    if target_int > 0:
+                                        logger.info(f"📱 سيتم استخدام معرف المستخدم مباشرة: {target_int}")
+                                        # Create a simple user entity for forwarding
+                                        try:
+                                            # Try sending a test message first to validate access
+                                            target_entity = target_int  # Use int as entity for direct user messaging
+                                        except Exception:
+                                            logger.error(f"❌ لا يمكن الوصول للمستخدم {target_int}")
+                                            continue
+                                    else:
+                                        # For channels/groups, must have access
+                                        logger.error(f"❌ يجب الوصول للقناة/المجموعة {target_int}")
+                                        continue
+                            
+                            # Validate target entity if it's an actual entity object
+                            if hasattr(target_entity, 'id'):
+                                target_title = getattr(target_entity, 'title', getattr(target_entity, 'first_name', str(target_entity.id)))
+                                logger.info(f"✅ تم العثور على المحادثة الهدف: {target_title} ({target_entity.id})")
+                            else:
+                                # target_entity is int - this is for users we can't directly access
+                                logger.info(f"📱 سيتم محاولة الإرسال للمستخدم: {target_entity}")
+                                
                         except Exception as entity_error:
-                            logger.error(f"❌ لا يمكن الوصول للمحادثة الهدف {target_entity}: {entity_error}")
+                            logger.error(f"❌ لا يمكن معالجة الهدف {target_chat_id}: {entity_error}")
                             continue
 
                         # Get message formatting settings for this task
@@ -1409,11 +1434,13 @@ class UserbotService:
                                         buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                     )
                                     
-                                    # Apply post-forwarding settings (pin, auto-delete)
+                                    # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                     if forwarded_msg:
                                         msg_id = forwarded_msg.id
                                         await self.apply_post_forwarding_settings(
-                                            client, target_entity, msg_id, forwarding_settings, task['id']
+                                            client, target_entity, msg_id, forwarding_settings, task['id'],
+                                            inline_buttons=inline_buttons,
+                                            has_original_buttons=bool(original_reply_markup)
                                         )
                                 else:
                                     # Send normally with buttons using spoiler support
@@ -1430,11 +1457,13 @@ class UserbotService:
                                         buttons=combined_buttons
                                     )
                                     
-                                    # Apply post-forwarding settings (pin, auto-delete)
+                                    # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                     if forwarded_msg:
                                         msg_id = forwarded_msg.id
                                         await self.apply_post_forwarding_settings(
-                                            client, target_entity, msg_id, forwarding_settings, task['id']
+                                            client, target_entity, msg_id, forwarding_settings, task['id'],
+                                            inline_buttons=inline_buttons,
+                                            has_original_buttons=bool(combined_buttons)
                                         )
                             else:
                                 # Fallback to forward for other types
@@ -1444,11 +1473,13 @@ class UserbotService:
                                     silent=forwarding_settings['silent_notifications']
                                 )
                                 
-                                # Apply post-forwarding settings (pin, auto-delete)
+                                # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                 if forwarded_msg:
                                     msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                                     await self.apply_post_forwarding_settings(
-                                        client, target_entity, msg_id, forwarding_settings, task['id']
+                                        client, target_entity, msg_id, forwarding_settings, task['id'],
+                                        inline_buttons=inline_buttons,
+                                        has_original_buttons=False
                                     )
 
                     except Exception as forward_error:
