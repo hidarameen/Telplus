@@ -2644,18 +2644,15 @@ class UserbotService:
             import aiohttp
             import json
             
-            logger.info(f"🔧 محاولة إضافة الأزرار عبر API مباشر للرسالة {message_id}")
+            logger.info(f"🔧 محاولة إضافة الأزرار عبر Bot API للرسالة {message_id}")
             
             # Normalize chat ID (add -100 prefix if needed)
             normalized_chat_id = self._normalize_chat_id(target_chat_id)
+            logger.info(f"🔄 معرف القناة المطبيع: {target_chat_id} -> {normalized_chat_id}")
             
             # Validate chat_id format first
             if not self._validate_chat_id(normalized_chat_id):
-                return False
-            
-            # Check bot permissions
-            if not await self._check_bot_permissions(normalized_chat_id):
-                logger.error(f"❌ البوت ليس لديه صلاحيات كافية في القناة {normalized_chat_id}")
+                logger.error(f"❌ معرف القناة غير صحيح: {normalized_chat_id}")
                 return False
             
             # Convert inline_buttons to API format
@@ -2670,25 +2667,112 @@ class UserbotService:
                         })
                 keyboard.append(keyboard_row)
             
-            # Get original message text first
-            message_text = await self._get_message_text_via_api(normalized_chat_id, message_id)
+            logger.info(f"🔘 تم تحويل {len(keyboard)} صف من الأزرار إلى تنسيق API")
             
-            # Try method 1: Edit existing message
-            if await self._edit_message_with_buttons(normalized_chat_id, message_id, message_text, keyboard):
+            # Try to add buttons directly using editMessageText
+            success = await self._edit_message_with_buttons_via_bot(normalized_chat_id, message_id, keyboard)
+            
+            if success:
+                logger.info(f"✅ تم إضافة الأزرار بنجاح عبر Bot API للرسالة {message_id}")
                 return True
             
-            # Try method 2: Send new message with buttons and delete old one
-            if await self._replace_message_with_buttons(normalized_chat_id, message_id, message_text, keyboard):
-                return True
+            # If direct edit fails, try to get message text and edit
+            logger.info(f"⚠️ فشل في التعديل المباشر، محاولة الحصول على نص الرسالة...")
             
-            return False
+            # Get original message text
+            message_text = await self._get_message_text_via_bot(normalized_chat_id, message_id)
+            
+            if message_text:
+                # Try to edit with text and buttons
+                success = await self._edit_message_with_text_and_buttons(normalized_chat_id, message_id, message_text, keyboard)
+                if success:
+                    return True
+            
+            # If all else fails, try send new message and delete old
+            logger.info(f"⚠️ محاولة إرسال رسالة جديدة مع الأزرار...")
+            success = await self._send_new_message_with_buttons(normalized_chat_id, message_id, message_text or "تم إضافة الأزرار", keyboard)
+            
+            return success
                         
         except Exception as e:
-            logger.error(f"❌ خطأ في إضافة الأزرار عبر API: {e}")
+            logger.error(f"❌ خطأ في إضافة الأزرار عبر Bot API: {e}")
             return False
 
-    async def _edit_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
-        """Try to edit existing message with buttons"""
+    async def _edit_message_with_buttons_via_bot(self, target_chat_id: str, message_id: int, keyboard: list):
+        """Edit message to add buttons via Bot API (without changing text)"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageReplyMarkup"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "message_id": message_id,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        logger.info(f"✅ تم إضافة الأزرار للرسالة {message_id} بنجاح")
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.warning(f"⚠️ فشل في إضافة الأزرار: {error_code} - {error_desc}")
+                        
+                        # Handle specific errors
+                        if "MESSAGE_NOT_MODIFIED" in error_desc:
+                            logger.info(f"ℹ️ الرسالة {message_id} تحتوي على أزرار بالفعل")
+                            return True
+                        elif "MESSAGE_EDIT_TIME_EXPIRED" in error_desc:
+                            logger.error(f"❌ انتهت صلاحية تعديل الرسالة {message_id}")
+                        elif "CHAT_NOT_FOUND" in error_desc:
+                            logger.error(f"❌ لم يتم العثور على القناة {target_chat_id}")
+                        elif "BOT_WAS_BLOCKED" in error_desc:
+                            logger.error(f"❌ تم حظر البوت من القناة {target_chat_id}")
+                        
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار: {e}")
+            return False
+
+    async def _get_message_text_via_bot(self, target_chat_id: str, message_id: int):
+        """Get message text via Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok') and result.get('result'):
+                        updates = result['result']
+                        for update in updates:
+                            if 'message' in update:
+                                msg = update['message']
+                                if (str(msg.get('chat', {}).get('id')) == str(target_chat_id) and 
+                                    msg.get('message_id') == message_id):
+                                    return msg.get('text', 'تم إضافة الأزرار')
+            
+            # If not found in updates, return default text
+            return "تم إضافة الأزرار"
+            
+        except Exception as e:
+            logger.warning(f"⚠️ لا يمكن الحصول على نص الرسالة: {e}")
+            return "تم إضافة الأزرار"
+
+    async def _edit_message_with_text_and_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
+        """Edit message text and add buttons via Bot API"""
         try:
             from bot_package.config import BOT_TOKEN
             import aiohttp
@@ -2723,6 +2807,65 @@ class UserbotService:
                         
         except Exception as e:
             logger.error(f"❌ خطأ في تعديل الرسالة: {e}")
+            return False
+
+    async def _send_new_message_with_buttons(self, target_chat_id: str, old_message_id: int, message_text: str, keyboard: list):
+        """Send new message with buttons and delete old message"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Send new message with buttons
+            send_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "text": message_text,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            # Check if text contains HTML formatting
+            if '<' in message_text and '>' in message_text:
+                payload["parse_mode"] = "HTML"
+            
+            async with aiohttp.ClientSession() as session:
+                # Send new message
+                async with session.post(send_url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        new_message_id = result['result']['message_id']
+                        logger.info(f"✅ تم إرسال رسالة جديدة مع الأزرار: {new_message_id}")
+                        
+                        # Try to delete old message
+                        try:
+                            delete_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+                            delete_payload = {
+                                "chat_id": target_chat_id,
+                                "message_id": old_message_id
+                            }
+                            
+                            async with session.post(delete_url, json=delete_payload) as delete_response:
+                                delete_result = await delete_response.json()
+                                if delete_result.get('ok'):
+                                    logger.info(f"✅ تم حذف الرسالة القديمة: {old_message_id}")
+                                else:
+                                    logger.warning(f"⚠️ لم يتم حذف الرسالة القديمة: {old_message_id}")
+                                    
+                        except Exception as delete_err:
+                            logger.warning(f"⚠️ خطأ في حذف الرسالة القديمة: {delete_err}")
+                        
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.error(f"❌ فشل في إرسال رسالة جديدة: {error_code} - {error_desc}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إرسال رسالة جديدة: {e}")
             return False
 
     async def _replace_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
