@@ -77,6 +77,68 @@ class TelegramBotSystem:
                     await asyncio.sleep(5)
                     
             except Exception as e:
+                error_str = str(e)
+                
+                # التعامل مع أخطاء قاعدة البيانات
+                if "readonly database" in error_str.lower() or "attempt to write a readonly database" in error_str.lower():
+                    logger.error(f"❌ خطأ في قاعدة البيانات (readonly): {e}")
+                    logger.error("🔧 محاولة إصلاح قاعدة البيانات...")
+                    
+                    try:
+                        # تشغيل إصلاح قاعدة البيانات
+                        import subprocess
+                        import sys
+                        
+                        logger.info("🔧 تشغيل سكريبت إصلاح قاعدة البيانات...")
+                        result = subprocess.run([sys.executable, "fix_database_permissions.py"], 
+                                              capture_output=True, text=True, timeout=60)
+                        
+                        if result.returncode == 0:
+                            logger.info("✅ تم إصلاح قاعدة البيانات بنجاح")
+                            logger.info("🔄 إعادة تشغيل بوت التحكم...")
+                            await asyncio.sleep(5)
+                            continue
+                        else:
+                            logger.error(f"❌ فشل في إصلاح قاعدة البيانات: {result.stderr}")
+                    except Exception as fix_error:
+                        logger.error(f"❌ خطأ في تشغيل إصلاح قاعدة البيانات: {fix_error}")
+                    
+                    # انتظار قصير قبل إعادة المحاولة
+                    delay = 30
+                    logger.info(f"⏱️ انتظار {delay} ثانية قبل إعادة المحاولة...")
+                    await asyncio.sleep(delay)
+                    continue
+                
+                # التعامل مع أخطاء القرص
+                elif "disk I/O error" in error_str.lower():
+                    logger.error(f"❌ خطأ في القرص (disk I/O error): {e}")
+                    logger.error("🔧 محاولة إصلاح مشاكل القرص...")
+                    
+                    try:
+                        # تشغيل إصلاح القرص
+                        import subprocess
+                        import sys
+                        
+                        logger.info("🔧 تشغيل سكريبت إصلاح القرص...")
+                        result = subprocess.run([sys.executable, "fix_disk_io_error.py"], 
+                                              capture_output=True, text=True, timeout=120)
+                        
+                        if result.returncode == 0:
+                            logger.info("✅ تم إصلاح مشاكل القرص بنجاح")
+                            logger.info("🔄 إعادة تشغيل بوت التحكم...")
+                            await asyncio.sleep(10)
+                            continue
+                        else:
+                            logger.error(f"❌ فشل في إصلاح القرص: {result.stderr}")
+                    except Exception as fix_error:
+                        logger.error(f"❌ خطأ في تشغيل إصلاح القرص: {fix_error}")
+                    
+                    # انتظار أطول قبل إعادة المحاولة
+                    delay = 60
+                    logger.info(f"⏱️ انتظار {delay} ثانية قبل إعادة المحاولة...")
+                    await asyncio.sleep(delay)
+                    continue
+                
                 logger.error(f"❌ خطأ في بوت التحكم: {e}")
                 logger.info("🔄 بوت التحكم سيعيد المحاولة - معزول عن مشاكل UserBot")
                 
