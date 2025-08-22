@@ -40,27 +40,44 @@ class Database:
         """Get SQLite database connection with context manager"""
         conn = None
         try:
+            # إصلاح صلاحيات الملف قبل الاتصال
+            try:
+                import os
+                if os.path.exists(self.db_path):
+                    os.chmod(self.db_path, 0o666)
+                    logger.info(f"✅ تم تصحيح صلاحيات قاعدة البيانات: {self.db_path}")
+            except Exception as e:
+                logger.warning(f"تحذير في تصحيح صلاحيات قاعدة البيانات: {e}")
+            
             # استخدام اتصال منفصل لكل thread
             if not hasattr(self._local, 'connection') or self._local.connection is None:
+                # إعدادات اتصال آمنة لتجنب readonly
                 conn = sqlite3.connect(
                     self.db_path, 
-                    timeout=300,
+                    timeout=30,  # مهلة أقصر
                     check_same_thread=False, 
-                    isolation_level='DEFERRED'
+                    isolation_level=None  # autocommit mode لتجنب المشاكل
                 )
                 conn.row_factory = sqlite3.Row
                 
-                # تطبيق إعدادات PRAGMA محسنة
+                # تطبيق إعدادات PRAGMA آمنة (بدون WAL نهائياً)
                 try:
-                    conn.execute('PRAGMA journal_mode=WAL')
+                    conn.execute('PRAGMA journal_mode=DELETE')
+                    conn.execute('PRAGMA locking_mode=NORMAL')
                     conn.execute('PRAGMA synchronous=NORMAL')
-                    conn.execute('PRAGMA busy_timeout=300000')
+                    conn.execute('PRAGMA busy_timeout=30000')
                     conn.execute('PRAGMA foreign_keys=ON')
-                    conn.execute('PRAGMA wal_autocheckpoint=1000')
                     conn.execute('PRAGMA temp_store=memory')
-                    conn.execute('PRAGMA cache_size=-32000')  # 32MB cache
+                    conn.execute('PRAGMA cache_size=2000')  # cache أصغر
+                    
+                    # التأكد من أن قاعدة البيانات قابلة للكتابة
+                    conn.execute('BEGIN IMMEDIATE')
+                    conn.execute('ROLLBACK')
+                    
+                    logger.info("✅ تم تطبيق إعدادات PRAGMA آمنة وتأكيد إمكانية الكتابة")
                 except sqlite3.OperationalError as e:
-                    logger.warning(f"تحذير في إعدادات PRAGMA: {e}")
+                    logger.error(f"❌ خطأ في إعدادات قاعدة البيانات: {e}")
+                    raise
                 
                 self._local.connection = conn
             else:
