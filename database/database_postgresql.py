@@ -630,6 +630,43 @@ class PostgreSQLDatabase:
 
             conn.commit()
 
+            # ===== Schema safety: ensure required columns exist (for upgraded databases) =====
+            try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS is_authenticated BOOLEAN DEFAULT FALSE")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS is_healthy BOOLEAN DEFAULT TRUE")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS connection_errors INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_error_time TIMESTAMP")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_error_message TEXT")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            except Exception:
+                pass
+
+            try:
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_user_channels_user_channel ON user_channels(user_id, channel_id)")
+            except Exception:
+                pass
+
+            conn.commit()
+
     # User session methods
     def save_user_session(self, user_id: int, phone_number: str, session_string: str) -> bool:
         """Save user session to database"""
