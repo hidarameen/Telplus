@@ -2646,7 +2646,11 @@ class UserbotService:
             
             logger.info(f"🔧 محاولة إضافة الأزرار عبر API مباشر للرسالة {message_id}")
             
-            # Check bot permissions first
+            # Validate chat_id format first
+            if not self._validate_chat_id(target_chat_id):
+                return False
+            
+            # Check bot permissions
             if not await self._check_bot_permissions(target_chat_id):
                 logger.error(f"❌ البوت ليس لديه صلاحيات كافية في القناة {target_chat_id}")
                 return False
@@ -2806,11 +2810,51 @@ class UserbotService:
             logger.warning(f"⚠️ لا يمكن الحصول على نص الرسالة الأصلية: {e}")
             return "تم إضافة الأزرار"
 
+    def _validate_chat_id(self, target_chat_id: str) -> bool:
+        """Validate chat ID format and detect phone numbers"""
+        try:
+            if not target_chat_id:
+                logger.error("❌ معرف القناة فارغ")
+                return False
+            
+            # Check if it's a phone number (usually 7-15 digits)
+            if target_chat_id.isdigit():
+                chat_id_int = int(target_chat_id)
+                if chat_id_int < 1000000000:  # Likely a phone number
+                    logger.error(f"❌ معرف القناة {target_chat_id} يبدو كرقم هاتف وليس معرف قناة")
+                    logger.error(f"💡 تأكد من استخدام معرف القناة الصحيح (مثال: -1001234567890)")
+                    return False
+            
+            # Check for valid channel/group ID formats
+            if target_chat_id.startswith('-100'):
+                # Channel ID format
+                return True
+            elif target_chat_id.startswith('-'):
+                # Group ID format
+                return True
+            elif target_chat_id.startswith('@'):
+                # Username format
+                return True
+            elif target_chat_id.isdigit() and int(target_chat_id) > 1000000000:
+                # Large numeric ID (likely a chat ID)
+                return True
+            else:
+                logger.warning(f"⚠️ معرف القناة {target_chat_id} قد لا يكون صحيحاً")
+                return True  # Allow it to try anyway
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في التحقق من معرف القناة: {e}")
+            return False
+
     async def _check_bot_permissions(self, target_chat_id: str):
         """Check if bot has necessary permissions in the channel"""
         try:
             from bot_package.config import BOT_TOKEN
             import aiohttp
+            
+            # Validate chat_id format first
+            if not self._validate_chat_id(target_chat_id):
+                return False
             
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
             payload = {
@@ -2843,7 +2887,18 @@ class UserbotService:
                             logger.error(f"❌ البوت ليس عضو في القناة {target_chat_id}")
                             return False
                     else:
-                        logger.error(f"❌ لا يمكن التحقق من صلاحيات البوت في القناة {target_chat_id}")
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.error(f"❌ لا يمكن التحقق من صلاحيات البوت في القناة {target_chat_id}: {error_code} - {error_desc}")
+                        
+                        # Handle specific errors
+                        if "CHAT_NOT_FOUND" in error_desc:
+                            logger.error(f"💡 تأكد من أن البوت عضو في القناة {target_chat_id}")
+                        elif "BOT_WAS_BLOCKED" in error_desc:
+                            logger.error(f"💡 البوت محظور من القناة {target_chat_id}")
+                        elif "USER_NOT_PARTICIPANT" in error_desc:
+                            logger.error(f"💡 البوت ليس عضو في القناة {target_chat_id}")
+                        
                         return False
                         
         except Exception as e:
@@ -2872,17 +2927,47 @@ class UserbotService:
                 
                 # Convert target_chat_id to appropriate format
                 try:
-                    if target_chat_id.startswith('-'):
+                    # Handle different chat ID formats
+                    if target_chat_id.startswith('-100'):
+                        # Channel ID format
                         target_entity = int(target_chat_id)
+                    elif target_chat_id.startswith('-'):
+                        # Group ID format
+                        target_entity = int(target_chat_id)
+                    elif target_chat_id.isdigit():
+                        # Check if it's a valid chat ID (not a phone number)
+                        chat_id_int = int(target_chat_id)
+                        if chat_id_int > 1000000000:  # Likely a chat ID
+                            target_entity = chat_id_int
+                        else:
+                            # This might be a phone number, try as string
+                            target_entity = target_chat_id
                     else:
+                        # Username or other format
                         target_entity = target_chat_id
                     
                     # Get target entity
                     target_entity = await bot_client.get_entity(target_entity)
                     logger.info(f"✅ تم العثور على القناة الهدف: {getattr(target_entity, 'title', target_chat_id)}")
                 except Exception as entity_err:
+                    error_str = str(entity_err)
                     logger.error(f"❌ فشل في الوصول للقناة {target_chat_id}: {entity_err}")
-                    return False
+                    
+                    # Handle specific error for phone numbers
+                    if "Cannot get entity by phone number as a bot" in error_str:
+                        logger.error(f"❌ لا يمكن استخدام رقم الهاتف {target_chat_id} كمعرف قناة للبوت")
+                        logger.error(f"💡 تأكد من استخدام معرف القناة الصحيح (مثال: -1001234567890)")
+                        return False
+                    elif "CHAT_NOT_FOUND" in error_str:
+                        logger.error(f"❌ لم يتم العثور على القناة {target_chat_id}")
+                        logger.error(f"💡 تأكد من أن البوت عضو في القناة")
+                        return False
+                    elif "BOT_WAS_BLOCKED" in error_str:
+                        logger.error(f"❌ تم حظر البوت من القناة {target_chat_id}")
+                        return False
+                    else:
+                        logger.error(f"❌ خطأ غير معروف في الوصول للقناة: {error_str}")
+                        return False
                 
                 # Get the original message with retry
                 max_retries = 5
