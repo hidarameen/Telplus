@@ -20,6 +20,17 @@ from bot_package.config import BOT_TOKEN, API_ID, API_HASH
 # Load environment variables from .env file
 load_dotenv()
 
+# CRITICAL FIX: Run database fix before anything else
+try:
+    import subprocess
+    result = subprocess.run(['python', 'auto_fix_databases.py'], capture_output=True, text=True, timeout=30)
+    if result.returncode == 0:
+        print("🔧 تم إصلاح قواعد البيانات بنجاح")
+    else:
+        print(f"⚠️ تحذير في إصلاح قواعد البيانات: {result.stderr}")
+except Exception as e:
+    print(f"⚠️ لا يمكن تشغيل إصلاح قواعد البيانات: {e}")
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,

@@ -21,11 +21,11 @@ class Database:
         conn.row_factory = sqlite3.Row
         try:
             # Improve concurrency and reduce lock errors
-            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA journal_mode=DELETE')  # Fixed: Use DELETE instead of WAL to prevent readonly errors
             conn.execute('PRAGMA synchronous=NORMAL')
             conn.execute('PRAGMA busy_timeout=120000')
             conn.execute('PRAGMA foreign_keys=ON')
-            conn.execute('PRAGMA wal_autocheckpoint=1000')
+            # Removed WAL autocheckpoint since we're using DELETE mode
         except Exception:
             # Ignore pragma failures on some platforms
             pass
