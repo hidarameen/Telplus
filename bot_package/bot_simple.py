@@ -3687,10 +3687,16 @@ class SimpleTelegramBot:
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT target_chat_id FROM tasks
-                    WHERE is_active = 1 AND target_chat_id = ?
-                ''', (str(chat_id),))
+                try:
+                    cursor.execute('''
+                        SELECT target_chat_id FROM tasks
+                        WHERE is_active = TRUE AND target_chat_id = %s
+                    ''', (str(chat_id),))
+                except Exception:
+                    cursor.execute('''
+                        SELECT target_chat_id FROM tasks
+                        WHERE is_active = 1 AND target_chat_id = ?
+                    ''', (str(chat_id),))
                 target_tasks = cursor.fetchall()
 
             # If this chat is a target chat, then filter based on word filters
