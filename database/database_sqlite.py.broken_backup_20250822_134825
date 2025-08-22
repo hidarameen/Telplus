@@ -107,58 +107,8 @@ class Database:
         """Initialize database tables"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
-            # Create all required tables
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS user_sessions (
-                    user_id INTEGER PRIMARY KEY,
-                    phone_number TEXT,
-                    session_string TEXT,
-                    is_authenticated BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    task_name TEXT,
-                    source_chat_id TEXT,
-                    source_chat_name TEXT,
-                    target_chat_id TEXT,
-                    target_chat_name TEXT,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS task_sources (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id INTEGER,
-                    chat_id TEXT,
-                    chat_name TEXT,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id)
-                )
-            ''')
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS task_targets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id INTEGER,
-                    chat_id TEXT,
-                    chat_name TEXT,
-                    FOREIGN KEY (task_id) REFERENCES tasks (id)
-                )
-            ''')
-            
-            conn.commit()
-            logger.info("✅ تم تهيئة جداول قاعدة البيانات بنجاح")
-
-    def save_user_session(self, user_id: int, phone_number: str, session_string: str):
-        """Save user session"""
+            def save_user_session(self, user_id: int, phone_number: str, session_string: str):
+                """Save user session"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -562,7 +512,56 @@ class Database:
             return True
 
     # Header/Footer/Buttons Settings Methods
+    def get_message_settings(self, task_id: int) -> Dict:
+        """Get task message settings (header, footer, buttons)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM task_message_settings 
+                WHERE task_id = ?
+            ''', (task_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'task_id': result['task_id'],
+                    'header_enabled': bool(result['header_enabled']),
+                    'header_text': result['header_text'] or '',
+                    'footer_enabled': bool(result['footer_enabled']),
+                    'footer_text': result['footer_text'] or '',
+                    'inline_buttons_enabled': bool(result['inline_buttons_enabled'])
+                }
+            else:
+                # Create default settings if not exist
+                cursor.execute('''
+                    INSERT INTO task_message_settings (task_id) VALUES (?)
+                ''', (task_id,))
+                conn.commit()
+                return {
+                    'task_id': task_id,
+                    'header_enabled': False,
+                    'header_text': '',
+                    'footer_enabled': False,
+                    'footer_text': '',
+                    'inline_buttons_enabled': False
+                }
 
+    def update_header_settings(self, task_id: int, enabled: bool, text: str = ''):
+        """Update header settings"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO task_message_settings 
+                (task_id, header_enabled, header_text, footer_enabled, footer_text, inline_buttons_enabled)
+                SELECT ?, ?, ?, 
+                       COALESCE(footer_enabled, FALSE),
+                       COALESCE(footer_text, ''),
+                       COALESCE(inline_buttons_enabled, FALSE)
+                FROM task_message_settings WHERE task_id = ?
+                UNION SELECT ?, ?, ?, FALSE, '', FALSE WHERE NOT EXISTS 
+                (SELECT 1 FROM task_message_settings WHERE task_id = ?)
+            ''', (task_id, enabled, text, task_id, task_id, enabled, text, task_id))
+            conn.commit()
 
     def update_footer_settings(self, task_id: int, enabled: bool, text: str = ''):
         """Update footer settings"""
@@ -754,44 +753,37 @@ class Database:
             
             conn.commit()
 
+    def update_inline_buttons_enabled(self, task_id: int, enabled: bool):
+        """Update inline buttons enabled status - for now this is managed by presence of buttons"""
+        # This is handled by the presence/absence of buttons in task_inline_buttons table
+        # No separate enabled field needed as buttons are either there or not
+        pass
 
     # ===== Text Cleaning Functions =====
 
     def get_text_cleaning_settings(self, task_id):
         """Get text cleaning settings for a task"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute("""
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("""
                 SELECT remove_links, remove_emojis, remove_hashtags, 
                        remove_phone_numbers, remove_empty_lines, remove_lines_with_keywords
                 FROM task_text_cleaning_settings
                 WHERE task_id = ?
             """, (task_id,))
             
-                
-                result = cursor.fetchone()
-                if result:
-                    return {
-                        'remove_links': bool(result[0]),
-                        'remove_emojis': bool(result[1]),
-                        'remove_hashtags': bool(result[2]),
-                        'remove_phone_numbers': bool(result[3]),
-                        'remove_empty_lines': bool(result[4]),
-                        'remove_lines_with_keywords': bool(result[5])
-                    }
-                else:
-                    # Return default settings if no record exists
-                    return {
-                        'remove_links': False,
-                        'remove_emojis': False,
-                        'remove_hashtags': False,
-                        'remove_phone_numbers': False,
-                        'remove_empty_lines': False,
-                        'remove_lines_with_keywords': False
-                    }
-            except Exception as e:
-                logger.error(f"خطأ في جلب إعدادات تنظيف النصوص: {e}")
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'remove_links': bool(result[0]),
+                    'remove_emojis': bool(result[1]),
+                    'remove_hashtags': bool(result[2]),
+                    'remove_phone_numbers': bool(result[3]),
+                    'remove_empty_lines': bool(result[4]),
+                    'remove_lines_with_keywords': bool(result[5])
+                }
+            else:
+                # Return default settings if no record exists
                 return {
                     'remove_links': False,
                     'remove_emojis': False,
@@ -800,11 +792,22 @@ class Database:
                     'remove_empty_lines': False,
                     'remove_lines_with_keywords': False
                 }
+        except Exception as e:
+            logger.error(f"خطأ في جلب إعدادات تنظيف النصوص: {e}")
+            return {
+                'remove_links': False,
+                'remove_emojis': False,
+                'remove_hashtags': False,
+                'remove_phone_numbers': False,
+                'remove_empty_lines': False,
+                'remove_lines_with_keywords': False
+            }
+        finally:
+            cursor.close()
 
     def update_text_cleaning_setting(self, task_id, setting_name, value):
         """Update a specific text cleaning setting"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+        cursor = self.connection.cursor()
         try:
             # First check if record exists
             cursor.execute("SELECT task_id FROM task_text_cleaning_settings WHERE task_id = ?", (task_id,))
@@ -833,59 +836,63 @@ class Database:
                     WHERE task_id = ?
                 """, (value, task_id))
             
-            conn.commit()
+            self.connection.commit()
             return True
         except Exception as e:
             logger.error(f"خطأ في تحديث إعداد تنظيف النص: {e}")
-            conn.rollback()
+            self.connection.rollback()
             return False
+        finally:
+            cursor.close()
 
     def get_text_cleaning_keywords(self, task_id):
         """Get text cleaning keywords for a task"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute("""
-                    SELECT keyword FROM task_text_cleaning_keywords
-                    WHERE task_id = ?
-                    ORDER BY keyword
-                """, (task_id,))
-                
-                results = cursor.fetchall()
-                return [row[0] for row in results]
-            except Exception as e:
-                logger.error(f"خطأ في جلب كلمات تنظيف النصوص: {e}")
-                return []
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("""
+                SELECT keyword FROM task_text_cleaning_keywords
+                WHERE task_id = ?
+                ORDER BY keyword
+            """, (task_id,))
+            
+            results = cursor.fetchall()
+            return [row[0] for row in results]
+        except Exception as e:
+            logger.error(f"خطأ في جلب كلمات تنظيف النصوص: {e}")
+            return []
+        finally:
+            cursor.close()
 
     def add_text_cleaning_keywords(self, task_id, keywords):
         """Add text cleaning keywords for a task"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            added_count = 0
-            try:
-                for keyword in keywords:
-                    keyword = keyword.strip()
-                    if keyword:
-                        # Check if keyword already exists
+        cursor = self.connection.cursor()
+        added_count = 0
+        try:
+            for keyword in keywords:
+                keyword = keyword.strip()
+                if keyword:
+                    # Check if keyword already exists
+                    cursor.execute("""
+                        SELECT keyword FROM task_text_cleaning_keywords
+                        WHERE task_id = ? AND keyword = ?
+                    """, (task_id, keyword))
+                    
+                    if not cursor.fetchone():
+                        # Add new keyword
                         cursor.execute("""
-                            SELECT keyword FROM task_text_cleaning_keywords
-                            WHERE task_id = ? AND keyword = ?
+                            INSERT INTO task_text_cleaning_keywords (task_id, keyword)
+                            VALUES (?, ?)
                         """, (task_id, keyword))
-                        
-                        if not cursor.fetchone():
-                            # Add new keyword
-                            cursor.execute("""
-                                INSERT INTO task_text_cleaning_keywords (task_id, keyword)
-                                VALUES (?, ?)
-                            """, (task_id, keyword))
-                            added_count += 1
-                
-                conn.commit()
-                return added_count
-            except Exception as e:
-                logger.error(f"خطأ في إضافة كلمات تنظيف النصوص: {e}")
-                conn.rollback()
-                return 0
+                        added_count += 1
+            
+            self.connection.commit()
+            return added_count
+        except Exception as e:
+            logger.error(f"خطأ في إضافة كلمات تنظيف النصوص: {e}")
+            self.connection.rollback()
+            return 0
+        finally:
+            cursor.close()
 
     def remove_text_cleaning_keyword(self, task_id, keyword):
         """Remove a text cleaning keyword"""
