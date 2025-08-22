@@ -673,6 +673,50 @@ class PostgreSQLDatabase:
             except Exception:
                 pass
 
+            # Compatibility columns for message settings / inline buttons / duplicates
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN IF NOT EXISTS header_enabled BOOLEAN DEFAULT FALSE")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN IF NOT EXISTS header_text TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN IF NOT EXISTS footer_enabled BOOLEAN DEFAULT FALSE")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN IF NOT EXISTS footer_text TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN IF NOT EXISTS inline_buttons_enabled BOOLEAN DEFAULT FALSE")
+            except Exception:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE task_inline_buttons ADD COLUMN IF NOT EXISTS row_position INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_inline_buttons ADD COLUMN IF NOT EXISTS col_position INTEGER DEFAULT 0")
+            except Exception:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE task_duplicate_settings ADD COLUMN IF NOT EXISTS similarity_threshold REAL DEFAULT 0.85")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_duplicate_settings ADD COLUMN IF NOT EXISTS check_text BOOLEAN DEFAULT TRUE")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_duplicate_settings ADD COLUMN IF NOT EXISTS check_media BOOLEAN DEFAULT TRUE")
+            except Exception:
+                pass
+
             conn.commit()
 
     # User session methods
@@ -1136,4 +1180,772 @@ class PostgreSQLDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error clearing conversation state: {e}")
+            return False
+
+    # ===== Session helpers =====
+    def update_session_health(self, user_id: int, is_healthy: bool, error_message: str = None) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                if is_healthy:
+                    cursor.execute('''
+                        UPDATE user_sessions
+                        SET is_healthy = TRUE, last_activity = CURRENT_TIMESTAMP, connection_errors = 0, updated_at = CURRENT_TIMESTAMP
+                        WHERE user_id = %s
+                    ''', (user_id,))
+                else:
+                    cursor.execute('''
+                        UPDATE user_sessions
+                        SET is_healthy = FALSE, connection_errors = COALESCE(connection_errors, 0) + 1,
+                            last_error_time = CURRENT_TIMESTAMP, last_error_message = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE user_id = %s
+                    ''', (error_message, user_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating session health: {e}")
+            return False
+
+    def get_user_session_string(self, user_id: int) -> str:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT session_string FROM user_sessions WHERE user_id = %s AND is_authenticated = TRUE', (user_id,))
+                row = cursor.fetchone()
+                return row[0] if row and row[0] else None
+        except Exception as e:
+            logger.error(f"Error getting session string: {e}")
+            return None
+
+    def get_all_authenticated_users(self):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT user_id, phone_number, session_string
+                    FROM user_sessions
+                    WHERE is_authenticated = TRUE AND session_string IS NOT NULL AND session_string <> ''
+                ''')
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error getting authenticated users: {e}")
+            return []
+
+    def delete_user_session(self, user_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM user_sessions WHERE user_id = %s', (user_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting user session: {e}")
+            return False
+
+    # ===== Tasks and sources/targets =====
+    def get_task_sources(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, chat_id, chat_name FROM task_sources WHERE task_id = %s ORDER BY created_at', (task_id,))
+                results = cursor.fetchall()
+                return [{'id': r[0], 'chat_id': r[1], 'chat_name': r[2]} for r in results]
+        except Exception as e:
+            logger.error(f"Error getting task sources: {e}")
+            return []
+
+    def get_task_targets(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, chat_id, chat_name FROM task_targets WHERE task_id = %s ORDER BY created_at', (task_id,))
+                results = cursor.fetchall()
+                return [{'id': r[0], 'chat_id': r[1], 'chat_name': r[2]} for r in results]
+        except Exception as e:
+            logger.error(f"Error getting task targets: {e}")
+            return []
+
+    def add_task_source(self, task_id: int, chat_id: str, chat_name: str = None):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('INSERT INTO task_sources (task_id, chat_id, chat_name) VALUES (%s, %s, %s) RETURNING id', (task_id, chat_id, chat_name))
+                new_id = cursor.fetchone()[0]
+                conn.commit()
+                return new_id
+        except Exception as e:
+            logger.error(f"Error adding task source: {e}")
+            return None
+
+    def add_task_target(self, task_id: int, chat_id: str, chat_name: str = None):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('INSERT INTO task_targets (task_id, chat_id, chat_name) VALUES (%s, %s, %s) RETURNING id', (task_id, chat_id, chat_name))
+                new_id = cursor.fetchone()[0]
+                conn.commit()
+                return new_id
+        except Exception as e:
+            logger.error(f"Error adding task target: {e}")
+            return None
+
+    def remove_task_source(self, source_id: int, task_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_sources WHERE id = %s AND task_id = %s', (source_id, task_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing task source: {e}")
+            return False
+
+    def remove_task_target(self, target_id: int, task_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_targets WHERE id = %s AND task_id = %s', (target_id, task_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing task target: {e}")
+            return False
+
+    def get_active_user_tasks(self, user_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name, forward_mode
+                    FROM tasks WHERE user_id = %s AND is_active = TRUE
+                    ORDER BY created_at DESC
+                ''', (user_id,))
+                rows = cursor.fetchall()
+                tasks = []
+                for row in rows:
+                    task_id = row[0]
+                    # Expand sources/targets if present in new tables
+                    sources = self.get_task_sources(task_id) or ([{'id': 0, 'chat_id': row[2], 'chat_name': row[3]}] if row[2] else [])
+                    targets = self.get_task_targets(task_id) or ([{'id': 0, 'chat_id': row[4], 'chat_name': row[5]}] if row[4] else [])
+                    for s in sources:
+                        for t in targets:
+                            tasks.append({
+                                'id': task_id,
+                                'task_name': row[1],
+                                'source_chat_id': s['chat_id'],
+                                'source_chat_name': s['chat_name'],
+                                'target_chat_id': t['chat_id'],
+                                'target_chat_name': t['chat_name'],
+                                'forward_mode': row[6] or 'forward'
+                            })
+                return tasks
+        except Exception as e:
+            logger.error(f"Error getting active user tasks: {e}")
+            return []
+
+    def get_task_with_sources_targets(self, task_id: int, user_id: int = None):
+        try:
+            task = self.get_task(task_id, user_id)
+            if not task:
+                return None
+            sources = self.get_task_sources(task_id) or ([{'id': 0, 'chat_id': task.get('source_chat_id'), 'chat_name': task.get('source_chat_name')}] if task.get('source_chat_id') else [])
+            targets = self.get_task_targets(task_id) or ([{'id': 0, 'chat_id': task.get('target_chat_id'), 'chat_name': task.get('target_chat_name')}] if task.get('target_chat_id') else [])
+            task['sources'] = sources
+            task['targets'] = targets
+            return task
+        except Exception as e:
+            logger.error(f"Error getting task with sources/targets: {e}")
+            return None
+
+    def migrate_task_to_new_structure(self, task_id: int) -> bool:
+        try:
+            task = self.get_task(task_id)
+            if not task:
+                return False
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM task_sources WHERE task_id = %s', (task_id,))
+                sources_count = cursor.fetchone()[0]
+                cursor.execute('SELECT COUNT(*) FROM task_targets WHERE task_id = %s', (task_id,))
+                targets_count = cursor.fetchone()[0]
+                if sources_count == 0 and task.get('source_chat_id'):
+                    cursor.execute('INSERT INTO task_sources (task_id, chat_id, chat_name) VALUES (%s, %s, %s)', (task_id, task['source_chat_id'], task['source_chat_name']))
+                if targets_count == 0 and task.get('target_chat_id'):
+                    cursor.execute('INSERT INTO task_targets (task_id, chat_id, chat_name) VALUES (%s, %s, %s)', (task_id, task['target_chat_id'], task['target_chat_name']))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error migrating task: {e}")
+            return False
+
+    # ===== Message mappings =====
+    def save_message_mapping(self, task_id: int, source_chat_id: str, source_message_id: int, target_chat_id: str, target_message_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO message_mappings (task_id, source_chat_id, source_message_id, target_chat_id, target_message_id, created_at)
+                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ''', (task_id, str(source_chat_id), source_message_id, str(target_chat_id), target_message_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving message mapping: {e}")
+            return False
+
+    def get_message_mappings_by_source(self, task_id: int, source_chat_id: str, source_message_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, task_id, source_chat_id, source_message_id, target_chat_id, target_message_id
+                    FROM message_mappings
+                    WHERE task_id = %s AND source_chat_id = %s AND source_message_id = %s
+                ''', (task_id, str(source_chat_id), source_message_id))
+                rows = cursor.fetchall()
+                return [{'id': r[0], 'task_id': r[1], 'source_chat_id': r[2], 'source_message_id': r[3], 'target_chat_id': r[4], 'target_message_id': r[5]} for r in rows]
+        except Exception as e:
+            logger.error(f"Error getting message mappings: {e}")
+            return []
+
+    def delete_message_mapping(self, mapping_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM message_mappings WHERE id = %s', (mapping_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting message mapping: {e}")
+            return False
+
+    # ===== Text cleaning / formatting / translation / watermark =====
+    def get_text_cleaning_settings(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_text_cleaning_settings WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting text cleaning settings: {e}")
+            return None
+
+    def get_text_cleaning_keywords(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT keyword FROM task_text_cleaning_keywords WHERE task_id = %s ORDER BY keyword', (task_id,))
+                return [r[0] for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting cleaning keywords: {e}")
+            return []
+
+    def get_text_formatting_settings(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_text_formatting_settings WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting text formatting settings: {e}")
+            return None
+
+    def get_translation_settings(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_translation_settings WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting translation settings: {e}")
+            return None
+
+    def get_watermark_settings(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_watermark_settings WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting watermark settings: {e}")
+            return None
+
+    # ===== Audio settings =====
+    def update_audio_metadata_enabled(self, task_id: int, enabled: bool) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_audio_metadata_settings (task_id, enabled)
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = CURRENT_TIMESTAMP
+                ''', (task_id, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating audio metadata enabled: {e}")
+            return False
+
+    def update_audio_metadata_setting(self, task_id: int, key: str, value) -> bool:
+        try:
+            allowed = {
+                'preserve_quality': 'preserve_quality',
+                'convert_to_mp3': 'convert_to_mp3',
+                'album_art_enabled': 'album_art_enabled',
+                'album_art_path': 'album_art_path',
+                'audio_merge_enabled': 'audio_merge_enabled',
+                'intro_audio_path': 'intro_audio_path',
+                'outro_audio_path': 'outro_audio_path',
+                'intro_position': 'intro_position'
+            }
+            if key not in allowed:
+                return False
+            column = allowed[key]
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    INSERT INTO task_audio_metadata_settings (task_id, {column})
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET {column} = EXCLUDED.{column}, updated_at = CURRENT_TIMESTAMP
+                ''', (task_id, value))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating audio metadata setting: {e}")
+            return False
+
+    def update_audio_metadata_template(self, task_id: int, template_name: str) -> bool:
+        try:
+            return self.update_audio_metadata_setting(task_id, 'template', template_name)
+        except Exception as e:
+            logger.error(f"Error updating audio metadata template: {e}")
+            return False
+
+    def set_album_art_settings(self, task_id: int, **kwargs) -> bool:
+        try:
+            # supported: enabled(bool), path(str), apply_to_all(bool)
+            mapping = {
+                'enabled': 'album_art_enabled',
+                'path': 'album_art_path',
+                'apply_to_all': 'apply_art_to_all'
+            }
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                for k, v in kwargs.items():
+                    if k in mapping:
+                        col = mapping[k]
+                        cursor.execute(f'''
+                            INSERT INTO task_audio_metadata_settings (task_id, {col})
+                            VALUES (%s, %s)
+                            ON CONFLICT (task_id) DO UPDATE SET {col} = EXCLUDED.{col}, updated_at = CURRENT_TIMESTAMP
+                        ''', (task_id, v))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting album art settings: {e}")
+            return False
+
+    def set_audio_merge_settings(self, task_id: int, **kwargs) -> bool:
+        try:
+            mapping = {
+                'enabled': 'audio_merge_enabled',
+                'intro_path': 'intro_audio_path',
+                'outro_path': 'outro_audio_path',
+                'intro_position': 'intro_position'
+            }
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                for k, v in kwargs.items():
+                    if k in mapping:
+                        col = mapping[k]
+                        cursor.execute(f'''
+                            INSERT INTO task_audio_metadata_settings (task_id, {col})
+                            VALUES (%s, %s)
+                            ON CONFLICT (task_id) DO UPDATE SET {col} = EXCLUDED.{col}, updated_at = CURRENT_TIMESTAMP
+                        ''', (task_id, v))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting audio merge settings: {e}")
+            return False
+
+    # ===== Message settings helpers =====
+    def update_inline_buttons_enabled(self, task_id: int, enabled: bool) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_message_settings (task_id, inline_buttons_enabled)
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET inline_buttons_enabled = EXCLUDED.inline_buttons_enabled, updated_at = CURRENT_TIMESTAMP
+                ''', (task_id, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating inline buttons enabled: {e}")
+            return False
+
+    # ===== Rate limiting =====
+    def check_rate_limit(self, task_id: int) -> bool:
+        try:
+            settings = self.get_rate_limit_settings(task_id)
+            if not settings or not settings.get('enabled'):
+                return False
+            max_per_hour = settings.get('max_messages_per_hour', 100)
+            max_per_day = settings.get('max_messages_per_day', 1000)
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT message_count, hour_count, day_count, last_reset_hour, last_reset_day FROM rate_limit_tracking WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                from datetime import datetime, timedelta
+                now = datetime.utcnow()
+                if not row:
+                    return False
+                message_count, hour_count, day_count, last_reset_hour, last_reset_day = row
+                # reset windows
+                if last_reset_hour is None or (now - last_reset_hour).total_seconds() >= 3600:
+                    hour_count = 0
+                if last_reset_day is None or (now - last_reset_day).total_seconds() >= 86400:
+                    day_count = 0
+                return (hour_count >= max_per_hour) or (day_count >= max_per_day)
+        except Exception as e:
+            logger.error(f"Error checking rate limit: {e}")
+            return False
+
+    def track_message_for_rate_limit(self, task_id: int) -> bool:
+        try:
+            from datetime import datetime
+            now = datetime.utcnow()
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, hour_count, day_count, last_reset_hour, last_reset_day FROM rate_limit_tracking WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                if not row:
+                    cursor.execute('''
+                        INSERT INTO rate_limit_tracking (task_id, message_count, hour_count, day_count, last_reset_hour, last_reset_day)
+                        VALUES (%s, 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ''', (task_id,))
+                else:
+                    cursor.execute('''
+                        UPDATE rate_limit_tracking
+                        SET message_count = COALESCE(message_count,0) + 1,
+                            hour_count = COALESCE(hour_count,0) + 1,
+                            day_count = COALESCE(day_count,0) + 1
+                        WHERE task_id = %s
+                    ''', (task_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error tracking rate limit: {e}")
+            return False
+
+    # ===== Advanced filters =====
+    def get_advanced_filters_settings(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_advanced_filters WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else {
+                    'day_filter_enabled': False,
+                    'working_hours_enabled': False,
+                    'language_filter_enabled': False,
+                    'admin_filter_enabled': False,
+                    'duplicate_filter_enabled': False,
+                    'inline_button_filter_enabled': False,
+                    'forwarded_message_filter_enabled': False
+                }
+        except Exception as e:
+            logger.error(f"Error getting advanced filters: {e}")
+            return {}
+
+    def get_forwarded_message_filter_setting(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_forwarded_message_filters WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting forwarded message filter: {e}")
+            return None
+
+    def get_inline_button_filter_setting(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_inline_button_filters WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting inline button filter: {e}")
+            return None
+
+    def get_day_filters(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT day_of_week, is_active FROM task_day_filters WHERE task_id = %s ORDER BY day_of_week', (task_id,))
+                return [{'day_number': r[0], 'is_allowed': bool(r[1])} for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting day filters: {e}")
+            return []
+
+    def set_day_filter(self, task_id: int, day_number: int, is_allowed: bool) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_day_filters (task_id, day_of_week, is_active)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id, day_of_week) DO UPDATE SET is_active = EXCLUDED.is_active
+                ''', (task_id, day_number, is_allowed))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting day filter: {e}")
+            return False
+
+    def get_working_hours(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_working_hours WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting working hours: {e}")
+            return None
+
+    def initialize_working_hours_schedule(self, task_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # create task_working_hours if missing
+                cursor.execute('''
+                    INSERT INTO task_working_hours (task_id, is_enabled)
+                    VALUES (%s, TRUE)
+                    ON CONFLICT (task_id) DO NOTHING
+                ''', (task_id,))
+                # populate schedule 0..23 disabled by default
+                for hour in range(24):
+                    cursor.execute('''
+                        INSERT INTO task_working_hours_schedule (working_hours_id, day_of_week, start_time, end_time, is_active)
+                        SELECT id, 0, '00:00', '00:00', FALSE FROM task_working_hours WHERE task_id = %s
+                        ON CONFLICT DO NOTHING
+                    ''', (task_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error initializing working hours schedule: {e}")
+            return False
+
+    def set_all_working_hours(self, task_id: int, enabled: bool) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('UPDATE task_working_hours SET is_enabled = %s, updated_at = CURRENT_TIMESTAMP WHERE task_id = %s', (enabled, task_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting all working hours: {e}")
+            return False
+
+    # ===== Duplicates =====
+    def get_duplicate_settings(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM task_duplicate_settings WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting duplicate settings: {e}")
+            return None
+
+    def update_duplicate_setting(self, task_id: int, key: str, value) -> bool:
+        try:
+            allowed = {'similarity_threshold', 'time_window_hours', 'check_text', 'check_media'}
+            if key not in allowed:
+                return False
+            column = 'duplicate_window_hours' if key == 'time_window_hours' else key
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    INSERT INTO task_duplicate_settings (task_id, {column})
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET {column} = EXCLUDED.{column}
+                ''', (task_id, value))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating duplicate setting: {e}")
+            return False
+
+    def get_recent_messages_for_duplicate_check(self, task_id: int, cutoff_time) -> list:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, source_message_id, message_text, message_hash, media_type, media_hash, forward_time
+                    FROM forwarded_messages_log
+                    WHERE task_id = %s AND forward_time >= %s
+                    ORDER BY forward_time DESC
+                ''', (task_id, cutoff_time))
+                rows = cursor.fetchall()
+                return [{'id': r[0], 'source_message_id': r[1], 'message_text': r[2], 'message_hash': r[3], 'media_type': r[4], 'media_hash': r[5], 'forward_time': r[6]} for r in rows]
+        except Exception as e:
+            logger.error(f"Error getting recent messages: {e}")
+            return []
+
+    def update_message_timestamp_for_duplicate(self, row_id: int, new_time) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('UPDATE forwarded_messages_log SET forward_time = %s WHERE id = %s', (new_time, row_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating message timestamp: {e}")
+            return False
+
+    def store_message_for_duplicate_check(self, task_id: int, source_chat_id: str, source_message_id: int, message_text: str, message_hash: str, media_type: str, media_hash: str) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO forwarded_messages_log (task_id, source_chat_id, source_message_id, message_text, message_hash, media_type, media_hash, forward_time)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ''', (task_id, str(source_chat_id), source_message_id, message_text, message_hash, media_type, media_hash))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error storing forwarded message: {e}")
+            return False
+
+    # ===== Language filters =====
+    def get_language_filters(self, task_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT language_code, language_name, is_active FROM task_language_filters WHERE task_id = %s ORDER BY language_code', (task_id,))
+                return [{'language_code': r[0], 'language_name': r[1], 'is_active': bool(r[2])} for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting language filters: {e}")
+            return []
+
+    def add_language_filter(self, task_id: int, language_code: str, language_name: str, is_active: bool) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_language_filters (task_id, language_code, language_name, is_active)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (task_id, language_code) DO UPDATE SET language_name = EXCLUDED.language_name, is_active = EXCLUDED.is_active
+                ''', (task_id, language_code, language_name, is_active))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error adding language filter: {e}")
+            return False
+
+    def remove_language_filter(self, task_id: int, language_code: str) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_language_filters WHERE task_id = %s AND language_code = %s', (task_id, language_code))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing language filter: {e}")
+            return False
+
+    def toggle_language_filter(self, task_id: int, language_code: str) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('UPDATE task_language_filters SET is_active = NOT is_active WHERE task_id = %s AND language_code = %s', (task_id, language_code))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error toggling language filter: {e}")
+            return False
+
+    def clear_language_filters(self, task_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_language_filters WHERE task_id = %s', (task_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error clearing language filters: {e}")
+            return False
+
+    # ===== Pending messages =====
+    def get_pending_message_by_source(self, task_id: int, user_id: int, source_chat_id: str, source_message_id: int):
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, task_id, user_id, source_chat_id, source_message_id, message_data, message_type, approval_message_id, status, created_at
+                    FROM pending_messages
+                    WHERE task_id = %s AND user_id = %s AND source_chat_id = %s AND source_message_id = %s
+                ''', (task_id, user_id, str(source_chat_id), source_message_id))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'id': row[0], 'task_id': row[1], 'user_id': row[2], 'source_chat_id': row[3],
+                        'source_message_id': row[4], 'message_data': row[5], 'message_type': row[6],
+                        'approval_message_id': row[7], 'status': row[8], 'created_at': row[9]
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error getting pending message: {e}")
+            return None
+
+    def add_pending_message(self, task_id: int, user_id: int, source_chat_id: str, source_message_id: int, message_data: str, message_type: str, approval_message_id: int = None) -> int:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO pending_messages (task_id, user_id, source_chat_id, source_message_id, message_data, message_type, approval_message_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                ''', (task_id, user_id, str(source_chat_id), source_message_id, message_data, message_type, approval_message_id))
+                new_id = cursor.fetchone()[0]
+                conn.commit()
+                return new_id
+        except Exception as e:
+            logger.error(f"Error adding pending message: {e}")
+            return None
+
+    def update_pending_message_status(self, pending_id: int, status: str, approval_message_id: int = None) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                if approval_message_id is not None:
+                    cursor.execute('UPDATE pending_messages SET status = %s, approval_message_id = %s WHERE id = %s', (status, approval_message_id, pending_id))
+                else:
+                    cursor.execute('UPDATE pending_messages SET status = %s WHERE id = %s', (status, pending_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating pending message status: {e}")
+            return False
+
+    # ===== Task update helpers =====
+    def update_task_forward_mode(self, task_id: int, user_id: int, forward_mode: str) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('UPDATE tasks SET forward_mode = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND user_id = %s', (forward_mode, task_id, user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating task forward mode: {e}")
             return False
