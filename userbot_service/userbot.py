@@ -3739,7 +3739,7 @@ class UserbotService:
         try:
             import datetime
             
-            # Get working hours configuration
+            # Get working hours configuration - always fetch fresh from database
             working_hours = self.db.get_working_hours(task_id)
             if not working_hours:
                 logger.debug(f"⏰ لا توجد إعدادات ساعات العمل للمهمة {task_id}")
@@ -3747,13 +3747,21 @@ class UserbotService:
             
             mode = working_hours.get('mode', 'work_hours')  # 'work_hours' or 'sleep_hours'
             enabled_hours = working_hours.get('enabled_hours', [])
+            schedule = working_hours.get('schedule', {})
             
             # For now, use UTC+3 (Riyadh timezone) as default
             timezone_offset = 3
             
+            # Enhanced logging for debugging
+            logger.info(f"⏰ [DEBUG] فحص ساعات العمل للمهمة {task_id}")
+            logger.info(f"⏰ [DEBUG] الإعدادات المستخرجة من قاعدة البيانات:")
+            logger.info(f"⏰ [DEBUG]   الوضع: {mode}")
+            logger.info(f"⏰ [DEBUG]   الساعات المُحددة: {sorted(enabled_hours) if enabled_hours else 'لا توجد'}")
+            logger.info(f"⏰ [DEBUG]   الجدول: {schedule}")
+            
             # If no hours are configured, don't block
             if not enabled_hours:
-                logger.debug(f"⏰ لا توجد ساعات محددة في فلتر ساعات العمل للمهمة {task_id}")
+                logger.info(f"⏰ لا توجد ساعات محددة في فلتر ساعات العمل للمهمة {task_id} - لن يتم حظر الرسائل")
                 return False
             
             # Get current time with timezone offset (Riyadh = UTC+3)
@@ -3765,6 +3773,8 @@ class UserbotService:
             
             # Check if current hour is in enabled hours
             is_in_enabled_hours = current_hour in enabled_hours
+            
+            logger.info(f"⏰ [DEBUG] الساعة الحالية {current_hour:02d} {'موجودة' if is_in_enabled_hours else 'غير موجودة'} في قائمة الساعات المحددة")
             
             if mode == 'work_hours':
                 # Work hours mode: Block if NOT in working hours
@@ -3780,6 +3790,8 @@ class UserbotService:
                     logger.info(f"⏰ وضع ساعات النوم: الساعة الحالية {current_hour:02d} في ساعات النوم - سيتم حظر الرسالة")
                 else:
                     logger.info(f"⏰ وضع ساعات النوم: الساعة الحالية {current_hour:02d} خارج ساعات النوم - سيتم توجيه الرسالة")
+            
+            logger.info(f"⏰ [DEBUG] النتيجة النهائية: {'حظر' if should_block else 'توجيه'} الرسالة")
             
             return should_block
             

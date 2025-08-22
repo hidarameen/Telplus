@@ -4100,13 +4100,13 @@ class SimpleTelegramBot:
         
         status_text = "🟢 مفعل" if is_enabled else "🔴 معطل"
         
-        # Mode descriptions
+        # Mode descriptions - clearer explanation
         if mode == 'work_hours':
             mode_text = "🏢 وضع ساعات العمل"
-            mode_description = "يتم توجيه الرسائل فقط في الساعات المحددة"
+            mode_description = "يتم توجيه الرسائل **فقط** في الساعات الخضراء (ساعات العمل)"
         else:  # sleep_hours
             mode_text = "😴 وضع ساعات النوم"
-            mode_description = "يتم حظر الرسائل في الساعات المحددة"
+            mode_description = "يتم حظر الرسائل في الساعات الخضراء (ساعات النوم)"
         
         # Count active hours
         active_hours = sum(1 for enabled in schedule.values() if enabled)
@@ -4174,11 +4174,19 @@ class SimpleTelegramBot:
             Button.inline("🔙 رجوع لفلتر ساعات العمل", f"working_hours_filter_{task_id}")
         ])
         
-        # Mode description
+        # Mode description - clearer explanation
         if mode == 'work_hours':
-            description = "🟢 الساعات الخضراء: سيتم توجيه الرسائل\n🔴 الساعات الحمراء: سيتم حظر الرسائل"
+            description = (
+                "🏢 **وضع ساعات العمل:**\n"
+                "🟢 الساعات الخضراء = ساعات العمل → **يتم توجيه الرسائل**\n"
+                "🔴 الساعات الحمراء = خارج ساعات العمل → **يتم حظر الرسائل**"
+            )
         else:  # sleep_hours
-            description = "🟢 الساعات الخضراء: سيتم حظر الرسائل (ساعات نوم)\n🔴 الساعات الحمراء: سيتم توجيه الرسائل"
+            description = (
+                "😴 **وضع ساعات النوم:**\n"
+                "🟢 الساعات الخضراء = ساعات النوم → **يتم حظر الرسائل**\n"
+                "🔴 الساعات الحمراء = خارج ساعات النوم → **يتم توجيه الرسائل**"
+            )
         
         # Add timestamp to force UI refresh
         import time
@@ -7154,25 +7162,37 @@ class SimpleTelegramBot:
             current_mode = settings.get('mode', 'work_hours')
             new_mode = 'sleep_hours' if current_mode == 'work_hours' else 'work_hours'
             
+            # Log the mode change for debugging
+            logger.info(f"🔄 تبديل وضع ساعات العمل للمهمة {task_id}: {current_mode} -> {new_mode}")
+            
             # Update mode
             success = self.db.update_working_hours(task_id, mode=new_mode)
             
             if success:
+                # Verify the update was saved correctly
+                updated_settings = self.db.get_working_hours(task_id)
+                saved_mode = updated_settings.get('mode', 'unknown')
+                logger.info(f"✅ تم حفظ الوضع الجديد في قاعدة البيانات: {saved_mode}")
+                
                 mode_text = "ساعات العمل فقط" if new_mode == 'work_hours' else "خارج ساعات العمل"
                 await event.answer(f"✅ تم تحديث وضع ساعات العمل: {mode_text}")
                 
-                # Force refresh UserBot tasks
+                # Force refresh UserBot tasks and clear any cache
                 try:
                     from userbot_service.userbot import userbot_instance
                     if user_id in userbot_instance.clients:
                         await userbot_instance.refresh_user_tasks(user_id)
-                        logger.info(f"🔄 تم تحديث مهام UserBot بعد تغيير وضع ساعات العمل")
+                        # Clear any cached settings if they exist
+                        if hasattr(userbot_instance, 'working_hours_cache'):
+                            userbot_instance.working_hours_cache.pop(task_id, None)
+                        logger.info(f"🔄 تم تحديث مهام UserBot وإزالة الذاكرة المؤقتة بعد تغيير وضع ساعات العمل")
                 except Exception as e:
                     logger.error(f"خطأ في تحديث مهام UserBot: {e}")
                 
                 # Return to working hours filter menu
                 await self.show_working_hours_filter(event, task_id)
             else:
+                logger.error(f"❌ فشل في حفظ وضع ساعات العمل للمهمة {task_id}")
                 await event.answer("❌ فشل في تحديث الإعداد")
                 
         except Exception as e:
