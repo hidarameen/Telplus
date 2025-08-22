@@ -656,6 +656,14 @@ class PostgreSQLDatabase:
             except Exception:
                 pass
             try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS session_string TEXT")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS phone_number TEXT")
+            except Exception:
+                pass
+            try:
                 cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             except Exception:
                 pass
