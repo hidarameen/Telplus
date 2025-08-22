@@ -1493,7 +1493,13 @@ class UserbotService:
                     logger.info(f"🔄 مزامنة التعديل مفعلة للمهمة {task_id}")
 
                     # Find all target messages that were forwarded from this source message
-                    message_mappings = self.db.get_message_mappings_by_source(task_id, source_chat_id, source_message_id)
+                    # Convert chat_id to both possible formats to handle legacy data
+                    legacy_chat_id = str(source_chat_id).replace('-100', '') if str(source_chat_id).startswith('-100') else str(source_chat_id)
+                    message_mappings = self.db.get_message_mappings_by_source(task_id, str(source_chat_id), source_message_id)
+                    
+                    # If no mappings found with full format, try legacy format
+                    if not message_mappings and str(source_chat_id).startswith('-100'):
+                        message_mappings = self.db.get_message_mappings_by_source(task_id, legacy_chat_id, source_message_id)
 
                     for mapping in message_mappings:
                         target_chat_id = mapping['target_chat_id']
@@ -1596,7 +1602,13 @@ class UserbotService:
 
                     for source_message_id in deleted_ids:
                         # Find all target messages that were forwarded from this source message
-                        message_mappings = self.db.get_message_mappings_by_source(task_id, source_chat_id, source_message_id)
+                        # Convert chat_id to both possible formats to handle legacy data
+                        legacy_chat_id = str(source_chat_id).replace('-100', '') if str(source_chat_id).startswith('-100') else str(source_chat_id)
+                        message_mappings = self.db.get_message_mappings_by_source(task_id, str(source_chat_id), source_message_id)
+                        
+                        # If no mappings found with full format, try legacy format
+                        if not message_mappings and str(source_chat_id).startswith('-100'):
+                            message_mappings = self.db.get_message_mappings_by_source(task_id, legacy_chat_id, source_message_id)
 
                         for mapping in message_mappings:
                             target_chat_id = mapping['target_chat_id']
