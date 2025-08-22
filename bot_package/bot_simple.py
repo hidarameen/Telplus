@@ -173,6 +173,20 @@ class SimpleTelegramBot:
         # Create bot client with unique session name
         self.bot = TelegramClient('simple_bot_session', API_ID, API_HASH)
         await self.bot.start(bot_token=BOT_TOKEN)
+        
+        # CRITICAL FIX: Ensure session file has correct permissions after creation
+        import os
+        import stat
+        session_file = 'simple_bot_session.session'
+        if os.path.exists(session_file):
+            os.chmod(session_file, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)  # 666
+            logger.info(f"✅ تم تصحيح صلاحيات ملف الجلسة: {session_file}")
+        
+        # Also fix any journal files
+        journal_file = f'{session_file}-journal'
+        if os.path.exists(journal_file):
+            os.chmod(journal_file, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)  # 666
+            logger.info(f"✅ تم تصحيح صلاحيات ملف journal: {journal_file}")
 
         # Add event handlers
         self.bot.add_event_handler(self.handle_start, events.NewMessage(pattern='/start'))
