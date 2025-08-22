@@ -620,7 +620,7 @@ class PostgreSQLDatabase:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_sources_task_id ON task_sources(task_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_targets_task_id ON task_targets(task_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)')
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_user_sessions_user_id ON user_sessions(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_conversation_states_user_id ON conversation_states(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_message_mappings_task_id ON message_mappings(task_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_pending_messages_task_id ON pending_messages(task_id)')
@@ -678,7 +678,15 @@ class PostgreSQLDatabase:
             except Exception:
                 pass
             try:
+                cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_chat_id TEXT")
+            except Exception:
+                pass
+            try:
                 cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_chat_name TEXT")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target_chat_id TEXT")
             except Exception:
                 pass
             try:
