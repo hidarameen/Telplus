@@ -1058,11 +1058,13 @@ class UserbotService:
                                 )
                                 logger.info(f"✅ تم توجيه الرسالة بنجاح في وضع التوجيه")
                                 
-                                # Apply post-forwarding settings (pin, auto-delete)
+                                # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                 if forwarded_msg:
                                     msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                                     await self.apply_post_forwarding_settings(
-                                        client, target_entity, msg_id, forwarding_settings, task['id']
+                                        client, target_entity, msg_id, forwarding_settings, task['id'],
+                                        inline_buttons=inline_buttons,
+                                        has_original_buttons=bool(original_reply_markup)
                                     )
                                     
                                     # Save message mapping for sync functionality
@@ -1197,11 +1199,13 @@ class UserbotService:
                                             buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                         )
                                         
-                                        # Apply post-forwarding settings (pin, auto-delete)
+                                        # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                         if forwarded_msg:
                                             msg_id = forwarded_msg.id
                                             await self.apply_post_forwarding_settings(
-                                                client, target_entity, msg_id, forwarding_settings, task['id']
+                                                client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                inline_buttons=inline_buttons,
+                                                has_original_buttons=bool(original_reply_markup)
                                             )
                                     else:
                                         # Regular media - send with caption using send_file
@@ -1246,11 +1250,13 @@ class UserbotService:
                                                 **video_kwargs
                                             )
                                             
-                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                             if forwarded_msg:
                                                 msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                                                 await self.apply_post_forwarding_settings(
-                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
                                                 )
                                 else:
                                     # Regular media message with caption handling
@@ -1285,11 +1291,13 @@ class UserbotService:
                                                 task=task, event=event
                                             )
                                             
-                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                             if forwarded_msg:
                                                 msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                                                 await self.apply_post_forwarding_settings(
-                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
                                                 )
                                         else:
                                             # Use original media if no processing was done
@@ -1315,11 +1323,13 @@ class UserbotService:
                                                     buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
                                                 )
                                             
-                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                             if forwarded_msg:
                                                 msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                                                 await self.apply_post_forwarding_settings(
-                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
                                                 )
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
@@ -1340,11 +1350,13 @@ class UserbotService:
                                                 task=task, event=event
                                             )
                                             
-                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                             if forwarded_msg:
                                                 msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                                                 await self.apply_post_forwarding_settings(
-                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
                                                 )
                                         else:
                                             # Use original media if no processing was done
@@ -1370,11 +1382,13 @@ class UserbotService:
                                                     buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
                                                 )
                                             
-                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                             if forwarded_msg:
                                                 msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                                                 await self.apply_post_forwarding_settings(
-                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
                                                 )
                         else:
                             # No media
@@ -2463,6 +2477,7 @@ class UserbotService:
 
     async def apply_post_forwarding_settings(self, client: TelegramClient, target_entity, msg_id: int, forwarding_settings: dict, task_id: int, inline_buttons=None, has_original_buttons=False):
         """Apply post-forwarding settings like pin message, auto delete, and inline buttons"""
+        import asyncio
         try:
             # Add inline buttons via bot client if needed and no original buttons exist
             if inline_buttons and not has_original_buttons:
@@ -2482,7 +2497,6 @@ class UserbotService:
 
             # Schedule auto delete if enabled
             if forwarding_settings['auto_delete_enabled'] and forwarding_settings['auto_delete_time'] > 0:
-                import asyncio
                 delete_time = forwarding_settings['auto_delete_time']
                 logger.info(f"⏰ جدولة حذف الرسالة {msg_id} بعد {delete_time} ثانية")
 
@@ -2574,51 +2588,98 @@ class UserbotService:
         """Add inline buttons to a message using bot client"""
         try:
             if not inline_buttons:
+                logger.warning(f"⚠️ لا توجد أزرار لإضافتها للرسالة {message_id} في المهمة {task_id}")
                 return False
+                
+            logger.info(f"🔘 بدء إضافة {len(inline_buttons)} صف من الأزرار للرسالة {message_id} في القناة {target_chat_id} - المهمة {task_id}")
                 
             from bot_package.config import BOT_TOKEN, API_ID, API_HASH
             from telethon import TelegramClient
+            import asyncio
             
-            # Create temporary bot client
-            bot_client = TelegramClient('temp_bot_session', API_ID, API_HASH)
+            # Add small delay to ensure message is fully sent
+            await asyncio.sleep(0.5)
+            
+            # Create temporary bot client with unique session name
+            import time
+            session_name = f'temp_bot_buttons_{int(time.time())}'
+            bot_client = TelegramClient(session_name, API_ID, API_HASH)
             
             try:
                 # Start bot client
                 await bot_client.start(bot_token=BOT_TOKEN)
-                logger.info(f"🤖 تم تشغيل bot client لإضافة الأزرار للرسالة {message_id}")
+                logger.info(f"🤖 تم تشغيل bot client بنجاح لإضافة الأزرار")
                 
-                # Get target entity
-                target_entity = await bot_client.get_entity(int(target_chat_id))
-                
-                # Get the original message
-                original_msg = await bot_client.get_messages(target_entity, ids=message_id)
-                if not original_msg:
-                    logger.error(f"❌ لم يتم العثور على الرسالة {message_id}")
+                # Convert target_chat_id to appropriate format
+                try:
+                    if target_chat_id.startswith('-'):
+                        target_entity = int(target_chat_id)
+                    else:
+                        target_entity = target_chat_id
+                    
+                    # Get target entity
+                    target_entity = await bot_client.get_entity(target_entity)
+                    logger.info(f"✅ تم العثور على القناة الهدف: {getattr(target_entity, 'title', target_chat_id)}")
+                except Exception as entity_err:
+                    logger.error(f"❌ فشل في الوصول للقناة {target_chat_id}: {entity_err}")
                     return False
                 
-                # Edit the message to add buttons while keeping original content
-                await bot_client.edit_message(
-                    target_entity,
-                    message_id,
-                    original_msg.text or original_msg.message,
-                    buttons=inline_buttons
-                )
+                # Get the original message with retry
+                max_retries = 3
+                original_msg = None
                 
-                logger.info(f"✅ تم إضافة {len(inline_buttons)} صف من الأزرار للرسالة {message_id} في المهمة {task_id}")
-                return True
+                for attempt in range(max_retries):
+                    try:
+                        original_msg = await bot_client.get_messages(target_entity, ids=message_id)
+                        if original_msg:
+                            break
+                        else:
+                            logger.warning(f"⚠️ محاولة {attempt + 1}: لم يتم العثور على الرسالة {message_id}")
+                            await asyncio.sleep(1)  # Wait before retry
+                    except Exception as get_msg_err:
+                        logger.warning(f"⚠️ محاولة {attempt + 1}: خطأ في جلب الرسالة {message_id}: {get_msg_err}")
+                        await asyncio.sleep(1)  # Wait before retry
+                
+                if not original_msg:
+                    logger.error(f"❌ فشل في العثور على الرسالة {message_id} بعد {max_retries} محاولات")
+                    return False
+                
+                logger.info(f"✅ تم العثور على الرسالة {message_id}: '{original_msg.text[:50] if original_msg.text else 'وسائط'}'")
+                
+                # Edit the message to add buttons while keeping original content
+                try:
+                    await bot_client.edit_message(
+                        target_entity,
+                        message_id,
+                        original_msg.text or original_msg.message or ".",
+                        buttons=inline_buttons,
+                        parse_mode='HTML'
+                    )
+                    
+                    logger.info(f"✅ تم إضافة {len(inline_buttons)} صف من الأزرار بنجاح للرسالة {message_id} في المهمة {task_id}")
+                    return True
+                    
+                except Exception as edit_err:
+                    logger.error(f"❌ فشل في تعديل الرسالة {message_id} لإضافة الأزرار: {edit_err}")
+                    return False
                 
             except Exception as bot_error:
-                logger.error(f"❌ خطأ في bot client لإضافة الأزرار: {bot_error}")
+                logger.error(f"❌ خطأ عام في bot client لإضافة الأزرار: {bot_error}")
                 return False
                 
             finally:
                 try:
                     await bot_client.disconnect()
-                except:
-                    pass
+                    # Clean up temporary session file
+                    import os
+                    session_file = f'{session_name}.session'
+                    if os.path.exists(session_file):
+                        os.remove(session_file)
+                except Exception as cleanup_err:
+                    logger.warning(f"⚠️ تحذير في تنظيف bot client: {cleanup_err}")
                     
         except Exception as e:
-            logger.error(f"خطأ في إضافة الأزرار باستخدام bot client: {e}")
+            logger.error(f"❌ خطأ عام في إضافة الأزرار باستخدام bot client: {e}")
             return False
 
     async def _check_advanced_features(self, task_id: int, message_text: str, user_id: int) -> bool:
