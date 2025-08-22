@@ -1075,3 +1075,57 @@ class PostgreSQLDatabase:
         except Exception as e:
             logger.error(f"Error updating user channel: {e}")
             return False
+
+    # ===== Conversation state methods (API parity with SQLite) =====
+    def set_conversation_state(self, user_id: int, state: str, data: str = '') -> bool:
+        try:
+            import json
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Normalize data to JSONB
+                try:
+                    parsed = json.loads(data) if data else {}
+                except Exception:
+                    parsed = {"data": data} if data else {}
+                cursor.execute('''
+                    INSERT INTO conversation_states (user_id, state, data, created_at, updated_at)
+                    VALUES (%s, %s, %s::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET state = EXCLUDED.state, data = EXCLUDED.data, updated_at = CURRENT_TIMESTAMP
+                ''', (user_id, state, json.dumps(parsed)))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting conversation state: {e}")
+            return False
+
+    def get_conversation_state(self, user_id: int):
+        try:
+            import json
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT state, data FROM conversation_states WHERE user_id = %s', (user_id,))
+                row = cursor.fetchone()
+                if row:
+                    state_val = row[0]
+                    data_val = row[1]
+                    try:
+                        data_str = json.dumps(data_val) if not isinstance(data_val, str) else data_val
+                    except Exception:
+                        data_str = str(data_val) if data_val is not None else ''
+                    return (state_val, data_str)
+                return None
+        except Exception as e:
+            logger.error(f"Error getting conversation state: {e}")
+            return None
+
+    def clear_conversation_state(self, user_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM conversation_states WHERE user_id = %s', (user_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error clearing conversation state: {e}")
+            return False
