@@ -605,76 +605,49 @@ class UserbotService:
                     self.user_locks[user_id] = asyncio.Lock()
 
                 async with self.user_locks[user_id]:
-                    # Log incoming message with client's user ID
-                    logger.warning(f"🔔 *** رسالة جديدة عبر عميل المستخدم {user_id} ***")
-                    logger.warning(f"📍 Chat ID: {event.chat_id}, Message: {event.text[:50] if event.text else 'رسالة بدون نص'}...")
-
-                    # Special monitoring for important chats
-                    if event.chat_id == -1002289754739:
-                        logger.error(f"🎯 *** رسالة من محادثة Hidar! Chat ID: {event.chat_id} (عميل {user_id}) ***")
-                        logger.error(f"🎯 *** بدء معالجة الرسالة للتوجيه... ***")
-                    elif event.chat_id == -1002403180244:
-                        logger.error(f"🎯 *** رسالة من محادثة Nuha! Chat ID: {event.chat_id} (عميل {user_id}) ***")
-                        logger.error(f"🎯 *** بدء معالجة الرسالة للتوجيه... ***")
-                    
                     # Get user tasks for this specific user (the owner of this client)
                     tasks = self.user_tasks.get(user_id, [])
+                    
+                    # Get source chat ID first
+                    source_chat_id = event.chat_id
+                    
+                    # Check if this chat is a source in any task for this user
+                    is_monitored_source = any(str(task['source_chat_id']) == str(source_chat_id) for task in tasks)
+                    
+                    # Only log if this is a monitored source chat
+                    if is_monitored_source:
+                        logger.info(f"📥 رسالة من مصدر مراقب: {source_chat_id} (المستخدم {user_id})")
+                        if event.text:
+                            logger.info(f"📝 المحتوى: {event.text[:100]}...")
+                    else:
+                        # Silent processing for non-monitored chats - no logging
+                        pass
 
 
                 # Get source chat ID and username first
-                source_chat_id = event.chat_id
                 source_username = getattr(event.chat, 'username', None)
 
-                # Special monitoring for the specific chat mentioned by user
-                # Enhanced logging for the specific task
-                if source_chat_id == -1002289754739:
-                    logger.warning(f"🎯 *** رسالة من المحادثة المطلوبة (Hidar)! Chat ID: {source_chat_id} ***")
-                    logger.warning(f"🎯 *** بدء معالجة الرسالة للتوجيه ***")
-                    logger.warning(f"🎯 *** عدد المهام المتاحة: {len(tasks)} ***")
-
                 if not tasks:
-                    logger.warning(f"⚠️ لا توجد مهام للمستخدم {user_id}")
-                    return
-
-                logger.info(f"📋 عدد المهام المتاحة للمستخدم {user_id}: {len(tasks)}")
-
-                # Log all tasks for debugging
-                for i, task in enumerate(tasks, 1):
-                    task_name = task.get('task_name', f"مهمة {task['id']}")
-                    logger.info(f"📋 مهمة {i}: '{task_name}' - مصدر='{task['source_chat_id']}' → هدف='{task['target_chat_id']}'")
-                    if str(task['source_chat_id']) == '-1002289754739':
-                        logger.warning(f"🎯 تم العثور على المهمة المطلوبة: {task_name}")
+                    return  # No tasks for this user - silent return
 
                 # Check media filters first
                 message_media_type = self.get_message_media_type(event.message)
                 has_text_caption = bool(event.message.text)  # Check if message has text/caption
-                logger.info(f"🎬 نوع الوسائط للرسالة: {message_media_type}, يحتوي على نص/caption: {has_text_caption}")
 
                 # Find matching tasks for this source chat
                 matching_tasks = []
-                logger.info(f"🔍 البحث عن مهام مطابقة للمحادثة {source_chat_id} (username: {source_username})")
 
                 for task in tasks:
                     task_source_id = str(task['source_chat_id'])
                     task_name = task.get('task_name', f"مهمة {task['id']}")
                     task_id = task.get('id')
 
-                    logger.info(f"🔍 فحص المهمة '{task_name}': مصدر='{task_source_id}' ضد '{source_chat_id}', هدف='{task['target_chat_id']}'")
-
                     # Convert both IDs to string and compare
                     source_chat_id_str = str(source_chat_id)
                     if task_source_id == source_chat_id_str:
-                        logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
-                        # Check admin filter first (if enabled) - now based on post_author
-                        logger.error(f"🚨 === بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id} ===")
-                        
-                        # Log message details for debugging
-                        author_signature = getattr(event.message, 'post_author', None)
-                        logger.error(f"🚨 === تفاصيل الرسالة: sender_id={event.sender_id}, post_author='{author_signature}' ===")
-                        
+                        # Check admin filter
                         admin_allowed = await self.is_admin_allowed_by_signature(task_id, event.message, source_chat_id_str)
-                        logger.error(f"🚨 === نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed} ===")
 
                         # Check media filter
                         media_allowed = self.is_media_allowed(task_id, message_media_type)
@@ -683,50 +656,22 @@ class UserbotService:
                         message_text = event.message.text or ""
                         word_filter_allowed = self.is_message_allowed_by_word_filter(task_id, message_text)
 
-                        # Decision is based on the primary media type, not the caption
-                        # For text messages with media, we check the media type
-                        # For pure text messages, we check text filter
+                        # Determine if message is allowed
                         if message_media_type == 'text':
-                            # Pure text message - check admin, text filter and word filter
                             is_message_allowed = admin_allowed and self.is_media_allowed(task_id, 'text') and word_filter_allowed
-                            filter_type = "النص"
-                            logger.error(f"🚨 === فحص رسالة نصية: admin={admin_allowed}, media={self.is_media_allowed(task_id, 'text')}, word={word_filter_allowed}, نتيجة نهائية={is_message_allowed} ===")
                         else:
-                            # Media message (photo, video, etc.) - check admin, media filter and word filter for caption
                             is_message_allowed = admin_allowed and media_allowed and word_filter_allowed
-                            filter_type = f"الوسائط ({message_media_type})"
-
-                        logger.error(f"🚨 === قرار نهائي: is_message_allowed = {is_message_allowed} ===")
 
                         if is_message_allowed:
-                            logger.error(f"🚨 === إضافة المهمة للقائمة المطابقة ===")
                             matching_tasks.append(task)
-                            if has_text_caption and message_media_type != 'text':
-                                logger.info(f"✅ الرسالة مسموحة - {filter_type} مسموح مع caption وفلاتر الكلمات")
-                            else:
-                                logger.info(f"✅ {filter_type} مسموح لهذه المهمة وفلاتر الكلمات")
+                            logger.info(f"✅ {task_name}: رسالة مقبولة")
                         else:
-                            logger.error(f"🚨 === رفض المهمة - الرسالة محظورة ===")
-                            # Check which filter blocked the message
-                            if not admin_allowed:
-                                logger.error(f"🚫 الرسالة محظورة بواسطة فلتر المشرفين - المرسل {event.sender_id} غير مسموح")
-                            elif not media_allowed:
-                                logger.error(f"🚫 {filter_type} محظور لهذه المهمة (فلتر الوسائط)")
-                            elif not word_filter_allowed:
-                                logger.error(f"🚫 الرسالة محظورة بواسطة فلتر الكلمات")
-                            else:
-                                if has_text_caption and message_media_type != 'text':
-                                    logger.error(f"🚫 {filter_type} محظور لهذه المهمة (مع caption)")
-                                else:
-                                    logger.error(f"🚫 {filter_type} محظور لهذه المهمة")
-                    else:
-                        logger.info(f"❌ لا يوجد تطابق للمهمة '{task_name}': '{task_source_id}' != '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
+                            logger.info(f"🚫 {task_name}: رسالة مرفوضة بواسطة الفلاتر")
 
                 if not matching_tasks:
-                    logger.debug(f"لا توجد مهام مطابقة للمحادثة {source_chat_id} للمستخدم {user_id}")
-                    return
+                    return  # No matching tasks - silent return
 
-                logger.info(f"تم العثور على {len(matching_tasks)} مهمة مطابقة للمحادثة {source_chat_id}")
+                logger.info(f"📤 معالجة {len(matching_tasks)} مهمة مطابقة للمحادثة {source_chat_id}")
 
                 # Check advanced features once per message (using first matching task for settings)
                 first_task = matching_tasks[0]
