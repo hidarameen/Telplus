@@ -17,6 +17,15 @@ class Database:
 
     def get_connection(self):
         """Get SQLite database connection"""
+        # إصلاح صلاحيات الملف قبل الاتصال
+        try:
+            import os
+            if os.path.exists(self.db_path):
+                os.chmod(self.db_path, 0o666)
+                logger.info(f"✅ تم تصحيح صلاحيات قاعدة البيانات: {self.db_path}")
+        except Exception as e:
+            logger.warning(f"تحذير في تصحيح صلاحيات قاعدة البيانات: {e}")
+        
         conn = sqlite3.connect(self.db_path, timeout=120, check_same_thread=False, isolation_level=None)
         conn.row_factory = sqlite3.Row
         try:
@@ -25,7 +34,43 @@ class Database:
             conn.execute('PRAGMA synchronous=NORMAL')
             conn.execute('PRAGMA busy_timeout=120000')
             conn.execute('PRAGMA foreign_keys=ON')
-            # Removed WAL autocheckpoint since we're using DELETE mode
+            conn.execute('PRAGMA locking_mode=NORMAL')
+            conn.execute('PRAGMA temp_store=memory')
+            conn.execute('PRAGMA cache_size=2000')
+            
+            # التأكد من أن قاعدة البيانات قابلة للكتابة
+            conn.execute('BEGIN IMMEDIATE')
+            conn.execute('ROLLBACK')
+            
+            logger.info("✅ تم تطبيق إعدادات PRAGMA آمنة وتأكيد إمكانية الكتابة")
+        except sqlite3.OperationalError as e:
+            if "readonly database" in str(e).lower():
+                logger.error(f"❌ مشكلة readonly في قاعدة البيانات: {e}")
+                logger.error("🔧 محاولة إصلاح الصلاحيات...")
+                try:
+                    import os
+                    os.chmod(self.db_path, 0o666)
+                    logger.info("✅ تم إصلاح الصلاحيات، إعادة المحاولة...")
+                    # إعادة إنشاء الاتصال
+                    conn.close()
+                    conn = sqlite3.connect(self.db_path, timeout=120, check_same_thread=False, isolation_level=None)
+                    conn.row_factory = sqlite3.Row
+                    conn.execute('PRAGMA journal_mode=DELETE')
+                    conn.execute('PRAGMA synchronous=NORMAL')
+                    conn.execute('PRAGMA busy_timeout=120000')
+                    conn.execute('PRAGMA foreign_keys=ON')
+                    conn.execute('PRAGMA locking_mode=NORMAL')
+                    conn.execute('PRAGMA temp_store=memory')
+                    conn.execute('PRAGMA cache_size=2000')
+                    conn.execute('BEGIN IMMEDIATE')
+                    conn.execute('ROLLBACK')
+                    logger.info("✅ تم إصلاح قاعدة البيانات بنجاح")
+                except Exception as fix_error:
+                    logger.error(f"❌ فشل في إصلاح قاعدة البيانات: {fix_error}")
+                    raise
+            else:
+                logger.error(f"❌ خطأ في قاعدة البيانات: {e}")
+                raise
         except Exception:
             # Ignore pragma failures on some platforms
             pass
