@@ -1164,15 +1164,17 @@ class UserbotService:
                                             caption=final_text, 
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if final_text else None,
-                                            buttons=original_reply_markup or inline_buttons,
+                                            buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                             task=task, event=event
                                         )
                                         
-                                        # Apply post-forwarding settings (pin, auto-delete)
+                                        # Apply post-forwarding settings (pin, auto-delete, inline buttons)
                                         if forwarded_msg:
                                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
                                             await self.apply_post_forwarding_settings(
-                                                client, target_entity, msg_id, forwarding_settings, task['id']
+                                                client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                inline_buttons=inline_buttons,
+                                                has_original_buttons=bool(original_reply_markup)
                                             )
                                     except Exception as direct_audio_err:
                                         logger.error(f"❌ فشل الرفع المباشر للملف الصوتي المعالج: {direct_audio_err}")
@@ -1192,7 +1194,7 @@ class UserbotService:
                                             link_preview=forwarding_settings["link_preview_enabled"],
                                             silent=forwarding_settings["silent_notifications"],
                                             parse_mode="HTML",
-                                            buttons=original_reply_markup or inline_buttons,
+                                            buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                         )
                                         
                                         # Apply post-forwarding settings (pin, auto-delete)
@@ -1222,7 +1224,7 @@ class UserbotService:
                                                 caption=caption_text,
                                                 silent=forwarding_settings["silent_notifications"],
                                                 parse_mode="HTML" if caption_text else None,
-                                                buttons=original_reply_markup or inline_buttons,
+                                                buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                                 task=task, event=event
                                             )
                                         else:
@@ -1279,7 +1281,7 @@ class UserbotService:
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
-                                                buttons=original_reply_markup or inline_buttons,
+                                                buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                                 task=task, event=event
                                             )
                                             
@@ -1299,7 +1301,7 @@ class UserbotService:
                                                     caption=caption_text,
                                                     silent=forwarding_settings['silent_notifications'],
                                                     parse_mode='HTML' if caption_text else None,
-                                                    buttons=original_reply_markup or inline_buttons
+                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
                                                 )
                                             else:
                                                 # No media - send as text message
@@ -1310,7 +1312,7 @@ class UserbotService:
                                                     link_preview=forwarding_settings['link_preview_enabled'],
                                                     silent=forwarding_settings['silent_notifications'],
                                                     parse_mode='HTML',
-                                                    buttons=original_reply_markup or inline_buttons
+                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
                                                 )
                                             
                                             # Apply post-forwarding settings (pin, auto-delete)
@@ -1334,7 +1336,7 @@ class UserbotService:
                                                 caption=caption_text,
                                                 silent=forwarding_settings['silent_notifications'],
                                                 parse_mode='HTML' if caption_text else None,
-                                                buttons=original_reply_markup or inline_buttons,
+                                                buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                                 task=task, event=event
                                             )
                                             
@@ -1354,7 +1356,7 @@ class UserbotService:
                                                     caption=caption_text,
                                                     silent=forwarding_settings['silent_notifications'],
                                                     parse_mode='HTML' if caption_text else None,
-                                                    buttons=original_reply_markup or inline_buttons
+                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
                                                 )
                                             else:
                                                 # No media - send as text message
@@ -1365,7 +1367,7 @@ class UserbotService:
                                                     link_preview=forwarding_settings['link_preview_enabled'],
                                                     silent=forwarding_settings['silent_notifications'],
                                                     parse_mode='HTML',
-                                                    buttons=original_reply_markup or inline_buttons
+                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
                                                 )
                                             
                                             # Apply post-forwarding settings (pin, auto-delete)
@@ -1390,7 +1392,7 @@ class UserbotService:
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
                                         formatting_entities=spoiler_entities,
-                                        buttons=original_reply_markup or inline_buttons,
+                                        buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                     )
                                     
                                     # Apply post-forwarding settings (pin, auto-delete)
@@ -1501,18 +1503,64 @@ class UserbotService:
                             # Get target entity
                             target_entity = await client.get_entity(int(target_chat_id))
 
-                            # Update the target message with the edited content
-                            await client.edit_message(
-                                target_entity,
-                                target_message_id,
-                                event.message.text or event.message.message,
-                                file=None if not event.message.media else event.message.media
-                            )
+                            # Get task settings for processing
+                            message_settings = self.get_message_processing_settings(task_id)
+                            
+                            # Process the edited text with same transformations as original
+                            edited_text = event.message.text or event.message.message or ""
+                            
+                            # Apply text processing if enabled
+                            if edited_text and message_settings['text_formatting_enabled']:
+                                processed_text, spoiler_entities = self._process_spoiler_entities(edited_text)
+                            else:
+                                processed_text = edited_text
+                                spoiler_entities = []
+                            
+                            # Check if inline buttons should be applied
+                            inline_buttons = None
+                            if message_settings['inline_buttons_enabled']:
+                                inline_buttons = self.build_inline_buttons(task_id)
+                                
+                            # Update the target message
+                            if spoiler_entities:
+                                # Edit with spoiler entities
+                                await client.edit_message(
+                                    target_entity,
+                                    target_message_id,
+                                    processed_text,
+                                    formatting_entities=spoiler_entities,
+                                    file=None if not event.message.media else event.message.media
+                                )
+                            else:
+                                # Edit normally
+                                await client.edit_message(
+                                    target_entity,
+                                    target_message_id,
+                                    processed_text,
+                                    file=None if not event.message.media else event.message.media,
+                                    parse_mode='HTML'
+                                )
+                            
+                            # Add inline buttons if needed (can't edit buttons with userbot, use bot client)
+                            if inline_buttons:
+                                asyncio.create_task(
+                                    self._add_inline_buttons_with_bot(
+                                        target_chat_id, target_message_id, inline_buttons, task_id
+                                    )
+                                )
 
                             logger.info(f"✅ تم تحديث الرسالة المتزامنة: {target_chat_id}:{target_message_id}")
 
                         except Exception as sync_error:
                             logger.error(f"❌ فشل في مزامنة تعديل الرسالة: {sync_error}")
+                            # Add more detailed error info
+                            error_str = str(sync_error)
+                            if "MESSAGE_NOT_MODIFIED" in error_str:
+                                logger.warning(f"⚠️ لم يتم تعديل الرسالة لأنها متطابقة: {target_chat_id}:{target_message_id}")
+                            elif "MESSAGE_EDIT_TIME_EXPIRED" in error_str:
+                                logger.warning(f"⚠️ انتهت صلاحية تعديل الرسالة: {target_chat_id}:{target_message_id}")
+                            else:
+                                logger.error(f"💥 تفاصيل خطأ مزامنة التعديل: {error_str}")
 
             except Exception as e:
                 logger.error(f"خطأ في معالج تعديل الرسائل للمستخدم {user_id}: {e}")
@@ -2401,9 +2449,17 @@ class UserbotService:
             logger.error(f"خطأ في بناء الأزرار الإنلاين: {e}")
             return None
 
-    async def apply_post_forwarding_settings(self, client: TelegramClient, target_entity, msg_id: int, forwarding_settings: dict, task_id: int):
-        """Apply post-forwarding settings like pin message and auto delete"""
+    async def apply_post_forwarding_settings(self, client: TelegramClient, target_entity, msg_id: int, forwarding_settings: dict, task_id: int, inline_buttons=None, has_original_buttons=False):
+        """Apply post-forwarding settings like pin message, auto delete, and inline buttons"""
         try:
+            # Add inline buttons via bot client if needed and no original buttons exist
+            if inline_buttons and not has_original_buttons:
+                asyncio.create_task(
+                    self._add_inline_buttons_with_bot(
+                        str(target_entity.id), msg_id, inline_buttons, task_id
+                    )
+                )
+            
             # Pin message if enabled
             if forwarding_settings['pin_message_enabled']:
                 try:
@@ -2427,19 +2483,131 @@ class UserbotService:
             logger.error(f"خطأ في تطبيق إعدادات ما بعد التوجيه: {e}")
 
     async def _schedule_message_deletion(self, client: TelegramClient, target_entity, msg_id: int, delay_seconds: int, task_id: int):
-        """Schedule message deletion after specified delay"""
+        """Schedule message deletion after specified delay with proper tracking"""
+        deletion_key = f"{target_entity}:{msg_id}"
+        
         try:
             import asyncio
+            
+            # Store the task for potential cancellation
+            deletion_task = asyncio.current_task()
+            if not hasattr(self, 'scheduled_deletions'):
+                self.scheduled_deletions = {}
+            self.scheduled_deletions[deletion_key] = deletion_task
+            
+            logger.info(f"⏰ تم جدولة حذف الرسالة {msg_id} بعد {delay_seconds} ثانية (المهمة {task_id})")
+            
+            # Wait for the specified delay
             await asyncio.sleep(delay_seconds)
 
             try:
+                # Remove from tracking before deletion
+                if deletion_key in self.scheduled_deletions:
+                    del self.scheduled_deletions[deletion_key]
+                
                 await client.delete_messages(target_entity, msg_id)
                 logger.info(f"🗑️ تم حذف الرسالة {msg_id} تلقائياً من {target_entity} (المهمة {task_id})")
+                
             except Exception as delete_error:
                 logger.error(f"❌ فشل في حذف الرسالة {msg_id} تلقائياً: {delete_error}")
+                
+                # Handle specific deletion errors
+                error_str = str(delete_error)
+                if "MESSAGE_DELETE_FORBIDDEN" in error_str:
+                    logger.warning(f"⚠️ لا يُسمح بحذف الرسالة {msg_id} - قد تكون رسالة أخرى")
+                elif "CHAT_ADMIN_REQUIRED" in error_str:
+                    logger.warning(f"⚠️ مطلوب صلاحيات إدارية لحذف الرسالة {msg_id}")
+                elif "MESSAGE_ID_INVALID" in error_str:
+                    logger.warning(f"⚠️ معرف الرسالة {msg_id} غير صالح أو محذوف مسبقاً")
 
+        except asyncio.CancelledError:
+            logger.info(f"🔄 تم إلغاء جدولة حذف الرسالة {msg_id} (المهمة {task_id})")
+            if deletion_key in getattr(self, 'scheduled_deletions', {}):
+                del self.scheduled_deletions[deletion_key]
         except Exception as e:
             logger.error(f"خطأ في جدولة حذف الرسالة: {e}")
+            if deletion_key in getattr(self, 'scheduled_deletions', {}):
+                del self.scheduled_deletions[deletion_key]
+    
+    def cancel_scheduled_deletion(self, target_entity, msg_id: int):
+        """Cancel a scheduled message deletion"""
+        deletion_key = f"{target_entity}:{msg_id}"
+        
+        if hasattr(self, 'scheduled_deletions') and deletion_key in self.scheduled_deletions:
+            task = self.scheduled_deletions[deletion_key]
+            if not task.done():
+                task.cancel()
+                logger.info(f"🔄 تم إلغاء الحذف المُجدول للرسالة {msg_id}")
+            del self.scheduled_deletions[deletion_key]
+            return True
+        return False
+    
+    def cleanup_completed_deletion_tasks(self):
+        """Clean up completed deletion tasks to prevent memory leaks"""
+        if not hasattr(self, 'scheduled_deletions'):
+            return
+            
+        completed_keys = []
+        for key, task in self.scheduled_deletions.items():
+            if task.done():
+                completed_keys.append(key)
+        
+        for key in completed_keys:
+            del self.scheduled_deletions[key]
+            
+        if completed_keys:
+            logger.info(f"🧹 تم تنظيف {len(completed_keys)} مهام حذف مكتملة من الذاكرة")
+
+    async def _add_inline_buttons_with_bot(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
+        """Add inline buttons to a message using bot client"""
+        try:
+            if not inline_buttons:
+                return False
+                
+            from bot_package.config import BOT_TOKEN, API_ID, API_HASH
+            from telethon import TelegramClient
+            
+            # Create temporary bot client
+            bot_client = TelegramClient('temp_bot_session', API_ID, API_HASH)
+            
+            try:
+                # Start bot client
+                await bot_client.start(bot_token=BOT_TOKEN)
+                logger.info(f"🤖 تم تشغيل bot client لإضافة الأزرار للرسالة {message_id}")
+                
+                # Get target entity
+                target_entity = await bot_client.get_entity(int(target_chat_id))
+                
+                # Get the original message
+                original_msg = await bot_client.get_messages(target_entity, ids=message_id)
+                if not original_msg:
+                    logger.error(f"❌ لم يتم العثور على الرسالة {message_id}")
+                    return False
+                
+                # Edit the message to add buttons while keeping original content
+                await bot_client.edit_message(
+                    target_entity,
+                    message_id,
+                    original_msg.text or original_msg.message,
+                    buttons=inline_buttons
+                )
+                
+                logger.info(f"✅ تم إضافة {len(inline_buttons)} صف من الأزرار للرسالة {message_id} في المهمة {task_id}")
+                return True
+                
+            except Exception as bot_error:
+                logger.error(f"❌ خطأ في bot client لإضافة الأزرار: {bot_error}")
+                return False
+                
+            finally:
+                try:
+                    await bot_client.disconnect()
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"خطأ في إضافة الأزرار باستخدام bot client: {e}")
+            return False
 
     async def _check_advanced_features(self, task_id: int, message_text: str, user_id: int) -> bool:
         """Check all advanced features before sending message"""
@@ -4004,6 +4172,9 @@ class UserbotService:
         معالجة علامات spoiler وتحويلها إلى MessageEntitySpoiler
         Process spoiler markers and convert them to MessageEntitySpoiler entities
         """
+        if not text:
+            return text, []
+            
         entities = []
         processed_text = text
         
@@ -4016,36 +4187,38 @@ class UserbotService:
         
         logger.info(f"🔍 تم العثور على {len(matches)} علامة spoiler في النص")
         
-        # معالجة المطابقات بترتيب عكسي للحفاظ على الفهارس
+        # إنشاء entities أولاً قبل تعديل النص
+        cumulative_offset = 0
+        for match in matches:
+            spoiler_text = match.group(1)
+            
+            # موضع البداية في النص المُعدل
+            entity_offset = match.start() - cumulative_offset
+            
+            # إنشاء entity
+            entity = MessageEntitySpoiler(
+                offset=entity_offset,
+                length=len(spoiler_text)
+            )
+            entities.append(entity)
+            
+            # تحديث الإزاحة التراكمية (طول العلامات المُزالة)
+            marker_length = len('TELETHON_SPOILER_START') + len('TELETHON_SPOILER_END')
+            cumulative_offset += marker_length
+            
+            logger.info(f"✅ Spoiler entity: offset={entity_offset}, length={len(spoiler_text)}, content='{spoiler_text[:50]}{'...' if len(spoiler_text) > 50 else ''}'")
+        
+        # الآن إزالة العلامات من النص (بترتيب عكسي للحفاظ على الفهارس)
         for match in reversed(matches):
             start_pos = match.start()
             end_pos = match.end()
             spoiler_text = match.group(1)
             
-            # استبدال العلامة بالنص العادي أولاً
+            # استبدال العلامة بالنص المخفي فقط
             processed_text = processed_text[:start_pos] + spoiler_text + processed_text[end_pos:]
         
-        # الآن إضافة الكيانات بالمواضع الصحيحة
-        offset = 0
-        for match in re.finditer(pattern, text, re.DOTALL):
-            spoiler_text = match.group(1)
-            
-            # حساب الموضع الصحيح بعد إزالة العلامات السابقة
-            correct_offset = match.start() - offset
-            
-            entity = MessageEntitySpoiler(
-                offset=correct_offset,
-                length=len(spoiler_text)
-            )
-            entities.append(entity)
-            
-            # تحديث الفهرس بطول العلامات المُزالة
-            marker_length = len('TELETHON_SPOILER_START') + len('TELETHON_SPOILER_END')
-            offset += marker_length
-            
-            logger.info(f"✅ Spoiler entity: offset={correct_offset}, length={len(spoiler_text)}, content='{spoiler_text[:50]}{'...' if len(spoiler_text) > 50 else ''}'")
-        
         logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler في النص بنجاح")
+        logger.info(f"📝 النص المُعالج: '{processed_text[:100]}{'...' if len(processed_text) > 100 else ''}'")
         
         return processed_text, entities
 
