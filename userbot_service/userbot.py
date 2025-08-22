@@ -3149,10 +3149,6 @@ class UserbotService:
                     else:
                         # Username or other format
                         target_entity = normalized_chat_id
-                            target_entity = target_chat_id
-                    else:
-                        # Username or other format
-                        target_entity = target_chat_id
                     
                     # Get target entity
                     target_entity = await bot_client.get_entity(target_entity)

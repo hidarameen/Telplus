@@ -654,7 +654,6 @@ class SimpleTelegramBot:
         )
         await self.edit_or_send_message(event, message_text, buttons=buttons)
 
-
     async def handle_callback(self, event):
         """Handle button callbacks"""
         try:
@@ -4078,7 +4077,6 @@ class SimpleTelegramBot:
         else:
             await event.answer("❌ فشل في حذف الهدف")
 
-
     async def show_working_hours_filter(self, event, task_id):
         """Show working hours filter settings with original interface"""
         user_id = event.sender_id
@@ -4195,8 +4193,6 @@ class SimpleTelegramBot:
         )
         
         await self.edit_or_send_message(event, message_text, buttons=buttons)
-
-
 
     async def select_all_hours(self, event, task_id):
         """Select all working hours"""
@@ -4817,8 +4813,6 @@ class SimpleTelegramBot:
         
         await self.edit_or_send_message(event, message_text, buttons=buttons)
 
-
-
     async def _get_duplicate_settings_buttons(self, task_id):
         """Get buttons for duplicate settings menu"""
         # Get current settings
@@ -4910,10 +4904,6 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في تبديل وضع فلتر الأزرار الإنلاين: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
 
-
-
-
-
     async def show_main_menu(self, event):
         """Show main menu"""
         user_id = event.sender_id
@@ -4993,7 +4983,6 @@ class SimpleTelegramBot:
         )
         
         await self.edit_or_send_message(event, message_text, buttons=buttons)
-
 
     async def list_tasks(self, event):
         """List user tasks"""
@@ -7579,7 +7568,6 @@ class SimpleTelegramBot:
         )
         await self.edit_or_send_message(event, message_text, buttons=buttons)
 
-
     async def show_media_filters(self, event, task_id):
         """Show media filters management for task"""
         user_id = event.sender_id
@@ -9744,8 +9732,6 @@ class SimpleTelegramBot:
         else:
             time_display = f"{delete_time} ثانية"
 
-
-
         buttons = [
             # الصف الأول - معاينة الرابط وتثبيت الرسالة
             [Button.inline(f"🔗 معاينة الرابط {link_preview_status.split()[0]}", f"toggle_link_preview_{task_id}"),
@@ -11340,8 +11326,6 @@ class SimpleTelegramBot:
         except Exception as e:
             logger.error(f"خطأ في تبديل الساعة {hour} للمهمة {task_id}: {e}")
             await event.answer("❌ حدث خطأ في التحديث")
-
-
 
     def _get_bot_token(self):
         """Get BOT_TOKEN from various sources"""
