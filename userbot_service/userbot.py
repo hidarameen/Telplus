@@ -1057,6 +1057,25 @@ class UserbotService:
                                     silent=forwarding_settings['silent_notifications']
                                 )
                                 logger.info(f"✅ تم توجيه الرسالة بنجاح في وضع التوجيه")
+                                
+                                # Apply post-forwarding settings (pin, auto-delete)
+                                if forwarded_msg:
+                                    msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                    await self.apply_post_forwarding_settings(
+                                        client, target_entity, msg_id, forwarding_settings, task['id']
+                                    )
+                                    
+                                    # Save message mapping for sync functionality
+                                    try:
+                                        self.db.save_message_mapping(
+                                            task_id=task['id'],
+                                            source_chat_id=str(source_chat_id),
+                                            source_message_id=event.message.id,
+                                            target_chat_id=str(target_chat_id),
+                                            target_message_id=msg_id
+                                        )
+                                    except Exception as mapping_error:
+                                        logger.error(f"❌ فشل في حفظ تطابق الرسالة: {mapping_error}")
                             except Exception as forward_err:
                                 logger.error(f"❌ فشل التوجيه المباشر، التبديل للنسخ: {forward_err}")
                                 # Fallback to copy mode if forward fails
@@ -1104,6 +1123,13 @@ class UserbotService:
                                         file=event.message.media,
                                         **server_copy_kwargs
                                     )
+                                    
+                                    # Apply post-forwarding settings (pin, auto-delete)
+                                    if forwarded_msg:
+                                        msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                        await self.apply_post_forwarding_settings(
+                                            client, target_entity, msg_id, forwarding_settings, task['id']
+                                        )
                                 else:
                                     # Pure text copy
                                     message_text = event.message.text or final_text or "رسالة"
@@ -1114,6 +1140,13 @@ class UserbotService:
                                         silent=forwarding_settings['silent_notifications'],
                                         buttons=original_reply_markup
                                     )
+                                    
+                                    # Apply post-forwarding settings (pin, auto-delete)
+                                    if forwarded_msg:
+                                        msg_id = forwarded_msg.id
+                                        await self.apply_post_forwarding_settings(
+                                            client, target_entity, msg_id, forwarding_settings, task['id']
+                                        )
                             else:
                                 # Copy mode: send as new message with all formatting applied
                                 if requires_copy_mode:
@@ -1134,6 +1167,13 @@ class UserbotService:
                                             buttons=original_reply_markup or inline_buttons,
                                             task=task, event=event
                                         )
+                                        
+                                        # Apply post-forwarding settings (pin, auto-delete)
+                                        if forwarded_msg:
+                                            msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                            await self.apply_post_forwarding_settings(
+                                                client, target_entity, msg_id, forwarding_settings, task['id']
+                                            )
                                     except Exception as direct_audio_err:
                                         logger.error(f"❌ فشل الرفع المباشر للملف الصوتي المعالج: {direct_audio_err}")
 
@@ -1154,6 +1194,13 @@ class UserbotService:
                                             parse_mode="HTML",
                                             buttons=original_reply_markup or inline_buttons,
                                         )
+                                        
+                                        # Apply post-forwarding settings (pin, auto-delete)
+                                        if forwarded_msg:
+                                            msg_id = forwarded_msg.id
+                                            await self.apply_post_forwarding_settings(
+                                                client, target_entity, msg_id, forwarding_settings, task['id']
+                                            )
                                     else:
                                         # Regular media - send with caption using send_file
                                         logger.info("📁 إرسال وسائط مع الكابشن")
@@ -1196,6 +1243,13 @@ class UserbotService:
                                                 file=media_to_send,
                                                 **video_kwargs
                                             )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                )
                                 else:
                                     # Regular media message with caption handling
                                     # Check if caption should be removed
@@ -1228,6 +1282,13 @@ class UserbotService:
                                                 buttons=original_reply_markup or inline_buttons,
                                                 task=task, event=event
                                             )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                )
                                         else:
                                             # Use original media if no processing was done
                                             logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
@@ -1239,6 +1300,13 @@ class UserbotService:
                                                 parse_mode='HTML' if caption_text else None,
                                                 buttons=original_reply_markup or inline_buttons
                                             )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                )
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
                                         logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
@@ -1257,6 +1325,13 @@ class UserbotService:
                                                 buttons=original_reply_markup or inline_buttons,
                                                 task=task, event=event
                                             )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                )
                                         else:
                                             # Use original media if no processing was done
                                             logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
@@ -1268,6 +1343,13 @@ class UserbotService:
                                                 parse_mode='HTML' if caption_text else None,
                                                 buttons=original_reply_markup or inline_buttons
                                             )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id']
+                                                )
                         else:
                             # No media
                             if (event.message.text or final_text):
@@ -1286,6 +1368,13 @@ class UserbotService:
                                         formatting_entities=spoiler_entities,
                                         buttons=original_reply_markup or inline_buttons,
                                     )
+                                    
+                                    # Apply post-forwarding settings (pin, auto-delete)
+                                    if forwarded_msg:
+                                        msg_id = forwarded_msg.id
+                                        await self.apply_post_forwarding_settings(
+                                            client, target_entity, msg_id, forwarding_settings, task['id']
+                                        )
                                 else:
                                     # Send normally with buttons
                                     # Combine original and custom buttons for Telethon
@@ -1299,6 +1388,13 @@ class UserbotService:
                                         parse_mode='HTML',
                                         buttons=combined_buttons
                                     )
+                                    
+                                    # Apply post-forwarding settings (pin, auto-delete)
+                                    if forwarded_msg:
+                                        msg_id = forwarded_msg.id
+                                        await self.apply_post_forwarding_settings(
+                                            client, target_entity, msg_id, forwarding_settings, task['id']
+                                        )
                             else:
                                 # Fallback to forward for other types
                                 forwarded_msg = await client.forward_messages(
@@ -1306,6 +1402,13 @@ class UserbotService:
                                     event.message,
                                     silent=forwarding_settings['silent_notifications']
                                 )
+                                
+                                # Apply post-forwarding settings (pin, auto-delete)
+                                if forwarded_msg:
+                                    msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                    await self.apply_post_forwarding_settings(
+                                        client, target_entity, msg_id, forwarding_settings, task['id']
+                                    )
 
                     except Exception as forward_error:
                         task_name = task.get('task_name', f"مهمة {task['id']}")
@@ -1782,6 +1885,14 @@ class UserbotService:
                         )
                     
                     logger.info(f"✅ تم إرسال ألبوم بنجاح إلى {target_chat_id}")
+                    
+                    # Apply post-forwarding settings (pin, auto-delete) for album
+                    if forwarded_msg and task_info.get('forwarding_settings'):
+                        # For albums, take the first message ID
+                        msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                        await self.apply_post_forwarding_settings(
+                            client, target_chat, msg_id, task_info['forwarding_settings'], task['id']
+                        )
                     
                     # Save message mappings for all items
                     if isinstance(forwarded_msg, list):
