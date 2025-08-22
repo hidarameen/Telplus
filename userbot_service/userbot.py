@@ -2625,13 +2625,295 @@ class UserbotService:
                 return False
                 
             logger.info(f"🔘 بدء إضافة {len(inline_buttons)} صف من الأزرار للرسالة {message_id} في القناة {target_chat_id} - المهمة {task_id}")
+            
+            # Try direct API method first (more reliable)
+            if await self._add_buttons_via_api(target_chat_id, message_id, inline_buttons, task_id):
+                return True
+            
+            # Fallback to Telethon method
+            return await self._add_buttons_via_telethon(target_chat_id, message_id, inline_buttons, task_id)
+                    
+        except Exception as e:
+            logger.error(f"❌ خطأ عام في إضافة الأزرار باستخدام bot client: {e}")
+            return False
+
+    async def _add_buttons_via_api(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
+        """Add inline buttons using direct Telegram Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            import json
+            
+            logger.info(f"🔧 محاولة إضافة الأزرار عبر API مباشر للرسالة {message_id}")
+            
+            # Validate chat_id format first
+            if not self._validate_chat_id(target_chat_id):
+                return False
+            
+            # Check bot permissions
+            if not await self._check_bot_permissions(target_chat_id):
+                logger.error(f"❌ البوت ليس لديه صلاحيات كافية في القناة {target_chat_id}")
+                return False
+            
+            # Convert inline_buttons to API format
+            keyboard = []
+            for row in inline_buttons:
+                keyboard_row = []
+                for button in row:
+                    if hasattr(button, 'url'):
+                        keyboard_row.append({
+                            "text": button.text,
+                            "url": button.url
+                        })
+                keyboard.append(keyboard_row)
+            
+            # Get original message text first
+            message_text = await self._get_message_text_via_api(target_chat_id, message_id)
+            
+            # Try method 1: Edit existing message
+            if await self._edit_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
+                return True
+            
+            # Try method 2: Send new message with buttons and delete old one
+            if await self._replace_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
+                return True
+            
+            return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار عبر API: {e}")
+            return False
+
+    async def _edit_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
+        """Try to edit existing message with buttons"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "message_id": message_id,
+                "text": message_text,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            # Check if text contains HTML formatting
+            if '<' in message_text and '>' in message_text:
+                payload["parse_mode"] = "HTML"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        logger.info(f"✅ تم تعديل الرسالة {message_id} وإضافة الأزرار بنجاح")
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.warning(f"⚠️ فشل في تعديل الرسالة: {error_code} - {error_desc}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في تعديل الرسالة: {e}")
+            return False
+
+    async def _replace_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
+        """Send new message with buttons and delete old message"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Send new message with buttons
+            send_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "text": message_text,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            # Check if text contains HTML formatting
+            if '<' in message_text and '>' in message_text:
+                payload["parse_mode"] = "HTML"
+            
+            async with aiohttp.ClientSession() as session:
+                # Send new message
+                async with session.post(send_url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        new_message_id = result['result']['message_id']
+                        logger.info(f"✅ تم إرسال رسالة جديدة مع الأزرار: {new_message_id}")
+                        
+                        # Try to delete old message
+                        try:
+                            delete_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+                            delete_payload = {
+                                "chat_id": target_chat_id,
+                                "message_id": message_id
+                            }
+                            
+                            async with session.post(delete_url, json=delete_payload) as delete_response:
+                                delete_result = await delete_response.json()
+                                if delete_result.get('ok'):
+                                    logger.info(f"✅ تم حذف الرسالة القديمة: {message_id}")
+                                else:
+                                    logger.warning(f"⚠️ لم يتم حذف الرسالة القديمة: {message_id}")
+                                    
+                        except Exception as delete_err:
+                            logger.warning(f"⚠️ خطأ في حذف الرسالة القديمة: {delete_err}")
+                        
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.error(f"❌ فشل في إرسال رسالة جديدة: {error_code} - {error_desc}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في استبدال الرسالة: {e}")
+            return False
+
+    async def _get_message_text_via_api(self, target_chat_id: str, message_id: int):
+        """Get original message text via Telegram Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Try to get message info using getUpdates (limited but works for recent messages)
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok') and result.get('result'):
+                        updates = result['result']
+                        for update in updates:
+                            if 'message' in update:
+                                msg = update['message']
+                                if (str(msg.get('chat', {}).get('id')) == str(target_chat_id) and 
+                                    msg.get('message_id') == message_id):
+                                    return msg.get('text', 'تم إضافة الأزرار')
+            
+            # If not found in updates, return default text
+            return "تم إضافة الأزرار"
+            
+        except Exception as e:
+            logger.warning(f"⚠️ لا يمكن الحصول على نص الرسالة الأصلية: {e}")
+            return "تم إضافة الأزرار"
+
+    def _validate_chat_id(self, target_chat_id: str) -> bool:
+        """Validate chat ID format and detect phone numbers"""
+        try:
+            if not target_chat_id:
+                logger.error("❌ معرف القناة فارغ")
+                return False
+            
+            # Check if it's a phone number (usually 7-15 digits)
+            if target_chat_id.isdigit():
+                chat_id_int = int(target_chat_id)
+                if chat_id_int < 1000000000:  # Likely a phone number
+                    logger.error(f"❌ معرف القناة {target_chat_id} يبدو كرقم هاتف وليس معرف قناة")
+                    logger.error(f"💡 تأكد من استخدام معرف القناة الصحيح (مثال: -1001234567890)")
+                    return False
+            
+            # Check for valid channel/group ID formats
+            if target_chat_id.startswith('-100'):
+                # Channel ID format
+                return True
+            elif target_chat_id.startswith('-'):
+                # Group ID format
+                return True
+            elif target_chat_id.startswith('@'):
+                # Username format
+                return True
+            elif target_chat_id.isdigit() and int(target_chat_id) > 1000000000:
+                # Large numeric ID (likely a chat ID)
+                return True
+            else:
+                logger.warning(f"⚠️ معرف القناة {target_chat_id} قد لا يكون صحيحاً")
+                return True  # Allow it to try anyway
                 
+        except Exception as e:
+            logger.error(f"❌ خطأ في التحقق من معرف القناة: {e}")
+            return False
+
+    async def _check_bot_permissions(self, target_chat_id: str):
+        """Check if bot has necessary permissions in the channel"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Validate chat_id format first
+            if not self._validate_chat_id(target_chat_id):
+                return False
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
+            payload = {
+                "chat_id": target_chat_id,
+                "user_id": BOT_TOKEN.split(':')[0] if ':' in BOT_TOKEN else None
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        member = result['result']
+                        status = member.get('status', '')
+                        
+                        # Check if bot is admin or has post permissions
+                        if status in ['administrator', 'creator']:
+                            logger.info(f"✅ البوت هو مشرف في القناة {target_chat_id}")
+                            return True
+                        elif status == 'member':
+                            # Check if bot has post_messages permission
+                            can_post = member.get('can_post_messages', False)
+                            if can_post:
+                                logger.info(f"✅ البوت لديه صلاحية النشر في القناة {target_chat_id}")
+                                return True
+                            else:
+                                logger.error(f"❌ البوت ليس لديه صلاحية النشر في القناة {target_chat_id}")
+                                return False
+                        else:
+                            logger.error(f"❌ البوت ليس عضو في القناة {target_chat_id}")
+                            return False
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.error(f"❌ لا يمكن التحقق من صلاحيات البوت في القناة {target_chat_id}: {error_code} - {error_desc}")
+                        
+                        # Handle specific errors
+                        if "CHAT_NOT_FOUND" in error_desc:
+                            logger.error(f"💡 تأكد من أن البوت عضو في القناة {target_chat_id}")
+                        elif "BOT_WAS_BLOCKED" in error_desc:
+                            logger.error(f"💡 البوت محظور من القناة {target_chat_id}")
+                        elif "USER_NOT_PARTICIPANT" in error_desc:
+                            logger.error(f"💡 البوت ليس عضو في القناة {target_chat_id}")
+                        
+                        return False
+                        
+        except Exception as e:
+            logger.warning(f"⚠️ خطأ في التحقق من صلاحيات البوت: {e}")
+            return False
+
+    async def _add_buttons_via_telethon(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
+        """Add inline buttons using Telethon client (fallback method)"""
+        try:
             from bot_package.config import BOT_TOKEN, API_ID, API_HASH
             from telethon import TelegramClient
             import asyncio
             
             # Add small delay to ensure message is fully sent
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
             
             # Create temporary bot client with unique session name
             import time
@@ -2645,20 +2927,50 @@ class UserbotService:
                 
                 # Convert target_chat_id to appropriate format
                 try:
-                    if target_chat_id.startswith('-'):
+                    # Handle different chat ID formats
+                    if target_chat_id.startswith('-100'):
+                        # Channel ID format
                         target_entity = int(target_chat_id)
+                    elif target_chat_id.startswith('-'):
+                        # Group ID format
+                        target_entity = int(target_chat_id)
+                    elif target_chat_id.isdigit():
+                        # Check if it's a valid chat ID (not a phone number)
+                        chat_id_int = int(target_chat_id)
+                        if chat_id_int > 1000000000:  # Likely a chat ID
+                            target_entity = chat_id_int
+                        else:
+                            # This might be a phone number, try as string
+                            target_entity = target_chat_id
                     else:
+                        # Username or other format
                         target_entity = target_chat_id
                     
                     # Get target entity
                     target_entity = await bot_client.get_entity(target_entity)
                     logger.info(f"✅ تم العثور على القناة الهدف: {getattr(target_entity, 'title', target_chat_id)}")
                 except Exception as entity_err:
+                    error_str = str(entity_err)
                     logger.error(f"❌ فشل في الوصول للقناة {target_chat_id}: {entity_err}")
-                    return False
+                    
+                    # Handle specific error for phone numbers
+                    if "Cannot get entity by phone number as a bot" in error_str:
+                        logger.error(f"❌ لا يمكن استخدام رقم الهاتف {target_chat_id} كمعرف قناة للبوت")
+                        logger.error(f"💡 تأكد من استخدام معرف القناة الصحيح (مثال: -1001234567890)")
+                        return False
+                    elif "CHAT_NOT_FOUND" in error_str:
+                        logger.error(f"❌ لم يتم العثور على القناة {target_chat_id}")
+                        logger.error(f"💡 تأكد من أن البوت عضو في القناة")
+                        return False
+                    elif "BOT_WAS_BLOCKED" in error_str:
+                        logger.error(f"❌ تم حظر البوت من القناة {target_chat_id}")
+                        return False
+                    else:
+                        logger.error(f"❌ خطأ غير معروف في الوصول للقناة: {error_str}")
+                        return False
                 
                 # Get the original message with retry
-                max_retries = 3
+                max_retries = 5
                 original_msg = None
                 
                 for attempt in range(max_retries):
@@ -2668,10 +2980,10 @@ class UserbotService:
                             break
                         else:
                             logger.warning(f"⚠️ محاولة {attempt + 1}: لم يتم العثور على الرسالة {message_id}")
-                            await asyncio.sleep(1)  # Wait before retry
+                            await asyncio.sleep(2)  # Wait before retry
                     except Exception as get_msg_err:
                         logger.warning(f"⚠️ محاولة {attempt + 1}: خطأ في جلب الرسالة {message_id}: {get_msg_err}")
-                        await asyncio.sleep(1)  # Wait before retry
+                        await asyncio.sleep(2)  # Wait before retry
                 
                 if not original_msg:
                     logger.error(f"❌ فشل في العثور على الرسالة {message_id} بعد {max_retries} محاولات")
@@ -2679,22 +2991,66 @@ class UserbotService:
                 
                 logger.info(f"✅ تم العثور على الرسالة {message_id}: '{original_msg.text[:50] if original_msg.text else 'وسائط'}'")
                 
+                # Check if bot has edit permissions
+                try:
+                    bot_info = await bot_client.get_me()
+                    logger.info(f"🤖 معلومات البوت: {bot_info.first_name} (@{bot_info.username})")
+                    
+                    # Get chat member info to check permissions
+                    chat_member = await bot_client.get_permissions(target_entity)
+                    if not chat_member.is_admin and not chat_member.post_messages:
+                        logger.error(f"❌ البوت ليس لديه صلاحيات كافية لتعديل الرسائل في {target_chat_id}")
+                        return False
+                        
+                except Exception as perm_err:
+                    logger.warning(f"⚠️ لا يمكن التحقق من صلاحيات البوت: {perm_err}")
+                
                 # Edit the message to add buttons while keeping original content
                 try:
-                    await bot_client.edit_message(
+                    # Prepare message text
+                    message_text = original_msg.text or original_msg.message or "."
+                    
+                    # Handle media messages
+                    media = None
+                    if original_msg.media:
+                        media = original_msg.media
+                    
+                    # Edit message with buttons
+                    edited_msg = await bot_client.edit_message(
                         target_entity,
                         message_id,
-                        original_msg.text or original_msg.message or ".",
+                        message_text,
                         buttons=inline_buttons,
-                        parse_mode='HTML'
+                        parse_mode='HTML' if '<' in message_text and '>' in message_text else None
                     )
                     
-                    logger.info(f"✅ تم إضافة {len(inline_buttons)} صف من الأزرار بنجاح للرسالة {message_id} في المهمة {task_id}")
-                    return True
+                    if edited_msg:
+                        logger.info(f"✅ تم إضافة {len(inline_buttons)} صف من الأزرار بنجاح للرسالة {message_id} في المهمة {task_id}")
+                        return True
+                    else:
+                        logger.error(f"❌ فشل في تعديل الرسالة {message_id} - لم يتم إرجاع رسالة معدلة")
+                        return False
                     
                 except Exception as edit_err:
+                    error_str = str(edit_err)
                     logger.error(f"❌ فشل في تعديل الرسالة {message_id} لإضافة الأزرار: {edit_err}")
-                    return False
+                    
+                    # Handle specific error cases
+                    if "MESSAGE_NOT_MODIFIED" in error_str:
+                        logger.warning(f"⚠️ الرسالة لم تتغير - قد تكون الأزرار موجودة بالفعل")
+                        return True
+                    elif "MESSAGE_EDIT_TIME_EXPIRED" in error_str:
+                        logger.error(f"❌ انتهت صلاحية تعديل الرسالة {message_id}")
+                        return False
+                    elif "CHAT_WRITE_FORBIDDEN" in error_str:
+                        logger.error(f"❌ البوت لا يستطيع الكتابة في القناة {target_chat_id}")
+                        return False
+                    elif "BOT_WAS_BLOCKED" in error_str:
+                        logger.error(f"❌ تم حظر البوت في القناة {target_chat_id}")
+                        return False
+                    else:
+                        logger.error(f"❌ خطأ غير معروف في تعديل الرسالة: {error_str}")
+                        return False
                 
             except Exception as bot_error:
                 logger.error(f"❌ خطأ عام في bot client لإضافة الأزرار: {bot_error}")
@@ -2708,11 +3064,12 @@ class UserbotService:
                     session_file = f'{session_name}.session'
                     if os.path.exists(session_file):
                         os.remove(session_file)
+                        logger.info(f"🧹 تم تنظيف ملف الجلسة المؤقت: {session_file}")
                 except Exception as cleanup_err:
                     logger.warning(f"⚠️ تحذير في تنظيف bot client: {cleanup_err}")
                     
         except Exception as e:
-            logger.error(f"❌ خطأ عام في إضافة الأزرار باستخدام bot client: {e}")
+            logger.error(f"❌ خطأ في إضافة الأزرار عبر Telethon: {e}")
             return False
 
     async def _check_advanced_features(self, task_id: int, message_text: str, user_id: int) -> bool:
