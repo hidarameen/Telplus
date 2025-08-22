@@ -266,10 +266,15 @@ class PostgreSQLDatabase:
                 CREATE TABLE IF NOT EXISTS pending_messages (
                     id SERIAL PRIMARY KEY,
                     task_id INTEGER NOT NULL,
+                    user_id BIGINT,
+                    source_chat_id TEXT,
+                    source_message_id BIGINT,
                     message_id BIGINT NOT NULL,
                     chat_id TEXT NOT NULL,
                     message_type TEXT NOT NULL,
                     message_data JSONB NOT NULL,
+                    approval_message_id BIGINT,
+                    status TEXT DEFAULT 'pending',
                     retry_count INTEGER DEFAULT 0,
                     max_retries INTEGER DEFAULT 3,
                     next_retry TIMESTAMP,
@@ -627,6 +632,15 @@ class PostgreSQLDatabase:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_forwarded_messages_log_task_id ON forwarded_messages_log(task_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_message_duplicates_task_id ON message_duplicates(task_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_channels_user_id ON user_channels(user_id)')
+            
+            -- Unique indexes to support ON CONFLICT semantics
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_task_message_settings_task_id ON task_message_settings(task_id)')
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_task_audio_metadata_settings_task_id ON task_audio_metadata_settings(task_id)')
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_task_duplicate_settings_task_id ON task_duplicate_settings(task_id)')
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_task_day_filters_task_day ON task_day_filters(task_id, day_of_week)')
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_task_language_filters ON task_language_filters(task_id, language_code)')
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_task_working_hours_task_id ON task_working_hours(task_id)')
+            cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_working_hours_schedule ON task_working_hours_schedule(working_hours_id, day_of_week)')
 
             conn.commit()
 
@@ -760,6 +774,35 @@ END$$;
                 pass
             try:
                 cursor.execute("ALTER TABLE task_message_settings ADD COLUMN IF NOT EXISTS inline_buttons_enabled BOOLEAN DEFAULT FALSE")
+            except Exception:
+                pass
+            -- Backfill unique constraints for ON CONFLICT support
+            try:
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_task_message_settings_task_id ON task_message_settings(task_id)")
+            except Exception:
+                pass
+            try:
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_task_audio_metadata_settings_task_id ON task_audio_metadata_settings(task_id)")
+            except Exception:
+                pass
+            try:
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_task_duplicate_settings_task_id ON task_duplicate_settings(task_id)")
+            except Exception:
+                pass
+            try:
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_task_day_filters_task_day ON task_day_filters(task_id, day_of_week)")
+            except Exception:
+                pass
+            try:
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_task_language_filters ON task_language_filters(task_id, language_code)")
+            except Exception:
+                pass
+            try:
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_task_working_hours_task_id ON task_working_hours(task_id)")
+            except Exception:
+                pass
+            try:
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_working_hours_schedule ON task_working_hours_schedule(working_hours_id, day_of_week)")
             except Exception:
                 pass
 
