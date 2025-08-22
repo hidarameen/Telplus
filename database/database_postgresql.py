@@ -692,7 +692,29 @@ class PostgreSQLDatabase:
                 cursor.execute("ALTER TABLE user_sessions ALTER COLUMN user_id TYPE BIGINT USING user_id::bigint")
             except Exception:
                 pass
-
+            try:
+                cursor.execute("ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_user_id_fkey")
+            except Exception:
+                pass
+            try:
+                cursor.execute("""
+DO $$
+DECLARE
+    r record;
+BEGIN
+    FOR r IN
+        SELECT conname
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        WHERE t.relname = 'user_sessions' AND c.contype = 'f'
+    LOOP
+        EXECUTE format('ALTER TABLE user_sessions DROP CONSTRAINT %I', r.conname);
+    END LOOP;
+END$$;
+""")
+            except Exception:
+                pass
+            
             try:
                 cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS task_name TEXT DEFAULT 'مهمة توجيه'")
             except Exception:
@@ -711,22 +733,6 @@ class PostgreSQLDatabase:
                 pass
             try:
                 cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target_chat_name TEXT")
-            except Exception:
-                pass
-            try:
-                cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS forward_mode TEXT DEFAULT 'forward'")
-            except Exception:
-                pass
-            try:
-                cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
-            except Exception:
-                pass
-            try:
-                cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-            except Exception:
-                pass
-            try:
-                cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             except Exception:
                 pass
 
