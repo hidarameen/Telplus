@@ -2687,7 +2687,6 @@ class UserbotService:
             
             # If direct edit fails, try to get message text and edit
             logger.info(f"⚠️ فشل في التعديل المباشر، محاولة الحصول على نص الرسالة...")
-            
             # Get original message text
             message_text = await self._get_message_text_via_bot(normalized_chat_id, message_id)
             
