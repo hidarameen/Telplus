@@ -12,6 +12,7 @@ telethon==1.36.0
 
 # Database
 SQLAlchemy==2.0.34
+asyncpg==0.29.0
 
 # Image Processing
 Pillow==10.4.0
