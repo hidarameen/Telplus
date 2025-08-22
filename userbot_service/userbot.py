@@ -2481,9 +2481,11 @@ class UserbotService:
         try:
             # Add inline buttons via bot client if needed and no original buttons exist
             if inline_buttons and not has_original_buttons:
+                # Handle both entity objects and integer IDs
+                target_id = str(target_entity.id) if hasattr(target_entity, 'id') else str(target_entity)
                 asyncio.create_task(
                     self._add_inline_buttons_with_bot(
-                        str(target_entity.id), msg_id, inline_buttons, task_id
+                        target_id, msg_id, inline_buttons, task_id
                     )
                 )
             
