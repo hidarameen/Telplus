@@ -2646,13 +2646,16 @@ class UserbotService:
             
             logger.info(f"🔧 محاولة إضافة الأزرار عبر API مباشر للرسالة {message_id}")
             
+            # Normalize chat ID (add -100 prefix if needed)
+            normalized_chat_id = self._normalize_chat_id(target_chat_id)
+            
             # Validate chat_id format first
-            if not self._validate_chat_id(target_chat_id):
+            if not self._validate_chat_id(normalized_chat_id):
                 return False
             
             # Check bot permissions
-            if not await self._check_bot_permissions(target_chat_id):
-                logger.error(f"❌ البوت ليس لديه صلاحيات كافية في القناة {target_chat_id}")
+            if not await self._check_bot_permissions(normalized_chat_id):
+                logger.error(f"❌ البوت ليس لديه صلاحيات كافية في القناة {normalized_chat_id}")
                 return False
             
             # Convert inline_buttons to API format
@@ -2668,14 +2671,14 @@ class UserbotService:
                 keyboard.append(keyboard_row)
             
             # Get original message text first
-            message_text = await self._get_message_text_via_api(target_chat_id, message_id)
+            message_text = await self._get_message_text_via_api(normalized_chat_id, message_id)
             
             # Try method 1: Edit existing message
-            if await self._edit_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
+            if await self._edit_message_with_buttons(normalized_chat_id, message_id, message_text, keyboard):
                 return True
             
             # Try method 2: Send new message with buttons and delete old one
-            if await self._replace_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
+            if await self._replace_message_with_buttons(normalized_chat_id, message_id, message_text, keyboard):
                 return True
             
             return False
@@ -2836,7 +2839,8 @@ class UserbotService:
                 # Username format
                 return True
             elif target_chat_id.isdigit() and int(target_chat_id) > 1000000000:
-                # Large numeric ID (likely a chat ID)
+                # Large numeric ID (likely a chat ID) - this might be a channel ID without -100 prefix
+                logger.info(f"ℹ️ معرف القناة {target_chat_id} قد يحتاج إلى إضافة -100 في البداية")
                 return True
             else:
                 logger.warning(f"⚠️ معرف القناة {target_chat_id} قد لا يكون صحيحاً")
@@ -2845,6 +2849,27 @@ class UserbotService:
         except Exception as e:
             logger.error(f"❌ خطأ في التحقق من معرف القناة: {e}")
             return False
+
+    def _normalize_chat_id(self, target_chat_id: str) -> str:
+        """Normalize chat ID by adding -100 prefix if needed"""
+        try:
+            if not target_chat_id:
+                return target_chat_id
+            
+            # If it's a large numeric ID (likely a channel ID without -100 prefix)
+            if target_chat_id.isdigit():
+                chat_id_int = int(target_chat_id)
+                if chat_id_int > 1000000000 and not target_chat_id.startswith('-100'):
+                    # This looks like a channel ID without -100 prefix
+                    normalized_id = f"-100{target_chat_id}"
+                    logger.info(f"🔄 تم تطبيع معرف القناة: {target_chat_id} -> {normalized_id}")
+                    return normalized_id
+            
+            return target_chat_id
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في تطبيع معرف القناة: {e}")
+            return target_chat_id
 
     async def _check_bot_permissions(self, target_chat_id: str):
         """Check if bot has necessary permissions in the channel"""
@@ -2925,45 +2950,48 @@ class UserbotService:
                 await bot_client.start(bot_token=BOT_TOKEN)
                 logger.info(f"🤖 تم تشغيل bot client بنجاح لإضافة الأزرار")
                 
+                # Normalize chat ID (add -100 prefix if needed)
+                normalized_chat_id = self._normalize_chat_id(target_chat_id)
+                
                 # Convert target_chat_id to appropriate format
                 try:
                     # Handle different chat ID formats
-                    if target_chat_id.startswith('-100'):
+                    if normalized_chat_id.startswith('-100'):
                         # Channel ID format
-                        target_entity = int(target_chat_id)
-                    elif target_chat_id.startswith('-'):
+                        target_entity = int(normalized_chat_id)
+                    elif normalized_chat_id.startswith('-'):
                         # Group ID format
-                        target_entity = int(target_chat_id)
-                    elif target_chat_id.isdigit():
+                        target_entity = int(normalized_chat_id)
+                    elif normalized_chat_id.isdigit():
                         # Check if it's a valid chat ID (not a phone number)
-                        chat_id_int = int(target_chat_id)
+                        chat_id_int = int(normalized_chat_id)
                         if chat_id_int > 1000000000:  # Likely a chat ID
                             target_entity = chat_id_int
                         else:
                             # This might be a phone number, try as string
-                            target_entity = target_chat_id
+                            target_entity = normalized_chat_id
                     else:
                         # Username or other format
-                        target_entity = target_chat_id
+                        target_entity = normalized_chat_id
                     
                     # Get target entity
                     target_entity = await bot_client.get_entity(target_entity)
-                    logger.info(f"✅ تم العثور على القناة الهدف: {getattr(target_entity, 'title', target_chat_id)}")
+                    logger.info(f"✅ تم العثور على القناة الهدف: {getattr(target_entity, 'title', normalized_chat_id)}")
                 except Exception as entity_err:
                     error_str = str(entity_err)
-                    logger.error(f"❌ فشل في الوصول للقناة {target_chat_id}: {entity_err}")
+                    logger.error(f"❌ فشل في الوصول للقناة {normalized_chat_id}: {entity_err}")
                     
                     # Handle specific error for phone numbers
                     if "Cannot get entity by phone number as a bot" in error_str:
-                        logger.error(f"❌ لا يمكن استخدام رقم الهاتف {target_chat_id} كمعرف قناة للبوت")
+                        logger.error(f"❌ لا يمكن استخدام رقم الهاتف {normalized_chat_id} كمعرف قناة للبوت")
                         logger.error(f"💡 تأكد من استخدام معرف القناة الصحيح (مثال: -1001234567890)")
                         return False
                     elif "CHAT_NOT_FOUND" in error_str:
-                        logger.error(f"❌ لم يتم العثور على القناة {target_chat_id}")
+                        logger.error(f"❌ لم يتم العثور على القناة {normalized_chat_id}")
                         logger.error(f"💡 تأكد من أن البوت عضو في القناة")
                         return False
                     elif "BOT_WAS_BLOCKED" in error_str:
-                        logger.error(f"❌ تم حظر البوت من القناة {target_chat_id}")
+                        logger.error(f"❌ تم حظر البوت من القناة {normalized_chat_id}")
                         return False
                     else:
                         logger.error(f"❌ خطأ غير معروف في الوصول للقناة: {error_str}")
