@@ -623,7 +623,6 @@ class UserbotService:
                         # Silent processing for non-monitored chats - no logging
                         pass
 
-
                 # Get source chat ID and username first
                 source_username = getattr(event.chat, 'username', None)
 
@@ -2687,9 +2686,7 @@ class UserbotService:
             
             # If direct edit fails, try to get message text and edit
             logger.info(f"⚠️ فشل في التعديل المباشر، محاولة الحصول على نص الرسالة...")
-            
             # Get original message text
-            message_text = await self._get_message_text_via_bot(normalized_chat_id, message_id)
             
             if message_text:
                 # Try to edit with text and buttons
@@ -3631,13 +3628,10 @@ class UserbotService:
             else:
                 logger.debug(f"👮‍♂️ لا يمكن تحديد هوية المرسل - سيتم السماح")
                 return False
-            
                 
         except Exception as e:
             logger.error(f"خطأ في فحص فلتر المشرفين: {e}")
             return False
-
-
 
     async def _check_admin_by_signature(self, task_id: int, author_signature: str) -> bool:
         """Check admin filter by Telegram Author Signature"""
@@ -5007,9 +5001,6 @@ class UserbotService:
         else:
             # افتراضي - توجيه
             return 'forward'
-
-
-
 
 # Global userbot instance
 userbot_instance = UserbotService()

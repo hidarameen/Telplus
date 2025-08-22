@@ -39,6 +39,15 @@ except ImportError:
     TRANSLATION_AVAILABLE = False
     Translator = None
 
+# استيراد معالج الوسائط في الخلفية
+try:
+    from background_media_processor import background_processor, process_media_in_background, get_processed_media, queue_batch_message
+    BACKGROUND_PROCESSING_AVAILABLE = True
+    
+except ImportError as e:
+    logger.warning(f"⚠️ لم يتم العثور على معالج الوسائط في الخلفية: {e}")
+    BACKGROUND_PROCESSING_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 class AlbumCollector:
@@ -104,6 +113,19 @@ class UserbotService:
         self.album_collectors: Dict[int, AlbumCollector] = {}  # user_id -> collector
         self.watermark_processor = WatermarkProcessor()  # معالج العلامة المائية
         self.audio_processor = AudioProcessor()  # معالج الوسوم الصوتية
+        
+        # بدء معالج الوسائط في الخلفية
+        if BACKGROUND_PROCESSING_AVAILABLE:
+            self.background_media_processing = True
+            logger.info("✅ سيتم استخدام معالجة الوسائط في الخلفية")
+        else:
+            self.background_media_processing = False
+            logger.info("⚠️ سيتم استخدام المعالجة المتزامنة للوسائط")
+        
+        # CRITICAL FIX: Initialize global cache systems for media processing optimization
+        self.global_processed_media_cache = {}  # Cache for processed media to prevent re-upload
+        self._current_media_cache = {}  # Temporary cache for download optimization per message
+        self.uploaded_file_cache = {}  # CRITICAL: Cache for uploaded file handles to prevent re-upload
         self.session_health_status: Dict[int, bool] = {}  # user_id -> health status
         self.session_locks: Dict[int, bool] = {}  # user_id -> is_locked (prevent multiple usage)
         self.max_reconnect_attempts = 3
@@ -583,76 +605,49 @@ class UserbotService:
                     self.user_locks[user_id] = asyncio.Lock()
 
                 async with self.user_locks[user_id]:
-                    # Log incoming message with client's user ID
-                    logger.warning(f"🔔 *** رسالة جديدة عبر عميل المستخدم {user_id} ***")
-                    logger.warning(f"📍 Chat ID: {event.chat_id}, Message: {event.text[:50] if event.text else 'رسالة بدون نص'}...")
-
-                    # Special monitoring for important chats
-                    if event.chat_id == -1002289754739:
-                        logger.error(f"🎯 *** رسالة من محادثة Hidar! Chat ID: {event.chat_id} (عميل {user_id}) ***")
-                        logger.error(f"🎯 *** بدء معالجة الرسالة للتوجيه... ***")
-                    elif event.chat_id == -1002403180244:
-                        logger.error(f"🎯 *** رسالة من محادثة Nuha! Chat ID: {event.chat_id} (عميل {user_id}) ***")
-                        logger.error(f"🎯 *** بدء معالجة الرسالة للتوجيه... ***")
-                    
                     # Get user tasks for this specific user (the owner of this client)
                     tasks = self.user_tasks.get(user_id, [])
+                    
+                    # Get source chat ID first
+                    source_chat_id = event.chat_id
+                    
+                    # Check if this chat is a source in any task for this user
+                    is_monitored_source = any(str(task['source_chat_id']) == str(source_chat_id) for task in tasks)
+                    
+                    # Only log if this is a monitored source chat
+                    if is_monitored_source:
+                        logger.info(f"📥 رسالة من مصدر مراقب: {source_chat_id} (المستخدم {user_id})")
+                        if event.text:
+                            logger.info(f"📝 المحتوى: {event.text[:100]}...")
+                    else:
+                        # Silent processing for non-monitored chats - no logging
+                        pass
 
 
                 # Get source chat ID and username first
-                source_chat_id = event.chat_id
                 source_username = getattr(event.chat, 'username', None)
 
-                # Special monitoring for the specific chat mentioned by user
-                # Enhanced logging for the specific task
-                if source_chat_id == -1002289754739:
-                    logger.warning(f"🎯 *** رسالة من المحادثة المطلوبة (Hidar)! Chat ID: {source_chat_id} ***")
-                    logger.warning(f"🎯 *** بدء معالجة الرسالة للتوجيه ***")
-                    logger.warning(f"🎯 *** عدد المهام المتاحة: {len(tasks)} ***")
-
                 if not tasks:
-                    logger.warning(f"⚠️ لا توجد مهام للمستخدم {user_id}")
-                    return
-
-                logger.info(f"📋 عدد المهام المتاحة للمستخدم {user_id}: {len(tasks)}")
-
-                # Log all tasks for debugging
-                for i, task in enumerate(tasks, 1):
-                    task_name = task.get('task_name', f"مهمة {task['id']}")
-                    logger.info(f"📋 مهمة {i}: '{task_name}' - مصدر='{task['source_chat_id']}' → هدف='{task['target_chat_id']}'")
-                    if str(task['source_chat_id']) == '-1002289754739':
-                        logger.warning(f"🎯 تم العثور على المهمة المطلوبة: {task_name}")
+                    return  # No tasks for this user - silent return
 
                 # Check media filters first
                 message_media_type = self.get_message_media_type(event.message)
                 has_text_caption = bool(event.message.text)  # Check if message has text/caption
-                logger.info(f"🎬 نوع الوسائط للرسالة: {message_media_type}, يحتوي على نص/caption: {has_text_caption}")
 
                 # Find matching tasks for this source chat
                 matching_tasks = []
-                logger.info(f"🔍 البحث عن مهام مطابقة للمحادثة {source_chat_id} (username: {source_username})")
 
                 for task in tasks:
                     task_source_id = str(task['source_chat_id'])
                     task_name = task.get('task_name', f"مهمة {task['id']}")
                     task_id = task.get('id')
 
-                    logger.info(f"🔍 فحص المهمة '{task_name}': مصدر='{task_source_id}' ضد '{source_chat_id}', هدف='{task['target_chat_id']}'")
-
                     # Convert both IDs to string and compare
                     source_chat_id_str = str(source_chat_id)
                     if task_source_id == source_chat_id_str:
-                        logger.info(f"✅ تطابق مباشر: '{task_source_id}' == '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
 
-                        # Check admin filter first (if enabled) - now based on post_author
-                        logger.error(f"🚨 === بدء فحص فلتر المشرفين للمهمة {task_id} والمرسل {event.sender_id} ===")
-                        
-                        # Log message details for debugging
-                        author_signature = getattr(event.message, 'post_author', None)
-                        logger.error(f"🚨 === تفاصيل الرسالة: sender_id={event.sender_id}, post_author='{author_signature}' ===")
-                        
+                        # Check admin filter
                         admin_allowed = await self.is_admin_allowed_by_signature(task_id, event.message, source_chat_id_str)
-                        logger.error(f"🚨 === نتيجة فحص فلتر المشرفين للمهمة {task_id}: {admin_allowed} ===")
 
                         # Check media filter
                         media_allowed = self.is_media_allowed(task_id, message_media_type)
@@ -661,50 +656,22 @@ class UserbotService:
                         message_text = event.message.text or ""
                         word_filter_allowed = self.is_message_allowed_by_word_filter(task_id, message_text)
 
-                        # Decision is based on the primary media type, not the caption
-                        # For text messages with media, we check the media type
-                        # For pure text messages, we check text filter
+                        # Determine if message is allowed
                         if message_media_type == 'text':
-                            # Pure text message - check admin, text filter and word filter
                             is_message_allowed = admin_allowed and self.is_media_allowed(task_id, 'text') and word_filter_allowed
-                            filter_type = "النص"
-                            logger.error(f"🚨 === فحص رسالة نصية: admin={admin_allowed}, media={self.is_media_allowed(task_id, 'text')}, word={word_filter_allowed}, نتيجة نهائية={is_message_allowed} ===")
                         else:
-                            # Media message (photo, video, etc.) - check admin, media filter and word filter for caption
                             is_message_allowed = admin_allowed and media_allowed and word_filter_allowed
-                            filter_type = f"الوسائط ({message_media_type})"
-
-                        logger.error(f"🚨 === قرار نهائي: is_message_allowed = {is_message_allowed} ===")
 
                         if is_message_allowed:
-                            logger.error(f"🚨 === إضافة المهمة للقائمة المطابقة ===")
                             matching_tasks.append(task)
-                            if has_text_caption and message_media_type != 'text':
-                                logger.info(f"✅ الرسالة مسموحة - {filter_type} مسموح مع caption وفلاتر الكلمات")
-                            else:
-                                logger.info(f"✅ {filter_type} مسموح لهذه المهمة وفلاتر الكلمات")
+                            logger.info(f"✅ {task_name}: رسالة مقبولة")
                         else:
-                            logger.error(f"🚨 === رفض المهمة - الرسالة محظورة ===")
-                            # Check which filter blocked the message
-                            if not admin_allowed:
-                                logger.error(f"🚫 الرسالة محظورة بواسطة فلتر المشرفين - المرسل {event.sender_id} غير مسموح")
-                            elif not media_allowed:
-                                logger.error(f"🚫 {filter_type} محظور لهذه المهمة (فلتر الوسائط)")
-                            elif not word_filter_allowed:
-                                logger.error(f"🚫 الرسالة محظورة بواسطة فلتر الكلمات")
-                            else:
-                                if has_text_caption and message_media_type != 'text':
-                                    logger.error(f"🚫 {filter_type} محظور لهذه المهمة (مع caption)")
-                                else:
-                                    logger.error(f"🚫 {filter_type} محظور لهذه المهمة")
-                    else:
-                        logger.info(f"❌ لا يوجد تطابق للمهمة '{task_name}': '{task_source_id}' != '{source_chat_id_str}' (types: {type(task_source_id)}, {type(source_chat_id_str)})")
+                            logger.info(f"🚫 {task_name}: رسالة مرفوضة بواسطة الفلاتر")
 
                 if not matching_tasks:
-                    logger.debug(f"لا توجد مهام مطابقة للمحادثة {source_chat_id} للمستخدم {user_id}")
-                    return
+                    return  # No matching tasks - silent return
 
-                logger.info(f"تم العثور على {len(matching_tasks)} مهمة مطابقة للمحادثة {source_chat_id}")
+                logger.info(f"📤 معالجة {len(matching_tasks)} مهمة مطابقة للمحادثة {source_chat_id}")
 
                 # Check advanced features once per message (using first matching task for settings)
                 first_task = matching_tasks[0]
@@ -740,17 +707,23 @@ class UserbotService:
                     first_task = matching_tasks[0]
                     logger.info(f"🎬 تهيئة معالجة الوسائط مرة واحدة (أول مهمة: {first_task['id']})")
 
-                    # فحص تجميعي: هل العلامة المائية مفعلة لكل المهام المطابقة؟
-                    watermark_enabled_for_all = True
+                    # CRITICAL FIX: فحص تجميعي: هل العلامة المائية مفعلة لأي مهمة من المهام المطابقة؟
+                    watermark_enabled_for_any = False
+                    watermark_settings = None
                     try:
                         for _t in matching_tasks:
                             _wm = self.db.get_watermark_settings(_t['id'])
-                            if not _wm.get('enabled', False):
-                                watermark_enabled_for_all = False
+                            if _wm and _wm.get('enabled', False):
+                                watermark_enabled_for_any = True
+                                watermark_settings = _wm  # Use first enabled watermark settings
+                                logger.info(f"🎯 العلامة المائية مفعلة لمهمة {_t['id']} - ستتم معالجة الوسائط مرة واحدة")
                                 break
+                        
+                        if not watermark_enabled_for_any:
+                            logger.info(f"🚫 العلامة المائية غير مفعلة لأي من المهام - معالجة أساسية للوسائط")
                     except Exception as _e:
-                        logger.warning(f"⚠️ فشل فحص إعدادات العلامة المائية لجميع المهام: {_e}")
-                        watermark_enabled_for_all = False
+                        logger.warning(f"⚠️ فشل فحص إعدادات العلامة المائية للمهام: {_e}")
+                        watermark_enabled_for_any = False
 
                     # فحص: هل الرسالة ملف صوتي؟
                     is_audio_message = False
@@ -771,61 +744,123 @@ class UserbotService:
                     except Exception:
                         is_audio_message = False
 
-                    # فحص تجميعي: هل وسوم الصوت مفعلة لكل المهام (للرسائل الصوتية فقط)؟
-                    audio_tags_enabled_for_all = False
+                    # CRITICAL FIX: فحص تجميعي: هل وسوم الصوت مفعلة لأي مهمة (للرسائل الصوتية فقط)؟
+                    audio_tags_enabled_for_any = False
+                    audio_settings = None
                     if is_audio_message:
-                        audio_tags_enabled_for_all = True
                         try:
                             for _t in matching_tasks:
                                 _as = self.db.get_audio_metadata_settings(_t['id'])
-                                if not _as.get('enabled', False):
-                                    audio_tags_enabled_for_all = False
+                                if _as and _as.get('enabled', False):
+                                    audio_tags_enabled_for_any = True
+                                    audio_settings = _as  # Use first enabled audio settings
+                                    logger.info(f"🎵 وسوم الصوت مفعلة لمهمة {_t['id']} - ستتم معالجة الملف الصوتي مرة واحدة")
                                     break
+                            
+                            if not audio_tags_enabled_for_any:
+                                logger.info(f"🚫 وسوم الصوت غير مفعلة لأي من المهام الصوتية")
                         except Exception as _e:
-                            logger.warning(f"⚠️ فشل فحص إعدادات الوسوم الصوتية لجميع المهام: {_e}")
-                            audio_tags_enabled_for_all = False
+                            logger.warning(f"⚠️ فشل فحص إعدادات وسوم الصوت: {_e}")
+                            audio_tags_enabled_for_any = False
 
+                    # CRITICAL FIX: Initialize global media cache for message-based reuse
+                    if not hasattr(self, 'global_processed_media_cache'):
+                        self.global_processed_media_cache = {}
+                    
+                    # Create unique cache key for this message and settings
+                    import hashlib
+                    message_hash = f"{event.message.id}_{event.chat_id}_{first_task['id']}_watermark"
+                    media_cache_key = hashlib.md5(message_hash.encode()).hexdigest()
+                    
                     try:
-                        if watermark_enabled_for_all:
-                            logger.info("🏷️ العلامة المائية مفعلة لكل المهام → سيتم تطبيقها مرة واحدة وإعادة الاستخدام")
-                            processed_media, processed_filename = await self.apply_watermark_to_media(event, first_task['id'])
-                            if processed_media and processed_media != event.message.media:
-                                logger.info(f"✅ تم معالجة الوسائط بنجاح: {processed_filename}")
+                        if watermark_enabled_for_any:
+                            logger.info("🏷️ العلامة المائية مفعلة لأحد المهام → سيتم تطبيقها مرة واحدة وإعادة الاستخدام")
+                            
+                            # CRITICAL OPTIMIZATION: Check cache before processing
+                            if media_cache_key in self.global_processed_media_cache:
+                                processed_media, processed_filename = self.global_processed_media_cache[media_cache_key]
+                                logger.info(f"🎯 استخدام الوسائط المعالجة من التخزين المؤقت: {processed_filename}")
                             else:
-                                logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
-                        elif audio_tags_enabled_for_all and is_audio_message:
-                            # تطبيق الوسوم الصوتية فقط (علامة مائية غير مفعلة)
-                            logger.info("🎵 الوسوم الصوتية مفعلة لكل المهام والرسالة صوتية → تطبيق الوسوم فقط")
-                            # تحميل الوسائط واستخراج اسم مناسب
-                            media_bytes = await event.message.download_media(bytes)
-                            if not media_bytes:
-                                logger.warning("⚠️ فشل تحميل الوسائط - سيتم استخدام الوسائط الأصلية")
-                                processed_media = event.message.media
-                                processed_filename = None
+                                # Process media ONLY ONCE and cache for all targets
+                                logger.info("🔧 بدء معالجة الوسائط لأول مرة - سيتم حفظها للاستخدام المتكرر")
+                                processed_media, processed_filename = await self.apply_watermark_to_media(event, first_task['id'])
+                                
+                                if processed_media and processed_media != event.message.media:
+                                    # Store in global cache for ALL future targets of this message
+                                    self.global_processed_media_cache[media_cache_key] = (processed_media, processed_filename)
+                                    logger.info(f"✅ تم معالجة الوسائط مرة واحدة وحفظها للاستخدام المتكرر: {processed_filename}")
+                                else:
+                                    logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
+                        elif audio_tags_enabled_for_any and is_audio_message:
+                            # CRITICAL FIX: Apply audio tags optimization similar to watermark
+                            logger.info("🎵 الوسوم الصوتية مفعلة لأحد المهام والرسالة صوتية → تطبيق الوسوم مرة واحدة وإعادة الاستخدام")
+                            
+                            # Create audio cache key (different from watermark key)
+                            audio_cache_key = hashlib.md5(
+                                f"{event.message.id}_{event.chat_id}_{first_task['id']}_audio".encode()
+                            ).hexdigest()
+                            
+                            # Check audio cache first - CRITICAL OPTIMIZATION
+                            if audio_cache_key in self.global_processed_media_cache:
+                                processed_media, processed_filename = self.global_processed_media_cache[audio_cache_key]
+                                logger.info(f"🎯 استخدام المقطع الصوتي المعالج من التخزين المؤقت: {processed_filename}")
                             else:
-                                file_name = "media_file"
-                                file_ext = ""
-                                if hasattr(event.message.media, 'document') and event.message.media.document:
-                                    doc = event.message.media.document
-                                    if hasattr(doc, 'attributes'):
-                                        for attr in doc.attributes:
-                                            if hasattr(attr, 'file_name') and attr.file_name:
-                                                file_name = attr.file_name
-                                                if '.' in file_name:
-                                                    file_ext = '.' + file_name.split('.')[-1].lower()
-                                                    file_name = file_name.rsplit('.', 1)[0]
-                                                break
-                                full_name = file_name + (file_ext or '')
-                                processed_media, processed_filename = await self.apply_audio_metadata(event, first_task['id'], media_bytes, full_name)
-                                try:
-                                    pm_type = type(processed_media).__name__
-                                    pm_size = len(processed_media) if isinstance(processed_media, (bytes, bytearray)) else None
-                                    logger.info(f"🧪 نتيجة معالجة الصوت: type={pm_type}, size={pm_size}, filename={processed_filename}")
-                                except Exception:
-                                    pass
+                                # Process audio ONCE and cache for all targets
+                                logger.info("🔧 بدء معالجة المقطع الصوتي لأول مرة - سيتم حفظه للاستخدام المتكرر")
+                                
+                                # تحميل الوسائط واستخراج اسم مناسب - مرة واحدة فقط
+                                if not hasattr(self, '_current_media_cache'):
+                                    self._current_media_cache = {}
+                                
+                                media_cache_key_download = f"{event.message.id}_{event.chat_id}_download"
+                                
+                                if media_cache_key_download in self._current_media_cache:
+                                    media_bytes, file_name, file_ext = self._current_media_cache[media_cache_key_download]
+                                    logger.info("🔄 استخدام الوسائط المحمّلة من التخزين المؤقت")
+                                else:
+                                    media_bytes = await event.message.download_media(bytes)
+                                    if not media_bytes:
+                                        logger.warning("⚠️ فشل تحميل الوسائط - سيتم استخدام الوسائط الأصلية")
+                                        processed_media = event.message.media
+                                        processed_filename = None
+                                    else:
+                                        file_name = "media_file"
+                                        file_ext = ""
+                                        if hasattr(event.message.media, 'document') and event.message.media.document:
+                                            doc = event.message.media.document
+                                            if hasattr(doc, 'attributes'):
+                                                for attr in doc.attributes:
+                                                    if hasattr(attr, 'file_name') and attr.file_name:
+                                                        file_name = attr.file_name
+                                                        # Extract file extension
+                                                        if "." in file_name:
+                                                            file_ext = "." + file_name.split(".")[-1]
+                                                        break
+                                                        if '.' in file_name:
+                                                            file_ext = '.' + file_name.split('.')[-1].lower()
+                                                            file_name = file_name.rsplit('.', 1)[0]
+                                                        break
+                                        
+                                        # حفظ البيانات المحمّلة في التخزين المؤقت لهذه الرسالة
+                                        self._current_media_cache[media_cache_key_download] = (media_bytes, file_name, file_ext)
+                                        logger.info("💾 تم حفظ الوسائط المحمّلة في التخزين المؤقت لإعادة الاستخدام")
+                                
+                                if media_bytes:
+                                    full_name = file_name + (file_ext or '')
+                                    processed_media, processed_filename = await self.apply_audio_metadata(event, first_task['id'], media_bytes, full_name)
+                                    
+                                    # Cache the processed audio for reuse across ALL targets
+                                    if processed_media and processed_media != media_bytes:
+                                        self.global_processed_media_cache[audio_cache_key] = (processed_media, processed_filename)
+                                        logger.info(f"✅ تم معالجة المقطع الصوتي مرة واحدة وحفظه للاستخدام المتكرر: {processed_filename}")
+                                    else:
+                                        logger.info("🔄 لم يتم تعديل المقطع الصوتي، استخدام الملف الأصلي")
+
                         else:
                             # لا علامة مائية ولا وسوم صوتية: لا تنزيل/معالجة - سيتم الإرسال كنسخ خادم إن أمكن
                             logger.info("⏭️ لا علامة مائية ولا وسوم صوتية مطلوبة → إرسال كوسائط عادية دون تنزيل/رفع")
+                            processed_media = None
+                            processed_filename = None
                     except Exception as e:
                         logger.error(f"❌ خطأ في معالجة الوسائط: {e}")
                         processed_media = event.message.media
@@ -891,21 +926,46 @@ class UserbotService:
                             
                             continue  # Skip individual processing
 
-                        # Parse target chat ID
-                        if target_chat_id.startswith('@'):
-                            target_entity = target_chat_id
-                            logger.info(f"🎯 استخدام اسم المستخدم كهدف: {target_entity}")
-                        else:
-                            target_entity = int(target_chat_id)
-                            logger.info(f"🎯 استخدام معرف رقمي كهدف: {target_entity}")
-
-                        # Get target chat info before forwarding
+                        # Parse target chat ID with improved user handling
                         try:
-                            target_chat = await client.get_entity(target_entity)
-                            target_title = getattr(target_chat, 'title', getattr(target_chat, 'first_name', str(target_entity)))
-                            logger.info(f"✅ تم العثور على المحادثة الهدف: {target_title} ({target_entity})")
+                            if target_chat_id.startswith('@'):
+                                target_entity = await client.get_entity(target_chat_id)
+                                logger.info(f"🎯 استخدام اسم المستخدم كهدف: {target_chat_id}")
+                            else:
+                                target_int = int(target_chat_id)
+                                logger.info(f"🎯 استخدام معرف رقمي كهدف: {target_int}")
+                                
+                                try:
+                                    # Try to get entity
+                                    target_entity = await client.get_entity(target_int)
+                                except Exception as get_entity_err:
+                                    logger.warning(f"⚠️ لا يمكن الوصول المباشر للهدف {target_int}: {get_entity_err}")
+                                    
+                                    # For users (positive ID), create a fallback approach
+                                    if target_int > 0:
+                                        logger.info(f"📱 سيتم استخدام معرف المستخدم مباشرة: {target_int}")
+                                        # Create a simple user entity for forwarding
+                                        try:
+                                            # Try sending a test message first to validate access
+                                            target_entity = target_int  # Use int as entity for direct user messaging
+                                        except Exception:
+                                            logger.error(f"❌ لا يمكن الوصول للمستخدم {target_int}")
+                                            continue
+                                    else:
+                                        # For channels/groups, must have access
+                                        logger.error(f"❌ يجب الوصول للقناة/المجموعة {target_int}")
+                                        continue
+                            
+                            # Validate target entity if it's an actual entity object
+                            if hasattr(target_entity, 'id'):
+                                target_title = getattr(target_entity, 'title', getattr(target_entity, 'first_name', str(target_entity.id)))
+                                logger.info(f"✅ تم العثور على المحادثة الهدف: {target_title} ({target_entity.id})")
+                            else:
+                                # target_entity is int - this is for users we can't directly access
+                                logger.info(f"📱 سيتم محاولة الإرسال للمستخدم: {target_entity}")
+                                
                         except Exception as entity_error:
-                            logger.error(f"❌ لا يمكن الوصول للمحادثة الهدف {target_entity}: {entity_error}")
+                            logger.error(f"❌ لا يمكن معالجة الهدف {target_chat_id}: {entity_error}")
                             continue
 
                         # Get message formatting settings for this task
@@ -1012,7 +1072,43 @@ class UserbotService:
                         processed_text = (final_text or (event.message.text if hasattr(event.message, 'text') else None) or "رسالة")
 
                         # إرسال الرسالة بالوضع المحدد
-                        if final_send_mode == 'copy':
+                        if final_send_mode == 'forward':
+                            # وضع التوجيه - إرسال الرسالة كما هي مع رأس التوجيه
+                            logger.info("🔀 استخدام وضع التوجيه - إرسال الرسالة مع رأس التوجيه")
+                            try:
+                                forwarded_msg = await client.forward_messages(
+                                    target_entity,
+                                    event.message,
+                                    silent=forwarding_settings['silent_notifications']
+                                )
+                                logger.info(f"✅ تم توجيه الرسالة بنجاح في وضع التوجيه")
+                                
+                                # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                if forwarded_msg:
+                                    msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                    await self.apply_post_forwarding_settings(
+                                        client, target_entity, msg_id, forwarding_settings, task['id'],
+                                        inline_buttons=inline_buttons,
+                                        has_original_buttons=bool(original_reply_markup)
+                                    )
+                                    
+                                    # Save message mapping for sync functionality
+                                    try:
+                                        self.db.save_message_mapping(
+                                            task_id=task['id'],
+                                            source_chat_id=str(source_chat_id),
+                                            source_message_id=event.message.id,
+                                            target_chat_id=str(target_chat_id),
+                                            target_message_id=msg_id
+                                        )
+                                    except Exception as mapping_error:
+                                        logger.error(f"❌ فشل في حفظ تطابق الرسالة: {mapping_error}")
+                            except Exception as forward_err:
+                                logger.error(f"❌ فشل التوجيه المباشر، التبديل للنسخ: {forward_err}")
+                                # Fallback to copy mode if forward fails
+                                final_send_mode = 'copy'
+
+                        elif final_send_mode == 'copy':
                             # Optimization: use server-side copy when no modifications are required
                             try:
                                 text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
@@ -1020,7 +1116,8 @@ class UserbotService:
                                 text_cleaning_settings = {}
                             remove_caption_flag = bool(text_cleaning_settings.get('remove_caption', False))
 
-                            no_media_change = (processed_media is None or processed_media == event.message.media) and (processed_filename is None)
+                            # CRITICAL FIX: Consider processed media as a change
+                            no_media_change = (processed_media is None) and (processed_filename is None)
                             no_caption_change = (final_text == original_text)
                             no_buttons_change = (inline_buttons is None and not should_remove_buttons)
                             is_album_message = album_collector.should_collect_album(event.message, forward_mode, split_album_enabled)
@@ -1040,13 +1137,26 @@ class UserbotService:
                                 if event.message.media:
                                     # Copy media by re-sending the same media reference (server-side), keep original caption/buttons
                                     caption_text = event.message.text
+                                    # CRITICAL FIX: Add force_document=False for server-side copy of videos
+                                    server_copy_kwargs = {
+                                        "caption": caption_text,
+                                        "silent": forwarding_settings['silent_notifications'],
+                                        "buttons": original_reply_markup,
+                                        "force_document": False  # Ensure videos display with preview and duration
+                                    }
+                                    
                                     forwarded_msg = await client.send_file(
                                         target_entity,
                                         file=event.message.media,
-                                        caption=caption_text,
-                                        silent=forwarding_settings['silent_notifications'],
-                                        buttons=original_reply_markup
+                                        **server_copy_kwargs
                                     )
+                                    
+                                    # Apply post-forwarding settings (pin, auto-delete)
+                                    if forwarded_msg:
+                                        msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                        await self.apply_post_forwarding_settings(
+                                            client, target_entity, msg_id, forwarding_settings, task['id']
+                                        )
                                 else:
                                     # Pure text copy
                                     message_text = event.message.text or final_text or "رسالة"
@@ -1057,6 +1167,13 @@ class UserbotService:
                                         silent=forwarding_settings['silent_notifications'],
                                         buttons=original_reply_markup
                                     )
+                                    
+                                    # Apply post-forwarding settings (pin, auto-delete)
+                                    if forwarded_msg:
+                                        msg_id = forwarded_msg.id
+                                        await self.apply_post_forwarding_settings(
+                                            client, target_entity, msg_id, forwarding_settings, task['id']
+                                        )
                             else:
                                 # Copy mode: send as new message with all formatting applied
                                 if requires_copy_mode:
@@ -1065,54 +1182,107 @@ class UserbotService:
                                 # إذا كان لدينا ملف صوتي مُعالج كبايتات، أرسله مباشرة لتفادي أي التباس كرسالة نصية
                                 if isinstance(processed_media, (bytes, bytearray)) and ((processed_filename and processed_filename.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.wma', '.opus'))) or True):
                                     try:
-                                        from send_file_helper import TelethonFileSender
                                         audio_filename = processed_filename or "audio.mp3"
                                         logger.info(f"🎵 إرسال الملف الصوتي المعالج بالرفع المباشر: {audio_filename}")
-                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                            client,
-                                            target_entity,
-                                            processed_media,
-                                            audio_filename,
-                                            caption=final_text,
+                                        
+                                        # CRITICAL FIX: Upload once and reuse file handle
+                                        forwarded_msg = await self._send_processed_media_optimized(
+                                            client, target_entity, processed_media, audio_filename,
+                                            caption=final_text, 
                                             silent=forwarding_settings['silent_notifications'],
                                             parse_mode='HTML' if final_text else None,
-                                            force_document=False,
-                                            buttons=original_reply_markup or inline_buttons,
+                                            buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                            task=task, event=event
                                         )
+                                        
+                                        # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                        if forwarded_msg:
+                                            msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                            await self.apply_post_forwarding_settings(
+                                                client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                inline_buttons=inline_buttons,
+                                                has_original_buttons=bool(original_reply_markup)
+                                            )
                                     except Exception as direct_audio_err:
                                         logger.error(f"❌ فشل الرفع المباشر للملف الصوتي المعالج: {direct_audio_err}")
 
                                 elif event.message.media:
-                                    # Check media type to handle web page separately
+                                    # Handle media messages correctly - send media with caption
                                     from telethon.tl.types import MessageMediaWebPage
                                     is_webpage = isinstance(event.message.media, MessageMediaWebPage)
-                                    has_processed_media = (processed_media is not None) or (processed_filename is not None)
-                                    if is_webpage and not has_processed_media:
-                                        # Web page - send as text message
-                                        # Process spoiler entities if present
-                                        message_text = final_text or event.message.text or "رسالة"
-                                        processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
                                     
-                                    if spoiler_entities:
-                                        # Send with spoiler entities and buttons
+                                    if is_webpage:
+                                        # Web page - send as text message with link preview
+                                        logger.info("🌐 إرسال صفحة ويب كنص مع معاينة الرابط")
+                                        message_text = final_text or event.message.text or "رسالة"
                                         forwarded_msg = await client.send_message(
                                             target_entity,
-                                            processed_text,
-                                            link_preview=forwarding_settings['link_preview_enabled'],
-                                            silent=forwarding_settings['silent_notifications'],
-                                            formatting_entities=spoiler_entities,
-                                            buttons=original_reply_markup or inline_buttons,
+                                            message_text,
+                                            link_preview=forwarding_settings["link_preview_enabled"],
+                                            silent=forwarding_settings["silent_notifications"],
+                                            parse_mode="HTML",
+                                            buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                         )
+                                        
+                                        # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                        if forwarded_msg:
+                                            msg_id = forwarded_msg.id
+                                            await self.apply_post_forwarding_settings(
+                                                client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                inline_buttons=inline_buttons,
+                                                has_original_buttons=bool(original_reply_markup)
+                                            )
                                     else:
-                                        # Send normally with buttons
-                                        forwarded_msg = await client.send_message(
-                                            target_entity,
-                                            processed_text,
-                                            link_preview=forwarding_settings['link_preview_enabled'],
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML',
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
+                                        # Regular media - send with caption using send_file
+                                        logger.info("📁 إرسال وسائط مع الكابشن")
+                                        caption_text = final_text
+                                        text_cleaning_settings = self.db.get_text_cleaning_settings(task["id"])
+                                        if text_cleaning_settings and text_cleaning_settings.get("remove_caption", False):
+                                            caption_text = None
+                                        
+                                        # CRITICAL FIX: Use processed media if available, otherwise original media
+                                        media_to_send = processed_media if processed_media else event.message.media
+                                        
+                                        if isinstance(processed_media, (bytes, bytearray)) and processed_filename:
+                                            # Send processed media with proper filename
+                                            logger.info(f"🎵 إرسال الوسائط المعالجة (مُحسّنة مرة واحدة): {processed_filename}")
+                                            
+                                            # CRITICAL FIX: Upload once and reuse file handle
+                                            forwarded_msg = await self._send_processed_media_optimized(
+                                                client, target_entity, processed_media, processed_filename,
+                                                caption=caption_text,
+                                                silent=forwarding_settings["silent_notifications"],
+                                                parse_mode="HTML" if caption_text else None,
+                                                buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                                task=task, event=event
+                                            )
+                                        else:
+                                            # Send original media with proper video attributes
+                                            logger.info("📁 إرسال الوسائط الأصلية")
+                                            
+                                            # CRITICAL FIX: Ensure videos are sent as videos with proper attributes
+                                            video_kwargs = {
+                                                "caption": caption_text,
+                                                "silent": forwarding_settings["silent_notifications"],
+                                                "parse_mode": "HTML" if caption_text else None,
+                                                "buttons": original_reply_markup or inline_buttons,
+                                                "force_document": False  # Critical: ensure videos show as videos
+                                            }
+                                            
+                                            forwarded_msg = await client.send_file(
+                                                target_entity,
+                                                file=media_to_send,
+                                                **video_kwargs
+                                            )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
+                                                )
                                 else:
                                     # Regular media message with caption handling
                                     # Check if caption should be removed
@@ -1130,48 +1300,121 @@ class UserbotService:
                                         # Split album: send each media individually
                                         logger.info(f"📸 تفكيك الألبوم: إرسال الوسائط بشكل منفصل للمهمة {task['id']}")
                                         
-                                        # ===== استخدام الوسائط المعالجة مسبقاً =====
+                                        # ===== CRITICAL FIX: استخدام الوسائط المعالجة مسبقاً =====
                                         # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
-                                        # هذا يحسن الأداء ويقلل من استهلاك الموارد
-                                        media_to_send = processed_media if processed_media else event.message.media
-                                        filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
-                                        logger.info(f"📁 سيتم إرسال الملف باسم: {filename_to_send}")
-                                        
-                                        from send_file_helper import TelethonFileSender
-                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                            client,
-                                            target_entity,
-                                            media_to_send,
-                                            filename_to_send,
-                                            caption=caption_text,
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML' if caption_text else None,
-                                            force_document=False,
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
+                                        if isinstance(processed_media, (bytes, bytearray)) and processed_filename:
+                                            # Use the pre-processed media - CRITICAL OPTIMIZATION
+                                            logger.info(f"🎯 استخدام الوسائط المُعالجة مسبقاً (محسّن): {processed_filename}")
+                                            
+                                            # CRITICAL FIX: Upload once and reuse file handle  
+                                            forwarded_msg = await self._send_processed_media_optimized(
+                                                client, target_entity, processed_media, processed_filename,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                                task=task, event=event
+                                            )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
+                                                )
+                                        else:
+                                            # Use original media if no processing was done
+                                            if event.message.media:
+                                                logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
+                                                forwarded_msg = await client.send_file(
+                                                    target_entity,
+                                                    file=event.message.media,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if caption_text else None,
+                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
+                                                )
+                                            else:
+                                                # No media - send as text message
+                                                logger.info("📝 لا توجد وسائط - إرسال كرسالة نصية")
+                                                forwarded_msg = await client.send_message(
+                                                    target_entity,
+                                                    caption_text or "رسالة",
+                                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML',
+                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
+                                                )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
+                                                )
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
                                         logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
                                         
                                         # ===== استخدام الوسائط المعالجة مسبقاً =====
-                                        # استخدام الوسائط التي تم معالجتها مرة واحدة بدلاً من معالجتها لكل هدف
-                                        # هذا يحسن الأداء ويقلل من استهلاك الموارد
-                                        media_to_send = processed_media if processed_media else event.message.media
-                                        filename_to_send = processed_filename if processed_filename else ("media_file.mp3" if (hasattr(event.message, 'media') and hasattr(event.message.media, 'document') and event.message.media.document and getattr(event.message.media.document, 'mime_type', '') and str(event.message.media.document.mime_type).startswith('audio/')) else "media_file.jpg")
-                                        
-                                        # In copy mode, we always send as new media, not forward
-                                        from send_file_helper import TelethonFileSender
-                                        forwarded_msg = await TelethonFileSender.send_file_with_name(
-                                            client,
-                                            target_entity,
-                                            media_to_send,
-                                            filename_to_send,
-                                            caption=caption_text,
-                                            silent=forwarding_settings['silent_notifications'],
-                                            parse_mode='HTML' if caption_text else None,
-                                            force_document=False,
-                                            buttons=original_reply_markup or inline_buttons,
-                                        )
+                                        if isinstance(processed_media, (bytes, bytearray)) and processed_filename:
+                                            # Use the pre-processed media with file handle optimization
+                                            logger.info(f"🎯 استخدام الوسائط المُعالجة مسبقاً (محسّن): {processed_filename}")
+                                            
+                                            # CRITICAL FIX: Upload once and reuse file handle
+                                            forwarded_msg = await self._send_processed_media_optimized(
+                                                client, target_entity, processed_media, processed_filename,
+                                                caption=caption_text,
+                                                silent=forwarding_settings['silent_notifications'],
+                                                parse_mode='HTML' if caption_text else None,
+                                                buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                                task=task, event=event
+                                            )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
+                                                )
+                                        else:
+                                            # Use original media if no processing was done
+                                            if event.message.media:
+                                                logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
+                                                forwarded_msg = await client.send_file(
+                                                    target_entity,
+                                                    file=event.message.media,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if caption_text else None,
+                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
+                                                )
+                                            else:
+                                                # No media - send as text message
+                                                logger.info("📝 لا توجد وسائط - إرسال كرسالة نصية")
+                                                forwarded_msg = await client.send_message(
+                                                    target_entity,
+                                                    caption_text or "رسالة",
+                                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML',
+                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
+                                                )
+                                            
+                                            # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                            if forwarded_msg:
+                                                msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                                await self.apply_post_forwarding_settings(
+                                                    client, target_entity, msg_id, forwarding_settings, task['id'],
+                                                    inline_buttons=inline_buttons,
+                                                    has_original_buttons=bool(original_reply_markup)
+                                                )
                         else:
                             # No media
                             if (event.message.text or final_text):
@@ -1188,14 +1431,24 @@ class UserbotService:
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
                                         formatting_entities=spoiler_entities,
-                                        buttons=original_reply_markup or inline_buttons,
+                                        buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
                                     )
+                                    
+                                    # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                    if forwarded_msg:
+                                        msg_id = forwarded_msg.id
+                                        await self.apply_post_forwarding_settings(
+                                            client, target_entity, msg_id, forwarding_settings, task['id'],
+                                            inline_buttons=inline_buttons,
+                                            has_original_buttons=bool(original_reply_markup)
+                                        )
                                 else:
-                                    # Send normally with buttons
+                                    # Send normally with buttons using spoiler support
                                     # Combine original and custom buttons for Telethon
                                     combined_buttons = original_reply_markup or inline_buttons
                                     
-                                    forwarded_msg = await client.send_message(
+                                    forwarded_msg = await self._send_message_with_spoiler_support(
+                                        client,
                                         target_entity,
                                         processed_text,
                                         link_preview=forwarding_settings['link_preview_enabled'],
@@ -1203,6 +1456,15 @@ class UserbotService:
                                         parse_mode='HTML',
                                         buttons=combined_buttons
                                     )
+                                    
+                                    # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                    if forwarded_msg:
+                                        msg_id = forwarded_msg.id
+                                        await self.apply_post_forwarding_settings(
+                                            client, target_entity, msg_id, forwarding_settings, task['id'],
+                                            inline_buttons=inline_buttons,
+                                            has_original_buttons=bool(combined_buttons)
+                                        )
                             else:
                                 # Fallback to forward for other types
                                 forwarded_msg = await client.forward_messages(
@@ -1210,6 +1472,15 @@ class UserbotService:
                                     event.message,
                                     silent=forwarding_settings['silent_notifications']
                                 )
+                                
+                                # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                if forwarded_msg:
+                                    msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                                    await self.apply_post_forwarding_settings(
+                                        client, target_entity, msg_id, forwarding_settings, task['id'],
+                                        inline_buttons=inline_buttons,
+                                        has_original_buttons=False
+                                    )
 
                     except Exception as forward_error:
                         task_name = task.get('task_name', f"مهمة {task['id']}")
@@ -1234,6 +1505,11 @@ class UserbotService:
 
             except Exception as e:
                 logger.error(f"خطأ في معالج الرسائل للمستخدم {user_id}: {e}")
+            finally:
+                # تنظيف التخزين المؤقت المحلي بعد معالجة كل رسالة
+                if hasattr(self, '_current_media_cache'):
+                    self._current_media_cache.clear()
+                    logger.info("🗑️ تم تنظيف التخزين المؤقت المحلي للوسائط")
 
         @client.on(events.MessageEdited)
         async def message_edit_handler(event):
@@ -1262,7 +1538,13 @@ class UserbotService:
                     logger.info(f"🔄 مزامنة التعديل مفعلة للمهمة {task_id}")
 
                     # Find all target messages that were forwarded from this source message
-                    message_mappings = self.db.get_message_mappings_by_source(task_id, source_chat_id, source_message_id)
+                    # Convert chat_id to both possible formats to handle legacy data
+                    legacy_chat_id = str(source_chat_id).replace('-100', '') if str(source_chat_id).startswith('-100') else str(source_chat_id)
+                    message_mappings = self.db.get_message_mappings_by_source(task_id, str(source_chat_id), source_message_id)
+                    
+                    # If no mappings found with full format, try legacy format
+                    if not message_mappings and str(source_chat_id).startswith('-100'):
+                        message_mappings = self.db.get_message_mappings_by_source(task_id, legacy_chat_id, source_message_id)
 
                     for mapping in message_mappings:
                         target_chat_id = mapping['target_chat_id']
@@ -1272,18 +1554,64 @@ class UserbotService:
                             # Get target entity
                             target_entity = await client.get_entity(int(target_chat_id))
 
-                            # Update the target message with the edited content
-                            await client.edit_message(
-                                target_entity,
-                                target_message_id,
-                                event.message.text or event.message.message,
-                                file=None if not event.message.media else event.message.media
-                            )
+                            # Get task settings for processing
+                            message_settings = self.get_message_processing_settings(task_id)
+                            
+                            # Process the edited text with same transformations as original
+                            edited_text = event.message.text or event.message.message or ""
+                            
+                            # Apply text processing if enabled
+                            if edited_text and message_settings['text_formatting_enabled']:
+                                processed_text, spoiler_entities = self._process_spoiler_entities(edited_text)
+                            else:
+                                processed_text = edited_text
+                                spoiler_entities = []
+                            
+                            # Check if inline buttons should be applied
+                            inline_buttons = None
+                            if message_settings['inline_buttons_enabled']:
+                                inline_buttons = self.build_inline_buttons(task_id)
+                                
+                            # Update the target message
+                            if spoiler_entities:
+                                # Edit with spoiler entities
+                                await client.edit_message(
+                                    target_entity,
+                                    target_message_id,
+                                    processed_text,
+                                    formatting_entities=spoiler_entities,
+                                    file=None if not event.message.media else event.message.media
+                                )
+                            else:
+                                # Edit normally
+                                await client.edit_message(
+                                    target_entity,
+                                    target_message_id,
+                                    processed_text,
+                                    file=None if not event.message.media else event.message.media,
+                                    parse_mode='HTML'
+                                )
+                            
+                            # Add inline buttons if needed (can't edit buttons with userbot, use bot client)
+                            if inline_buttons:
+                                asyncio.create_task(
+                                    self._add_inline_buttons_with_bot(
+                                        target_chat_id, target_message_id, inline_buttons, task_id
+                                    )
+                                )
 
                             logger.info(f"✅ تم تحديث الرسالة المتزامنة: {target_chat_id}:{target_message_id}")
 
                         except Exception as sync_error:
                             logger.error(f"❌ فشل في مزامنة تعديل الرسالة: {sync_error}")
+                            # Add more detailed error info
+                            error_str = str(sync_error)
+                            if "MESSAGE_NOT_MODIFIED" in error_str:
+                                logger.warning(f"⚠️ لم يتم تعديل الرسالة لأنها متطابقة: {target_chat_id}:{target_message_id}")
+                            elif "MESSAGE_EDIT_TIME_EXPIRED" in error_str:
+                                logger.warning(f"⚠️ انتهت صلاحية تعديل الرسالة: {target_chat_id}:{target_message_id}")
+                            else:
+                                logger.error(f"💥 تفاصيل خطأ مزامنة التعديل: {error_str}")
 
             except Exception as e:
                 logger.error(f"خطأ في معالج تعديل الرسائل للمستخدم {user_id}: {e}")
@@ -1319,7 +1647,13 @@ class UserbotService:
 
                     for source_message_id in deleted_ids:
                         # Find all target messages that were forwarded from this source message
-                        message_mappings = self.db.get_message_mappings_by_source(task_id, source_chat_id, source_message_id)
+                        # Convert chat_id to both possible formats to handle legacy data
+                        legacy_chat_id = str(source_chat_id).replace('-100', '') if str(source_chat_id).startswith('-100') else str(source_chat_id)
+                        message_mappings = self.db.get_message_mappings_by_source(task_id, str(source_chat_id), source_message_id)
+                        
+                        # If no mappings found with full format, try legacy format
+                        if not message_mappings and str(source_chat_id).startswith('-100'):
+                            message_mappings = self.db.get_message_mappings_by_source(task_id, legacy_chat_id, source_message_id)
 
                         for mapping in message_mappings:
                             target_chat_id = mapping['target_chat_id']
@@ -1682,6 +2016,14 @@ class UserbotService:
                     
                     logger.info(f"✅ تم إرسال ألبوم بنجاح إلى {target_chat_id}")
                     
+                    # Apply post-forwarding settings (pin, auto-delete) for album
+                    if forwarded_msg and task_info.get('forwarding_settings'):
+                        # For albums, take the first message ID
+                        msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                        await self.apply_post_forwarding_settings(
+                            client, target_chat, msg_id, task_info['forwarding_settings'], task['id']
+                        )
+                    
                     # Save message mappings for all items
                     if isinstance(forwarded_msg, list):
                         for i, item in enumerate(target_items):
@@ -1871,6 +2213,7 @@ class UserbotService:
             watermarked_media = None
             if apply_wm:
                 logger.info(f"🏷️ تطبيق العلامة المائية على {full_file_name} للمهمة {task_id}")
+                # CRITICAL FIX: Process media ONCE for all targets to prevent multiple uploads
                 watermarked_media = self.watermark_processor.process_media_once_for_all_targets(
                     media_bytes,
                     full_file_name,
@@ -2012,6 +2355,7 @@ class UserbotService:
                     cleaned_lines = [self.apply_text_cleaning(line, task_id) for line in lines]
                     effective_template['lyrics'] = '\n'.join(cleaned_lines)
 
+            # CRITICAL FIX: Process audio ONCE for all targets to prevent multiple uploads
             processed_audio = self.audio_processor.process_audio_once_for_all_targets(
                 media_bytes,
                 file_name,
@@ -2039,6 +2383,64 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في معالجة الوسوم الصوتية: {e}")
             return media_bytes, file_name
+
+    async def _send_processed_media_optimized(self, client, target_entity, media_bytes, filename, task=None, event=None, **kwargs):
+        """
+        CRITICAL OPTIMIZATION: Upload processed media once and reuse file handle for all targets
+        This prevents redundant uploads and dramatically improves performance
+        """
+        import hashlib
+        import io
+        
+        # Create unique cache key for this media
+        media_hash = hashlib.md5(media_bytes).hexdigest()
+        cache_key = f"{media_hash}_{filename}"
+        
+        # Check if file already uploaded
+        if cache_key in self.uploaded_file_cache:
+            file_handle = self.uploaded_file_cache[cache_key]
+            logger.info(f"🎯 استخدام معرف الملف المرفوع مسبقاً (محسّن): {filename}")
+            
+            # Send using cached file handle - NO RE-UPLOAD
+            return await client.send_file(target_entity, file_handle, **kwargs)
+        else:
+            # First time upload: upload and cache file handle
+            logger.info(f"📤 رفع الملف لأول مرة وحفظ المعرف للأهداف التالية: {filename}")
+            
+            # Upload file and get handle for reuse
+            try:
+                from send_file_helper import TelethonFileSender
+                
+                # Use TelethonFileSender to upload with proper attributes but cache result
+                # CRITICAL FIX: Force video files to be sent as video, not document
+                if filename and filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v')):
+                    kwargs["force_document"] = False  # إجبار الإرسال كفيديو
+                    # إزالة parse_mode للفيديوهات لتجنب مشاكل التنسيق
+                    if 'parse_mode' in kwargs:
+                        del kwargs['parse_mode']
+                
+                result = await TelethonFileSender.send_file_with_name(
+                    client, target_entity, media_bytes, filename, **kwargs
+                )
+                
+                # Try to extract file handle from the sent message for caching
+                try:
+                    if hasattr(result, 'media') and hasattr(result.media, 'document'):
+                        file_handle = result.media.document
+                        self.uploaded_file_cache[cache_key] = file_handle
+                        logger.info(f"✅ تم حفظ معرف الملف للاستخدام المتكرر: {filename}")
+                except Exception as cache_err:
+                    logger.warning(f"⚠️ لم يتم حفظ معرف الملف: {cache_err}")
+                
+                return result
+                
+            except Exception as e:
+                logger.error(f"❌ فشل في رفع الملف المُحسّن: {e}")
+                # Fallback to normal method
+                from send_file_helper import TelethonFileSender
+                return await TelethonFileSender.send_file_with_name(
+                    client, target_entity, media_bytes, filename, **kwargs
+                )
 
     def apply_message_formatting(self, text: str, settings: dict) -> str:
         """Apply header and footer formatting to message text"""
@@ -2104,9 +2506,20 @@ class UserbotService:
             logger.error(f"خطأ في بناء الأزرار الإنلاين: {e}")
             return None
 
-    async def apply_post_forwarding_settings(self, client: TelegramClient, target_entity, msg_id: int, forwarding_settings: dict, task_id: int):
-        """Apply post-forwarding settings like pin message and auto delete"""
+    async def apply_post_forwarding_settings(self, client: TelegramClient, target_entity, msg_id: int, forwarding_settings: dict, task_id: int, inline_buttons=None, has_original_buttons=False):
+        """Apply post-forwarding settings like pin message, auto delete, and inline buttons"""
+        import asyncio
         try:
+            # Add inline buttons via bot client if needed and no original buttons exist
+            if inline_buttons and not has_original_buttons:
+                # Handle both entity objects and integer IDs
+                target_id = str(target_entity.id) if hasattr(target_entity, 'id') else str(target_entity)
+                asyncio.create_task(
+                    self._add_inline_buttons_with_bot(
+                        target_id, msg_id, inline_buttons, task_id
+                    )
+                )
+            
             # Pin message if enabled
             if forwarding_settings['pin_message_enabled']:
                 try:
@@ -2117,7 +2530,6 @@ class UserbotService:
 
             # Schedule auto delete if enabled
             if forwarding_settings['auto_delete_enabled'] and forwarding_settings['auto_delete_time'] > 0:
-                import asyncio
                 delete_time = forwarding_settings['auto_delete_time']
                 logger.info(f"⏰ جدولة حذف الرسالة {msg_id} بعد {delete_time} ثانية")
 
@@ -2130,19 +2542,704 @@ class UserbotService:
             logger.error(f"خطأ في تطبيق إعدادات ما بعد التوجيه: {e}")
 
     async def _schedule_message_deletion(self, client: TelegramClient, target_entity, msg_id: int, delay_seconds: int, task_id: int):
-        """Schedule message deletion after specified delay"""
+        """Schedule message deletion after specified delay with proper tracking"""
+        deletion_key = f"{target_entity}:{msg_id}"
+        
         try:
             import asyncio
+            
+            # Store the task for potential cancellation
+            deletion_task = asyncio.current_task()
+            if not hasattr(self, 'scheduled_deletions'):
+                self.scheduled_deletions = {}
+            self.scheduled_deletions[deletion_key] = deletion_task
+            
+            logger.info(f"⏰ تم جدولة حذف الرسالة {msg_id} بعد {delay_seconds} ثانية (المهمة {task_id})")
+            
+            # Wait for the specified delay
             await asyncio.sleep(delay_seconds)
 
             try:
+                # Remove from tracking before deletion
+                if deletion_key in self.scheduled_deletions:
+                    del self.scheduled_deletions[deletion_key]
+                
                 await client.delete_messages(target_entity, msg_id)
                 logger.info(f"🗑️ تم حذف الرسالة {msg_id} تلقائياً من {target_entity} (المهمة {task_id})")
+                
             except Exception as delete_error:
                 logger.error(f"❌ فشل في حذف الرسالة {msg_id} تلقائياً: {delete_error}")
+                
+                # Handle specific deletion errors
+                error_str = str(delete_error)
+                if "MESSAGE_DELETE_FORBIDDEN" in error_str:
+                    logger.warning(f"⚠️ لا يُسمح بحذف الرسالة {msg_id} - قد تكون رسالة أخرى")
+                elif "CHAT_ADMIN_REQUIRED" in error_str:
+                    logger.warning(f"⚠️ مطلوب صلاحيات إدارية لحذف الرسالة {msg_id}")
+                elif "MESSAGE_ID_INVALID" in error_str:
+                    logger.warning(f"⚠️ معرف الرسالة {msg_id} غير صالح أو محذوف مسبقاً")
 
+        except asyncio.CancelledError:
+            logger.info(f"🔄 تم إلغاء جدولة حذف الرسالة {msg_id} (المهمة {task_id})")
+            if deletion_key in getattr(self, 'scheduled_deletions', {}):
+                del self.scheduled_deletions[deletion_key]
         except Exception as e:
             logger.error(f"خطأ في جدولة حذف الرسالة: {e}")
+            if deletion_key in getattr(self, 'scheduled_deletions', {}):
+                del self.scheduled_deletions[deletion_key]
+    
+    def cancel_scheduled_deletion(self, target_entity, msg_id: int):
+        """Cancel a scheduled message deletion"""
+        deletion_key = f"{target_entity}:{msg_id}"
+        
+        if hasattr(self, 'scheduled_deletions') and deletion_key in self.scheduled_deletions:
+            task = self.scheduled_deletions[deletion_key]
+            if not task.done():
+                task.cancel()
+                logger.info(f"🔄 تم إلغاء الحذف المُجدول للرسالة {msg_id}")
+            del self.scheduled_deletions[deletion_key]
+            return True
+        return False
+    
+    def cleanup_completed_deletion_tasks(self):
+        """Clean up completed deletion tasks to prevent memory leaks"""
+        if not hasattr(self, 'scheduled_deletions'):
+            return
+            
+        completed_keys = []
+        for key, task in self.scheduled_deletions.items():
+            if task.done():
+                completed_keys.append(key)
+        
+        for key in completed_keys:
+            del self.scheduled_deletions[key]
+            
+        if completed_keys:
+            logger.info(f"🧹 تم تنظيف {len(completed_keys)} مهام حذف مكتملة من الذاكرة")
+
+    async def _add_inline_buttons_with_bot(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
+        """Add inline buttons to a message using bot client"""
+        try:
+            if not inline_buttons:
+                logger.warning(f"⚠️ لا توجد أزرار لإضافتها للرسالة {message_id} في المهمة {task_id}")
+                return False
+                
+            logger.info(f"🔘 بدء إضافة {len(inline_buttons)} صف من الأزرار للرسالة {message_id} في القناة {target_chat_id} - المهمة {task_id}")
+            
+            # Try direct API method first (more reliable)
+            if await self._add_buttons_via_api(target_chat_id, message_id, inline_buttons, task_id):
+                return True
+            
+            # Fallback to Telethon method
+            return await self._add_buttons_via_telethon(target_chat_id, message_id, inline_buttons, task_id)
+                    
+        except Exception as e:
+            logger.error(f"❌ خطأ عام في إضافة الأزرار باستخدام bot client: {e}")
+            return False
+
+    async def _add_buttons_via_api(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
+        """Add inline buttons using direct Telegram Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            import json
+            
+            logger.info(f"🔧 محاولة إضافة الأزرار عبر Bot API للرسالة {message_id}")
+            
+            # Normalize chat ID (add -100 prefix if needed)
+            normalized_chat_id = self._normalize_chat_id(target_chat_id)
+            logger.info(f"🔄 معرف القناة المطبيع: {target_chat_id} -> {normalized_chat_id}")
+            
+            # Validate chat_id format first
+            if not self._validate_chat_id(normalized_chat_id):
+                logger.error(f"❌ معرف القناة غير صحيح: {normalized_chat_id}")
+                return False
+            
+            # Convert inline_buttons to API format
+            keyboard = []
+            for row in inline_buttons:
+                keyboard_row = []
+                for button in row:
+                    if hasattr(button, 'url'):
+                        keyboard_row.append({
+                            "text": button.text,
+                            "url": button.url
+                        })
+                keyboard.append(keyboard_row)
+            
+            logger.info(f"🔘 تم تحويل {len(keyboard)} صف من الأزرار إلى تنسيق API")
+            
+            # Try to add buttons directly using editMessageText
+            success = await self._edit_message_with_buttons_via_bot(normalized_chat_id, message_id, keyboard)
+            
+            if success:
+                logger.info(f"✅ تم إضافة الأزرار بنجاح عبر Bot API للرسالة {message_id}")
+                return True
+            
+            # If direct edit fails, try to get message text and edit
+            logger.info(f"⚠️ فشل في التعديل المباشر، محاولة الحصول على نص الرسالة...")
+            # Get original message text
+            
+            if message_text:
+                # Try to edit with text and buttons
+                success = await self._edit_message_with_text_and_buttons(normalized_chat_id, message_id, message_text, keyboard)
+                if success:
+                    return True
+            
+            # If all else fails, try send new message and delete old
+            logger.info(f"⚠️ محاولة إرسال رسالة جديدة مع الأزرار...")
+            success = await self._send_new_message_with_buttons(normalized_chat_id, message_id, message_text or "تم إضافة الأزرار", keyboard)
+            
+            return success
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار عبر Bot API: {e}")
+            return False
+
+    async def _edit_message_with_buttons_via_bot(self, target_chat_id: str, message_id: int, keyboard: list):
+        """Edit message to add buttons via Bot API (without changing text)"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageReplyMarkup"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "message_id": message_id,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        logger.info(f"✅ تم إضافة الأزرار للرسالة {message_id} بنجاح")
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.warning(f"⚠️ فشل في إضافة الأزرار: {error_code} - {error_desc}")
+                        
+                        # Handle specific errors
+                        if "MESSAGE_NOT_MODIFIED" in error_desc:
+                            logger.info(f"ℹ️ الرسالة {message_id} تحتوي على أزرار بالفعل")
+                            return True
+                        elif "MESSAGE_EDIT_TIME_EXPIRED" in error_desc:
+                            logger.error(f"❌ انتهت صلاحية تعديل الرسالة {message_id}")
+                        elif "CHAT_NOT_FOUND" in error_desc:
+                            logger.error(f"❌ لم يتم العثور على القناة {target_chat_id}")
+                        elif "BOT_WAS_BLOCKED" in error_desc:
+                            logger.error(f"❌ تم حظر البوت من القناة {target_chat_id}")
+                        
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار: {e}")
+            return False
+
+    async def _get_message_text_via_bot(self, target_chat_id: str, message_id: int):
+        """Get message text via Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok') and result.get('result'):
+                        updates = result['result']
+                        for update in updates:
+                            if 'message' in update:
+                                msg = update['message']
+                                if (str(msg.get('chat', {}).get('id')) == str(target_chat_id) and 
+                                    msg.get('message_id') == message_id):
+                                    return msg.get('text', 'تم إضافة الأزرار')
+            
+            # If not found in updates, return default text
+            return "تم إضافة الأزرار"
+            
+        except Exception as e:
+            logger.warning(f"⚠️ لا يمكن الحصول على نص الرسالة: {e}")
+            return "تم إضافة الأزرار"
+
+    async def _edit_message_with_text_and_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
+        """Edit message text and add buttons via Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "message_id": message_id,
+                "text": message_text,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            # Check if text contains HTML formatting
+            if '<' in message_text and '>' in message_text:
+                payload["parse_mode"] = "HTML"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        logger.info(f"✅ تم تعديل الرسالة {message_id} وإضافة الأزرار بنجاح")
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.warning(f"⚠️ فشل في تعديل الرسالة: {error_code} - {error_desc}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في تعديل الرسالة: {e}")
+            return False
+
+    async def _send_new_message_with_buttons(self, target_chat_id: str, old_message_id: int, message_text: str, keyboard: list):
+        """Send new message with buttons and delete old message"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Send new message with buttons
+            send_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "text": message_text,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            # Check if text contains HTML formatting
+            if '<' in message_text and '>' in message_text:
+                payload["parse_mode"] = "HTML"
+            
+            async with aiohttp.ClientSession() as session:
+                # Send new message
+                async with session.post(send_url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        new_message_id = result['result']['message_id']
+                        logger.info(f"✅ تم إرسال رسالة جديدة مع الأزرار: {new_message_id}")
+                        
+                        # Try to delete old message
+                        try:
+                            delete_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+                            delete_payload = {
+                                "chat_id": target_chat_id,
+                                "message_id": old_message_id
+                            }
+                            
+                            async with session.post(delete_url, json=delete_payload) as delete_response:
+                                delete_result = await delete_response.json()
+                                if delete_result.get('ok'):
+                                    logger.info(f"✅ تم حذف الرسالة القديمة: {old_message_id}")
+                                else:
+                                    logger.warning(f"⚠️ لم يتم حذف الرسالة القديمة: {old_message_id}")
+                                    
+                        except Exception as delete_err:
+                            logger.warning(f"⚠️ خطأ في حذف الرسالة القديمة: {delete_err}")
+                        
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.error(f"❌ فشل في إرسال رسالة جديدة: {error_code} - {error_desc}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إرسال رسالة جديدة: {e}")
+            return False
+
+    async def _replace_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
+        """Send new message with buttons and delete old message"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Send new message with buttons
+            send_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "text": message_text,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            # Check if text contains HTML formatting
+            if '<' in message_text and '>' in message_text:
+                payload["parse_mode"] = "HTML"
+            
+            async with aiohttp.ClientSession() as session:
+                # Send new message
+                async with session.post(send_url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        new_message_id = result['result']['message_id']
+                        logger.info(f"✅ تم إرسال رسالة جديدة مع الأزرار: {new_message_id}")
+                        
+                        # Try to delete old message
+                        try:
+                            delete_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+                            delete_payload = {
+                                "chat_id": target_chat_id,
+                                "message_id": message_id
+                            }
+                            
+                            async with session.post(delete_url, json=delete_payload) as delete_response:
+                                delete_result = await delete_response.json()
+                                if delete_result.get('ok'):
+                                    logger.info(f"✅ تم حذف الرسالة القديمة: {message_id}")
+                                else:
+                                    logger.warning(f"⚠️ لم يتم حذف الرسالة القديمة: {message_id}")
+                                    
+                        except Exception as delete_err:
+                            logger.warning(f"⚠️ خطأ في حذف الرسالة القديمة: {delete_err}")
+                        
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.error(f"❌ فشل في إرسال رسالة جديدة: {error_code} - {error_desc}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في استبدال الرسالة: {e}")
+            return False
+
+    async def _get_message_text_via_api(self, target_chat_id: str, message_id: int):
+        """Get original message text via Telegram Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Try to get message info using getUpdates (limited but works for recent messages)
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok') and result.get('result'):
+                        updates = result['result']
+                        for update in updates:
+                            if 'message' in update:
+                                msg = update['message']
+                                if (str(msg.get('chat', {}).get('id')) == str(target_chat_id) and 
+                                    msg.get('message_id') == message_id):
+                                    return msg.get('text', 'تم إضافة الأزرار')
+            
+            # If not found in updates, return default text
+            return "تم إضافة الأزرار"
+            
+        except Exception as e:
+            logger.warning(f"⚠️ لا يمكن الحصول على نص الرسالة الأصلية: {e}")
+            return "تم إضافة الأزرار"
+
+    def _validate_chat_id(self, target_chat_id: str) -> bool:
+        """Validate chat ID format and detect phone numbers"""
+        try:
+            if not target_chat_id:
+                logger.error("❌ معرف القناة فارغ")
+                return False
+            
+            # Check if it's a phone number (usually 7-15 digits)
+            if target_chat_id.isdigit():
+                chat_id_int = int(target_chat_id)
+                if chat_id_int < 1000000000:  # Likely a phone number
+                    logger.error(f"❌ معرف القناة {target_chat_id} يبدو كرقم هاتف وليس معرف قناة")
+                    logger.error(f"💡 تأكد من استخدام معرف القناة الصحيح (مثال: -1001234567890)")
+                    return False
+            
+            # Check for valid channel/group ID formats
+            if target_chat_id.startswith('-100'):
+                # Channel ID format
+                return True
+            elif target_chat_id.startswith('-'):
+                # Group ID format
+                return True
+            elif target_chat_id.startswith('@'):
+                # Username format
+                return True
+            elif target_chat_id.isdigit() and int(target_chat_id) > 1000000000:
+                # Large numeric ID (likely a chat ID) - this might be a channel ID without -100 prefix
+                logger.info(f"ℹ️ معرف القناة {target_chat_id} قد يحتاج إلى إضافة -100 في البداية")
+                return True
+            else:
+                logger.warning(f"⚠️ معرف القناة {target_chat_id} قد لا يكون صحيحاً")
+                return True  # Allow it to try anyway
+                
+        except Exception as e:
+            logger.error(f"❌ خطأ في التحقق من معرف القناة: {e}")
+            return False
+
+    def _normalize_chat_id(self, target_chat_id: str) -> str:
+        """Normalize chat ID by adding -100 prefix if needed"""
+        try:
+            if not target_chat_id:
+                return target_chat_id
+            
+            # If it's a large numeric ID (likely a channel ID without -100 prefix)
+            if target_chat_id.isdigit():
+                chat_id_int = int(target_chat_id)
+                if chat_id_int > 1000000000 and not target_chat_id.startswith('-100'):
+                    # This looks like a channel ID without -100 prefix
+                    normalized_id = f"-100{target_chat_id}"
+                    logger.info(f"🔄 تم تطبيع معرف القناة: {target_chat_id} -> {normalized_id}")
+                    return normalized_id
+            
+            return target_chat_id
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ في تطبيع معرف القناة: {e}")
+            return target_chat_id
+
+    async def _check_bot_permissions(self, target_chat_id: str):
+        """Check if bot has necessary permissions in the channel"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Validate chat_id format first
+            if not self._validate_chat_id(target_chat_id):
+                return False
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
+            payload = {
+                "chat_id": target_chat_id,
+                "user_id": BOT_TOKEN.split(':')[0] if ':' in BOT_TOKEN else None
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        member = result['result']
+                        status = member.get('status', '')
+                        
+                        # Check if bot is admin or has post permissions
+                        if status in ['administrator', 'creator']:
+                            logger.info(f"✅ البوت هو مشرف في القناة {target_chat_id}")
+                            return True
+                        elif status == 'member':
+                            # Check if bot has post_messages permission
+                            can_post = member.get('can_post_messages', False)
+                            if can_post:
+                                logger.info(f"✅ البوت لديه صلاحية النشر في القناة {target_chat_id}")
+                                return True
+                            else:
+                                logger.error(f"❌ البوت ليس لديه صلاحية النشر في القناة {target_chat_id}")
+                                return False
+                        else:
+                            logger.error(f"❌ البوت ليس عضو في القناة {target_chat_id}")
+                            return False
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.error(f"❌ لا يمكن التحقق من صلاحيات البوت في القناة {target_chat_id}: {error_code} - {error_desc}")
+                        
+                        # Handle specific errors
+                        if "CHAT_NOT_FOUND" in error_desc:
+                            logger.error(f"💡 تأكد من أن البوت عضو في القناة {target_chat_id}")
+                        elif "BOT_WAS_BLOCKED" in error_desc:
+                            logger.error(f"💡 البوت محظور من القناة {target_chat_id}")
+                        elif "USER_NOT_PARTICIPANT" in error_desc:
+                            logger.error(f"💡 البوت ليس عضو في القناة {target_chat_id}")
+                        
+                        return False
+                        
+        except Exception as e:
+            logger.warning(f"⚠️ خطأ في التحقق من صلاحيات البوت: {e}")
+            return False
+
+    async def _add_buttons_via_telethon(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
+        """Add inline buttons using Telethon client (fallback method)"""
+        try:
+            from bot_package.config import BOT_TOKEN, API_ID, API_HASH
+            from telethon import TelegramClient
+            import asyncio
+            
+            # Add small delay to ensure message is fully sent
+            await asyncio.sleep(1.0)
+            
+            # Create temporary bot client with unique session name
+            import time
+            session_name = f'temp_bot_buttons_{int(time.time())}'
+            bot_client = TelegramClient(session_name, API_ID, API_HASH)
+            
+            try:
+                # Start bot client
+                await bot_client.start(bot_token=BOT_TOKEN)
+                logger.info(f"🤖 تم تشغيل bot client بنجاح لإضافة الأزرار")
+                
+                # Normalize chat ID (add -100 prefix if needed)
+                normalized_chat_id = self._normalize_chat_id(target_chat_id)
+                
+                # Convert target_chat_id to appropriate format
+                try:
+                    # Handle different chat ID formats
+                    if normalized_chat_id.startswith('-100'):
+                        # Channel ID format
+                        target_entity = int(normalized_chat_id)
+                    elif normalized_chat_id.startswith('-'):
+                        # Group ID format
+                        target_entity = int(normalized_chat_id)
+                    elif normalized_chat_id.isdigit():
+                        # Check if it's a valid chat ID (not a phone number)
+                        chat_id_int = int(normalized_chat_id)
+                        if chat_id_int > 1000000000:  # Likely a chat ID
+                            target_entity = chat_id_int
+                        else:
+                            # This might be a phone number, try as string
+                            target_entity = normalized_chat_id
+                    else:
+                        # Username or other format
+                        target_entity = normalized_chat_id
+                    
+                    # Get target entity
+                    target_entity = await bot_client.get_entity(target_entity)
+                    logger.info(f"✅ تم العثور على القناة الهدف: {getattr(target_entity, 'title', normalized_chat_id)}")
+                except Exception as entity_err:
+                    error_str = str(entity_err)
+                    logger.error(f"❌ فشل في الوصول للقناة {normalized_chat_id}: {entity_err}")
+                    
+                    # Handle specific error for phone numbers
+                    if "Cannot get entity by phone number as a bot" in error_str:
+                        logger.error(f"❌ لا يمكن استخدام رقم الهاتف {normalized_chat_id} كمعرف قناة للبوت")
+                        logger.error(f"💡 تأكد من استخدام معرف القناة الصحيح (مثال: -1001234567890)")
+                        return False
+                    elif "CHAT_NOT_FOUND" in error_str:
+                        logger.error(f"❌ لم يتم العثور على القناة {normalized_chat_id}")
+                        logger.error(f"💡 تأكد من أن البوت عضو في القناة")
+                        return False
+                    elif "BOT_WAS_BLOCKED" in error_str:
+                        logger.error(f"❌ تم حظر البوت من القناة {normalized_chat_id}")
+                        return False
+                    else:
+                        logger.error(f"❌ خطأ غير معروف في الوصول للقناة: {error_str}")
+                        return False
+                
+                # Get the original message with retry
+                max_retries = 5
+                original_msg = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        original_msg = await bot_client.get_messages(target_entity, ids=message_id)
+                        if original_msg:
+                            break
+                        else:
+                            logger.warning(f"⚠️ محاولة {attempt + 1}: لم يتم العثور على الرسالة {message_id}")
+                            await asyncio.sleep(2)  # Wait before retry
+                    except Exception as get_msg_err:
+                        logger.warning(f"⚠️ محاولة {attempt + 1}: خطأ في جلب الرسالة {message_id}: {get_msg_err}")
+                        await asyncio.sleep(2)  # Wait before retry
+                
+                if not original_msg:
+                    logger.error(f"❌ فشل في العثور على الرسالة {message_id} بعد {max_retries} محاولات")
+                    return False
+                
+                logger.info(f"✅ تم العثور على الرسالة {message_id}: '{original_msg.text[:50] if original_msg.text else 'وسائط'}'")
+                
+                # Check if bot has edit permissions
+                try:
+                    bot_info = await bot_client.get_me()
+                    logger.info(f"🤖 معلومات البوت: {bot_info.first_name} (@{bot_info.username})")
+                    
+                    # Get chat member info to check permissions
+                    chat_member = await bot_client.get_permissions(target_entity)
+                    if not chat_member.is_admin and not chat_member.post_messages:
+                        logger.error(f"❌ البوت ليس لديه صلاحيات كافية لتعديل الرسائل في {target_chat_id}")
+                        return False
+                        
+                except Exception as perm_err:
+                    logger.warning(f"⚠️ لا يمكن التحقق من صلاحيات البوت: {perm_err}")
+                
+                # Edit the message to add buttons while keeping original content
+                try:
+                    # Prepare message text
+                    message_text = original_msg.text or original_msg.message or "."
+                    
+                    # Handle media messages
+                    media = None
+                    if original_msg.media:
+                        media = original_msg.media
+                    
+                    # Edit message with buttons
+                    edited_msg = await bot_client.edit_message(
+                        target_entity,
+                        message_id,
+                        message_text,
+                        buttons=inline_buttons,
+                        parse_mode='HTML' if '<' in message_text and '>' in message_text else None
+                    )
+                    
+                    if edited_msg:
+                        logger.info(f"✅ تم إضافة {len(inline_buttons)} صف من الأزرار بنجاح للرسالة {message_id} في المهمة {task_id}")
+                        return True
+                    else:
+                        logger.error(f"❌ فشل في تعديل الرسالة {message_id} - لم يتم إرجاع رسالة معدلة")
+                        return False
+                    
+                except Exception as edit_err:
+                    error_str = str(edit_err)
+                    logger.error(f"❌ فشل في تعديل الرسالة {message_id} لإضافة الأزرار: {edit_err}")
+                    
+                    # Handle specific error cases
+                    if "MESSAGE_NOT_MODIFIED" in error_str:
+                        logger.warning(f"⚠️ الرسالة لم تتغير - قد تكون الأزرار موجودة بالفعل")
+                        return True
+                    elif "MESSAGE_EDIT_TIME_EXPIRED" in error_str:
+                        logger.error(f"❌ انتهت صلاحية تعديل الرسالة {message_id}")
+                        return False
+                    elif "CHAT_WRITE_FORBIDDEN" in error_str:
+                        logger.error(f"❌ البوت لا يستطيع الكتابة في القناة {target_chat_id}")
+                        return False
+                    elif "BOT_WAS_BLOCKED" in error_str:
+                        logger.error(f"❌ تم حظر البوت في القناة {target_chat_id}")
+                        return False
+                    else:
+                        logger.error(f"❌ خطأ غير معروف في تعديل الرسالة: {error_str}")
+                        return False
+                
+            except Exception as bot_error:
+                logger.error(f"❌ خطأ عام في bot client لإضافة الأزرار: {bot_error}")
+                return False
+                
+            finally:
+                try:
+                    await bot_client.disconnect()
+                    # Clean up temporary session file
+                    import os
+                    session_file = f'{session_name}.session'
+                    if os.path.exists(session_file):
+                        os.remove(session_file)
+                        logger.info(f"🧹 تم تنظيف ملف الجلسة المؤقت: {session_file}")
+                except Exception as cleanup_err:
+                    logger.warning(f"⚠️ تحذير في تنظيف bot client: {cleanup_err}")
+                    
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار عبر Telethon: {e}")
+            return False
 
     async def _check_advanced_features(self, task_id: int, message_text: str, user_id: int) -> bool:
         """Check all advanced features before sending message"""
@@ -3685,15 +4782,36 @@ class UserbotService:
             logger.error(f"خطأ في اختبار تنسيق النص: {e}")
             return message_text
     
+    async def _send_message_with_spoiler_support(self, client, target_entity, text: str, **kwargs) -> any:
+        """
+        إرسال رسالة مع دعم spoiler entities
+        Send message with spoiler entities support
+        """
+        if not text:
+            text = "رسالة"
+            
+        processed_text, spoiler_entities = self._process_spoiler_entities(text)
+        
+        if spoiler_entities:
+            # Remove parse_mode if spoiler entities are present
+            kwargs.pop('parse_mode', None)
+            kwargs['formatting_entities'] = spoiler_entities
+        
+        return await client.send_message(target_entity, processed_text, **kwargs)
+
     def _process_spoiler_entities(self, text: str) -> Tuple[str, List]:
         """
         معالجة علامات spoiler وتحويلها إلى MessageEntitySpoiler
         Process spoiler markers and convert them to MessageEntitySpoiler entities
+        FIXED: حساب صحيح للمواضع والأطوال
         """
-        entities = []
-        processed_text = text
+        if not text:
+            return text, []
+            
+        from telethon.tl.types import MessageEntitySpoiler
+        import re
         
-        # البحث عن جميع علامات spoiler - إضافة DOTALL flag للنصوص متعددة الأسطر
+        entities = []
         pattern = r'TELETHON_SPOILER_START(.*?)TELETHON_SPOILER_END'
         matches = list(re.finditer(pattern, text, re.DOTALL))
         
@@ -3702,36 +4820,45 @@ class UserbotService:
         
         logger.info(f"🔍 تم العثور على {len(matches)} علامة spoiler في النص")
         
-        # معالجة المطابقات بترتيب عكسي للحفاظ على الفهارس
+        # إنشاء النص النهائي والكيانات بطريقة صحيحة
+        processed_text = text
+        offset_correction = 0  # تصحيح الموضع بسبب إزالة العلامات
+        
+        # معالجة المطابقات بترتيب عكسي للحفاظ على المواضع
         for match in reversed(matches):
             start_pos = match.start()
-            end_pos = match.end()
+            end_pos = match.end() 
             spoiler_text = match.group(1)
             
-            # استبدال العلامة بالنص العادي أولاً
+            # استبدال العلامة بالنص المخفي فقط
             processed_text = processed_text[:start_pos] + spoiler_text + processed_text[end_pos:]
         
-        # الآن إضافة الكيانات بالمواضع الصحيحة
-        offset = 0
-        for match in re.finditer(pattern, text, re.DOTALL):
+        # الآن حساب المواضع الصحيحة في النص المُنظف
+        current_offset = 0
+        for match in matches:
             spoiler_text = match.group(1)
             
-            # حساب الموضع الصحيح بعد إزالة العلامات السابقة
-            correct_offset = match.start() - offset
+            # البحث عن موضع النص المخفي في النص المُنظف
+            # نجد الموضع النسبي من بداية النص
+            text_before_marker = text[:match.start()]
+            # إزالة جميع علامات spoiler من النص السابق لحساب الموضع الصحيح
+            clean_text_before = re.sub(r'TELETHON_SPOILER_START.*?TELETHON_SPOILER_END', 
+                                       lambda m: m.group(1), text_before_marker, flags=re.DOTALL)
             
+            correct_offset = len(clean_text_before)
+            
+            # إنشاء entity
             entity = MessageEntitySpoiler(
                 offset=correct_offset,
                 length=len(spoiler_text)
             )
             entities.append(entity)
             
-            # تحديث الفهرس بطول العلامات المُزالة
-            marker_length = len('TELETHON_SPOILER_START') + len('TELETHON_SPOILER_END')
-            offset += marker_length
-            
-            logger.info(f"✅ Spoiler entity: offset={correct_offset}, length={len(spoiler_text)}, content='{spoiler_text[:50]}{'...' if len(spoiler_text) > 50 else ''}'")
+            logger.info(f"✅ Spoiler entity: offset={correct_offset}, length={len(spoiler_text)}, content='{spoiler_text[:30]}{'...' if len(spoiler_text) > 30 else ''}'")
         
-        logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler في النص بنجاح")
+        logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler بنجاح")
+        logger.info(f"📝 النص الأصلي: '{text[:50]}{'...' if len(text) > 50 else ''}'")
+        logger.info(f"📝 النص المُعالج: '{processed_text[:50]}{'...' if len(processed_text) > 50 else ''}'")
         
         return processed_text, entities
 
@@ -3874,3 +5001,190 @@ async def stop_userbot_service():
     logger.info("⏹️ إيقاف خدمة UserBot...")
     await userbot_instance.stop_all()
     logger.info("✅ تم إيقاف خدمة UserBot")
+
+# ===== معالجة الوسائط في الخلفية والإرسال المجمع =====
+
+async def _process_media_sync(self, event, task_id: int, watermark_enabled: bool, 
+                            audio_enabled: bool, is_audio_message: bool, cache_key: str):
+    """معالجة الوسائط بطريقة متزامنة مع التخزين المؤقت"""
+    try:
+        # فحص التخزين المؤقت أولاً
+        if hasattr(self, 'global_processed_media_cache') and cache_key in self.global_processed_media_cache:
+            processed_media, processed_filename = self.global_processed_media_cache[cache_key]
+            logger.info(f"🎯 استخدام الوسائط المعالجة من التخزين المؤقت: {processed_filename}")
+            return processed_media, processed_filename
+        
+        # بدء المعالجة الفعلية
+        processed_media = None
+        processed_filename = None
+        
+        if watermark_enabled:
+            logger.info("🏷️ تطبيق العلامة المائية مرة واحدة")
+            processed_media, processed_filename = await self.apply_watermark_to_media(event, task_id)
+            
+            if processed_media and processed_media != event.message.media:
+                # حفظ في التخزين المؤقت
+                if not hasattr(self, 'global_processed_media_cache'):
+                    self.global_processed_media_cache = {}
+                self.global_processed_media_cache[cache_key] = (processed_media, processed_filename)
+                logger.info(f"✅ تم تطبيق العلامة المائية وحفظها: {processed_filename}")
+            else:
+                logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
+        
+        elif audio_enabled and is_audio_message:
+            logger.info("🎵 تطبيق وسوم الصوت مرة واحدة")
+            
+            # تحميل الوسائط واستخراج اسم مناسب
+            if not hasattr(self, '_current_media_cache'):
+                self._current_media_cache = {}
+            
+            media_cache_key_download = f"{event.message.id}_{event.chat_id}_download"
+            
+            if media_cache_key_download in self._current_media_cache:
+                media_bytes, file_name, file_ext = self._current_media_cache[media_cache_key_download]
+                logger.info("🔄 استخدام الوسائط المحمّلة من التخزين المؤقت")
+            else:
+                # تحميل مرة واحدة فقط
+                media_bytes = await event.message.download_media(bytes)
+                if not media_bytes:
+                    return event.message.media, None
+                
+                # استخراج اسم الملف وامتداده
+                file_name = "audio"
+                file_ext = ".mp3"
+                
+                if hasattr(event.message.media, 'document') and event.message.media.document:
+                    doc = event.message.media.document
+                    if hasattr(doc, 'attributes'):
+                        for attr in doc.attributes:
+                            if hasattr(attr, 'file_name') and attr.file_name:
+                                if '.' in attr.file_name:
+                                    file_name = attr.file_name.rsplit('.', 1)[0]
+                                    file_ext = '.' + attr.file_name.split('.')[-1].lower()
+                                else:
+                                    file_name = attr.file_name
+                                break
+                
+                # حفظ في التخزين المؤقت للتحميل
+                self._current_media_cache[media_cache_key_download] = (media_bytes, file_name, file_ext)
+            
+            # تطبيق معالجة الصوت
+            processed_media, processed_filename = await self.apply_audio_metadata(
+                event, task_id, media_bytes, f"{file_name}{file_ext}"
+            )
+            
+            if processed_media and isinstance(processed_media, (bytes, bytearray)):
+                # حفظ في التخزين المؤقت
+                if not hasattr(self, 'global_processed_media_cache'):
+                    self.global_processed_media_cache = {}
+                self.global_processed_media_cache[cache_key] = (processed_media, processed_filename)
+                logger.info(f"✅ تم تطبيق وسوم الصوت وحفظها: {processed_filename}")
+            else:
+                logger.info("🔄 لم يتم تطبيق وسوم الصوت، استخدام الوسائط الأصلية")
+        
+        return processed_media, processed_filename
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في المعالجة المتزامنة: {e}")
+        return None, None
+
+async def _apply_batch_send_delay(self, batch_key: str, target_chat_id: str, 
+                                message_data: dict, delay: float = 2.0):
+    """تطبيق تأخير الإرسال المجمع"""
+    try:
+        if BACKGROUND_PROCESSING_AVAILABLE:
+            # استخدام نظام الإرسال المجمع المتقدم
+            await queue_batch_message(batch_key, {
+                'target_chat_id': target_chat_id,
+                'message_data': message_data,
+                'send_callback': self._send_batch_message
+            }, delay)
+            return True
+        else:
+            # تأخير بسيط
+            await asyncio.sleep(delay)
+            return False
+    except Exception as e:
+        logger.error(f"❌ خطأ في تطبيق تأخير الإرسال المجمع: {e}")
+        return False
+
+async def _send_batch_message(self, message_data: dict):
+    """إرسال رسالة مجمعة"""
+    try:
+        # تنفيذ منطق الإرسال الفعلي هنا
+        target_chat_id = message_data.get('target_chat_id')
+        data = message_data.get('message_data', {})
+        
+        logger.info(f"📤 إرسال رسالة مجمعة إلى: {target_chat_id}")
+        # يمكن توسيع هذا لتنفيذ الإرسال الفعلي
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في إرسال رسالة مجمعة: {e}")
+
+async def _apply_enhanced_batch_delay(self, task: dict, media=None, filename=None):
+    """تطبيق تأخير محسن للإرسال المجمع بناءً على نوع الوسائط"""
+    try:
+        base_delay = 1.0  # تأخير أساسي بثانية واحدة
+        
+        # تحديد التأخير بناءً على نوع الوسائط
+        if media and filename:
+            if filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                # فيديو - تأخير أطول
+                delay = base_delay * 2.5
+                logger.info(f"🎬 تأخير إرسال فيديو: {delay}s")
+            elif filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                # صورة - تأخير متوسط
+                delay = base_delay * 1.5
+                logger.info(f"🖼️ تأخير إرسال صورة: {delay}s")
+            elif filename.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav')):
+                # صوت - تأخير قصير
+                delay = base_delay * 1.2
+                logger.info(f"🎵 تأخير إرسال صوت: {delay}s")
+            else:
+                # ملف عادي
+                delay = base_delay
+                logger.info(f"📄 تأخير إرسال ملف: {delay}s")
+        else:
+            # رسالة نصية
+            delay = base_delay * 0.5
+            logger.info(f"📝 تأخير إرسال نص: {delay}s")
+        
+        # تطبيق التأخير
+        await asyncio.sleep(delay)
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في تطبيق التأخير المحسن: {e}")
+        # تأخير بسيط كبديل
+        await asyncio.sleep(1.0)
+        return False
+
+async def _should_use_background_processing(self, event, processing_needed: bool) -> bool:
+    """تحديد ما إذا كان يجب استخدام المعالجة في الخلفية"""
+    try:
+        if not processing_needed or not self.background_media_processing:
+            return False
+        
+        # فحص حجم الملف
+        if hasattr(event.message, 'media') and hasattr(event.message.media, 'document'):
+            doc = event.message.media.document
+            if doc and hasattr(doc, 'size') and doc.size:
+                file_size = doc.size
+                # استخدام المعالجة في الخلفية للملفات أكبر من 3 ميجابايت
+                if file_size > 3 * 1024 * 1024:
+                    logger.info(f"📊 ملف كبير ({file_size / 1024 / 1024:.1f}MB) - يُفضل المعالجة في الخلفية")
+                    return True
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في تحديد نوع المعالجة: {e}")
+        return False
+
+# إضافة الوظائف للصف UserbotService
+UserbotService._process_media_sync = _process_media_sync
+UserbotService._apply_batch_send_delay = _apply_batch_send_delay
+UserbotService._send_batch_message = _send_batch_message
+UserbotService._apply_enhanced_batch_delay = _apply_enhanced_batch_delay
+UserbotService._should_use_background_processing = _should_use_background_processing

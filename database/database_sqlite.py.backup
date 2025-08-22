@@ -580,6 +580,7 @@ class Database:
 
     # Header/Footer/Buttons Settings Methods
 
+
     def update_footer_settings(self, task_id: int, enabled: bool, text: str = ''):
         """Update footer settings"""
         with self.get_connection() as conn:
@@ -770,6 +771,7 @@ class Database:
             
             conn.commit()
 
+
     # ===== Text Cleaning Functions =====
 
     def get_text_cleaning_settings(self, task_id):
@@ -783,6 +785,7 @@ class Database:
                 FROM task_text_cleaning_settings
                 WHERE task_id = ?
             """, (task_id,))
+            
                 
                 result = cursor.fetchone()
                 if result:
