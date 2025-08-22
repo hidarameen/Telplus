@@ -109,6 +109,36 @@ class TelegramBotSystem:
                     await asyncio.sleep(delay)
                     continue
                 
+                # التعامل مع أخطاء القرص
+                elif "disk I/O error" in error_str.lower():
+                    logger.error(f"❌ خطأ في القرص (disk I/O error): {e}")
+                    logger.error("🔧 محاولة إصلاح مشاكل القرص...")
+                    
+                    try:
+                        # تشغيل إصلاح القرص
+                        import subprocess
+                        import sys
+                        
+                        logger.info("🔧 تشغيل سكريبت إصلاح القرص...")
+                        result = subprocess.run([sys.executable, "fix_disk_io_error.py"], 
+                                              capture_output=True, text=True, timeout=120)
+                        
+                        if result.returncode == 0:
+                            logger.info("✅ تم إصلاح مشاكل القرص بنجاح")
+                            logger.info("🔄 إعادة تشغيل بوت التحكم...")
+                            await asyncio.sleep(10)
+                            continue
+                        else:
+                            logger.error(f"❌ فشل في إصلاح القرص: {result.stderr}")
+                    except Exception as fix_error:
+                        logger.error(f"❌ خطأ في تشغيل إصلاح القرص: {fix_error}")
+                    
+                    # انتظار أطول قبل إعادة المحاولة
+                    delay = 60
+                    logger.info(f"⏱️ انتظار {delay} ثانية قبل إعادة المحاولة...")
+                    await asyncio.sleep(delay)
+                    continue
+                
                 logger.error(f"❌ خطأ في بوت التحكم: {e}")
                 logger.info("🔄 بوت التحكم سيعيد المحاولة - معزول عن مشاكل UserBot")
                 
