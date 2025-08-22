@@ -4183,14 +4183,15 @@ class UserbotService:
         """
         معالجة علامات spoiler وتحويلها إلى MessageEntitySpoiler
         Process spoiler markers and convert them to MessageEntitySpoiler entities
+        FIXED: حساب صحيح للمواضع والأطوال
         """
         if not text:
             return text, []
             
-        entities = []
-        processed_text = text
+        from telethon.tl.types import MessageEntitySpoiler
+        import re
         
-        # البحث عن جميع علامات spoiler - إضافة DOTALL flag للنصوص متعددة الأسطر
+        entities = []
         pattern = r'TELETHON_SPOILER_START(.*?)TELETHON_SPOILER_END'
         matches = list(re.finditer(pattern, text, re.DOTALL))
         
@@ -4199,38 +4200,45 @@ class UserbotService:
         
         logger.info(f"🔍 تم العثور على {len(matches)} علامة spoiler في النص")
         
-        # إنشاء entities أولاً قبل تعديل النص
-        cumulative_offset = 0
-        for match in matches:
-            spoiler_text = match.group(1)
-            
-            # موضع البداية في النص المُعدل
-            entity_offset = match.start() - cumulative_offset
-            
-            # إنشاء entity
-            entity = MessageEntitySpoiler(
-                offset=entity_offset,
-                length=len(spoiler_text)
-            )
-            entities.append(entity)
-            
-            # تحديث الإزاحة التراكمية (طول العلامات المُزالة)
-            marker_length = len('TELETHON_SPOILER_START') + len('TELETHON_SPOILER_END')
-            cumulative_offset += marker_length
-            
-            logger.info(f"✅ Spoiler entity: offset={entity_offset}, length={len(spoiler_text)}, content='{spoiler_text[:50]}{'...' if len(spoiler_text) > 50 else ''}'")
+        # إنشاء النص النهائي والكيانات بطريقة صحيحة
+        processed_text = text
+        offset_correction = 0  # تصحيح الموضع بسبب إزالة العلامات
         
-        # الآن إزالة العلامات من النص (بترتيب عكسي للحفاظ على الفهارس)
+        # معالجة المطابقات بترتيب عكسي للحفاظ على المواضع
         for match in reversed(matches):
             start_pos = match.start()
-            end_pos = match.end()
+            end_pos = match.end() 
             spoiler_text = match.group(1)
             
             # استبدال العلامة بالنص المخفي فقط
             processed_text = processed_text[:start_pos] + spoiler_text + processed_text[end_pos:]
         
-        logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler في النص بنجاح")
-        logger.info(f"📝 النص المُعالج: '{processed_text[:100]}{'...' if len(processed_text) > 100 else ''}'")
+        # الآن حساب المواضع الصحيحة في النص المُنظف
+        current_offset = 0
+        for match in matches:
+            spoiler_text = match.group(1)
+            
+            # البحث عن موضع النص المخفي في النص المُنظف
+            # نجد الموضع النسبي من بداية النص
+            text_before_marker = text[:match.start()]
+            # إزالة جميع علامات spoiler من النص السابق لحساب الموضع الصحيح
+            clean_text_before = re.sub(r'TELETHON_SPOILER_START.*?TELETHON_SPOILER_END', 
+                                       lambda m: m.group(1), text_before_marker, flags=re.DOTALL)
+            
+            correct_offset = len(clean_text_before)
+            
+            # إنشاء entity
+            entity = MessageEntitySpoiler(
+                offset=correct_offset,
+                length=len(spoiler_text)
+            )
+            entities.append(entity)
+            
+            logger.info(f"✅ Spoiler entity: offset={correct_offset}, length={len(spoiler_text)}, content='{spoiler_text[:30]}{'...' if len(spoiler_text) > 30 else ''}'")
+        
+        logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler بنجاح")
+        logger.info(f"📝 النص الأصلي: '{text[:50]}{'...' if len(text) > 50 else ''}'")
+        logger.info(f"📝 النص المُعالج: '{processed_text[:50]}{'...' if len(processed_text) > 50 else ''}'")
         
         return processed_text, entities
 
