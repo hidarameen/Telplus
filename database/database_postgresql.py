@@ -692,6 +692,10 @@ class PostgreSQLDatabase:
                 cursor.execute("ALTER TABLE user_sessions ALTER COLUMN user_id TYPE BIGINT USING user_id::bigint")
             except Exception:
                 pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_user_id_fkey")
+            except Exception:
+                pass
 
             try:
                 cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS task_name TEXT DEFAULT 'مهمة توجيه'")
