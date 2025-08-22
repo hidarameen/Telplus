@@ -1291,15 +1291,27 @@ class UserbotService:
                                                 )
                                         else:
                                             # Use original media if no processing was done
-                                            logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
-                                            forwarded_msg = await client.send_file(
-                                                target_entity,
-                                                file=event.message.media,
-                                                caption=caption_text,
-                                                silent=forwarding_settings['silent_notifications'],
-                                                parse_mode='HTML' if caption_text else None,
-                                                buttons=original_reply_markup or inline_buttons
-                                            )
+                                            if event.message.media:
+                                                logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
+                                                forwarded_msg = await client.send_file(
+                                                    target_entity,
+                                                    file=event.message.media,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if caption_text else None,
+                                                    buttons=original_reply_markup or inline_buttons
+                                                )
+                                            else:
+                                                # No media - send as text message
+                                                logger.info("📝 لا توجد وسائط - إرسال كرسالة نصية")
+                                                forwarded_msg = await client.send_message(
+                                                    target_entity,
+                                                    caption_text or "رسالة",
+                                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML',
+                                                    buttons=original_reply_markup or inline_buttons
+                                                )
                                             
                                             # Apply post-forwarding settings (pin, auto-delete)
                                             if forwarded_msg:
@@ -1334,15 +1346,27 @@ class UserbotService:
                                                 )
                                         else:
                                             # Use original media if no processing was done
-                                            logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
-                                            forwarded_msg = await client.send_file(
-                                                target_entity,
-                                                file=event.message.media,
-                                                caption=caption_text,
-                                                silent=forwarding_settings['silent_notifications'],
-                                                parse_mode='HTML' if caption_text else None,
-                                                buttons=original_reply_markup or inline_buttons
-                                            )
+                                            if event.message.media:
+                                                logger.info("📁 استخدام الوسائط الأصلية (بدون معالجة)")
+                                                forwarded_msg = await client.send_file(
+                                                    target_entity,
+                                                    file=event.message.media,
+                                                    caption=caption_text,
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML' if caption_text else None,
+                                                    buttons=original_reply_markup or inline_buttons
+                                                )
+                                            else:
+                                                # No media - send as text message
+                                                logger.info("📝 لا توجد وسائط - إرسال كرسالة نصية")
+                                                forwarded_msg = await client.send_message(
+                                                    target_entity,
+                                                    caption_text or "رسالة",
+                                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                                    silent=forwarding_settings['silent_notifications'],
+                                                    parse_mode='HTML',
+                                                    buttons=original_reply_markup or inline_buttons
+                                                )
                                             
                                             # Apply post-forwarding settings (pin, auto-delete)
                                             if forwarded_msg:

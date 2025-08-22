@@ -2693,7 +2693,7 @@ class Database:
             for hour in range(24):
                 cursor.execute('''
                     INSERT OR IGNORE INTO task_working_hours_schedule 
-                    (task_id, hour, enabled)
+                    (task_id, hour, is_active)
                     VALUES (?, ?, ?)
                 ''', (task_id, hour, False))
             conn.commit()
@@ -2706,7 +2706,7 @@ class Database:
             for hour in range(24):
                 cursor.execute('''
                     INSERT OR REPLACE INTO task_working_hours_schedule 
-                    (task_id, hour, enabled)
+                    (task_id, hour, is_active)
                     VALUES (?, ?, ?)
                 ''', (task_id, hour, is_enabled))
             conn.commit()
@@ -2718,7 +2718,7 @@ class Database:
             cursor = conn.cursor()
             # Get current state
             cursor.execute('''
-                SELECT enabled FROM task_working_hours_schedule 
+                SELECT is_active as enabled FROM task_working_hours_schedule 
                 WHERE task_id = ? AND hour = ?
             ''', (task_id, hour))
             result = cursor.fetchone()
@@ -2756,7 +2756,7 @@ class Database:
                 
                 cursor.execute('''
                     INSERT OR REPLACE INTO task_working_hours_schedule 
-                    (task_id, hour, enabled)
+                    (task_id, hour, is_active)
                     VALUES (?, ?, ?)
                 ''', (task_id, hour, is_in_range))
             conn.commit()
@@ -2792,7 +2792,7 @@ class Database:
                         
                         cursor.execute('''
                             INSERT OR REPLACE INTO task_working_hours_schedule 
-                            (task_id, hour, enabled)
+                            (task_id, hour, is_active)
                             VALUES (?, ?, ?)
                         ''', (task_id, hour, is_in_range))
                     conn.commit()
@@ -2809,7 +2809,7 @@ class Database:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT OR REPLACE INTO task_working_hours_schedule 
-                    (task_id, hour, enabled)
+                    (task_id, hour, is_active)
                     VALUES (?, ?, ?)
                 ''', (task_id, hour, enabled))
                 conn.commit()
