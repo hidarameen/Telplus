@@ -667,6 +667,18 @@ class PostgreSQLDatabase:
                 cursor.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             except Exception:
                 pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP")
+            except Exception:
+                pass
+            try:
+                cursor.execute("UPDATE user_sessions SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_sessions ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP")
+            except Exception:
+                pass
 
             try:
                 cursor.execute("ALTER TABLE user_sessions ALTER COLUMN user_id TYPE BIGINT USING user_id::bigint")
