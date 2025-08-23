@@ -39,15 +39,12 @@ class UltraOptimizedWatermarkProcessor:
         
         # إعدادات FFmpeg للسرعة القصوى
         self.ultra_fast_settings = {
-            'crf': 40,              # جودة أقل للسرعة القصوى
-            'preset': 'ultrafast',   # أسرع preset
-            'threads': 16,          # استخدام جميع النوى المتاحة
-            'tile-columns': 6,      # تحسين الترميز أكثر
-            'frame-parallel': 1,    # معالجة متوازية
-            'tune': 'fastdecode',   # تحسين للسرعة
-            'profile': 'baseline',  # profile بسيط
-            'level': '3.0',         # مستوى بسيط
-            'x264opts': 'no-scenecut',  # إيقاف scene cut detection
+            'crf': 23,              # افتراضي آمن يحافظ على الجودة
+            'preset': 'veryfast',   # سرعة جيدة مع جودة مقبولة
+            'threads': 16,
+            'tune': 'film',         # ضبط يحافظ على التفاصيل
+            'profile': 'high',
+            'level': '4.0',
         }
         
         # إعدادات الذاكرة المؤقتة
@@ -194,6 +191,35 @@ class UltraOptimizedWatermarkProcessor:
                         image = image.convert('RGBA')
                         image.paste(watermark, (0, 0), watermark)
                         image = image.convert('RGB')
+            elif watermark_settings['watermark_type'] == 'image' and watermark_settings.get('watermark_image_path'):
+                try:
+                    wm_img = Image.open(watermark_settings['watermark_image_path'])
+                    if wm_img.mode != 'RGBA':
+                        wm_img = wm_img.convert('RGBA')
+                    size_percentage = int(watermark_settings.get('size_percentage', 20))
+                    opacity = int(watermark_settings.get('opacity', 70))
+                    base_w, base_h = image.size
+                    wm_w, wm_h = wm_img.size
+                    aspect = wm_w / wm_h if wm_h else 1
+                    target_area = max(1, int(base_w * base_h * (max(1, size_percentage) / 100.0)))
+                    new_h = int((target_area / aspect) ** 0.5)
+                    new_w = int(new_h * aspect)
+                    new_w = max(20, min(new_w, base_w - 10))
+                    new_h = max(20, min(new_h, base_h - 10))
+                    if (new_w, new_h) != wm_img.size:
+                        wm_img = wm_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    if 0 <= opacity < 100:
+                        alpha = wm_img.split()[-1]
+                        alpha = alpha.point(lambda p: int(p * opacity / 100))
+                        wm_img.putalpha(alpha)
+                    # Paste at chosen position
+                    pos = self._calculate_position_ultra_fast((base_w, base_h), wm_img.size, watermark_settings.get('position','bottom_right'))
+                    if image.mode != 'RGBA':
+                        image = image.convert('RGBA')
+                    image.paste(wm_img, pos, wm_img)
+                    image = image.convert('RGB')
+                except Exception as _e:
+                    logger.warning(f"فشل تطبيق علامة صورة على صورة: {_e}")
             
             # حفظ الصورة محسنة
             output = io.BytesIO()
@@ -423,10 +449,16 @@ class UltraOptimizedWatermarkProcessor:
                                             watermark_settings: dict) -> bool:
         """معالجة الفيديو باستخدام FFmpeg بشكل متوازي"""
         try:
-            # إعدادات السرعة القصوى (قابلة للتخصيص من الإعدادات)
-            crf = int(watermark_settings.get('crf', self.ultra_fast_settings['crf']))
-            preset = watermark_settings.get('preset', self.ultra_fast_settings['preset'])
+            # وضع الحفاظ على الجودة: CRF منخفض و preset أبطأ لضغط أفضل بدون فقد بصري
+            quality_mode = watermark_settings.get('quality_mode')
+            base_crf = self.ultra_fast_settings['crf']
+            base_preset = self.ultra_fast_settings['preset']
+            crf = int(watermark_settings.get('crf', 18 if quality_mode == 'preserve' else base_crf))
+            preset = watermark_settings.get('preset', 'slow' if quality_mode == 'preserve' else base_preset)
             threads = int(watermark_settings.get('threads', self.ultra_fast_settings['threads']))
+            tune = watermark_settings.get('tune', self.ultra_fast_settings.get('tune', 'film'))
+            profile = watermark_settings.get('profile', self.ultra_fast_settings.get('profile', 'high'))
+            level = watermark_settings.get('level', self.ultra_fast_settings.get('level', '4.0'))
             
             # حساب موقع العلامة المائية
             position = watermark_settings.get('position', 'bottom_right')
