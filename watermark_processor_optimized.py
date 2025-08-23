@@ -38,13 +38,12 @@ class OptimizedWatermarkProcessor:
         
         # إعدادات محسنة للسرعة - أقصى سرعة ممكنة
         self.fast_video_settings = {
-            'crf': 35,  # جودة أقل للسرعة القصوى
-            'preset': 'ultrafast',  # أسرع preset
-            'threads': 8,  # استخدام جميع النوى المتاحة
-            'tile-columns': 4,  # تحسين الترميز أكثر
-            'frame-parallel': 1,  # معالجة متوازية للإطارات
-            'tune': 'fastdecode',  # تحسين للسرعة
-            'profile': 'baseline',  # profile بسيط للسرعة
+            'crf': 23,             # افتراضي يحافظ على الجودة
+            'preset': 'veryfast',  # أسرع مع جودة مقبولة
+            'threads': 8,
+            'tune': 'film',
+            'profile': 'high',
+            'level': '4.0'
         }
         
         logger.info("🚀 تم تهيئة المعالج المحسن للسرعة")
@@ -294,9 +293,15 @@ class OptimizedWatermarkProcessor:
         """بناء أمر FFmpeg محسن للسرعة"""
         
         # إعدادات محسنة للسرعة (قابلة للتخصيص من الإعدادات)
-        crf = int(watermark_settings.get('crf', self.fast_video_settings['crf']))
-        preset = watermark_settings.get('preset', self.fast_video_settings['preset'])
+        quality_mode = watermark_settings.get('quality_mode')
+        base_crf = self.fast_video_settings['crf']
+        base_preset = self.fast_video_settings['preset']
+        crf = int(watermark_settings.get('crf', 18 if quality_mode == 'preserve' else base_crf))
+        preset = watermark_settings.get('preset', 'slow' if quality_mode == 'preserve' else base_preset)
         threads = int(watermark_settings.get('threads', self.fast_video_settings['threads']))
+        tune = watermark_settings.get('tune', self.fast_video_settings.get('tune', 'film'))
+        profile = watermark_settings.get('profile', self.fast_video_settings.get('profile', 'high'))
+        level = watermark_settings.get('level', self.fast_video_settings.get('level', '4.0'))
         
         # حساب موقع العلامة المائية
         position = watermark_settings.get('position', 'bottom_right')
@@ -319,6 +324,9 @@ class OptimizedWatermarkProcessor:
             '-movflags', '+faststart',      # تحسين بدء التشغيل
             '-c:a', 'copy',                 # نسخ الصوت بدون إعادة ترميز
             '-avoid_negative_ts', 'make_zero',
+            '-tune', tune,
+            '-profile:v', profile,
+            '-level', level,
             output_path
         ]
  
