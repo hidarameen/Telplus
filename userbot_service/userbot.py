@@ -1747,7 +1747,6 @@ class UserbotService:
 
         except Exception as e:
             logger.error(f"❌ خطأ في إشعار البوت لإضافة الأزرار: {e}")
-
     def get_message_media_type(self, message):
         """Determine the media type of a message"""
         if message.text and not message.media:
@@ -2343,7 +2342,6 @@ class UserbotService:
                 'message': f"خطأ في التحقق من FFmpeg: {e}",
                 'ffmpeg_available': False
             }
-    
     async def apply_audio_metadata(self, event, task_id: int, media_bytes: bytes, file_name: str):
         """
         Apply audio metadata processing if enabled for the task
@@ -2712,281 +2710,6 @@ class UserbotService:
             
         if completed_keys:
             logger.info(f"🧹 تم تنظيف {len(completed_keys)} مهام حذف مكتملة من الذاكرة")
-    async def _add_inline_buttons_with_bot(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
-        """Add inline buttons to a message using bot client"""
-        try:
-            if not inline_buttons:
-                logger.warning(f"⚠️ لا توجد أزرار لإضافتها للرسالة {message_id} في المهمة {task_id}")
-                return False
-                
-            logger.info(f"🔘 بدء إضافة {len(inline_buttons)} صف من الأزرار للرسالة {message_id} في القناة {target_chat_id} - المهمة {task_id}")
-            
-            # Try direct API method first (more reliable)
-            if await self._add_buttons_via_api(target_chat_id, message_id, inline_buttons, task_id):
-                return True
-            
-            # Fallback to Telethon method
-            return await self._add_buttons_via_telethon(target_chat_id, message_id, inline_buttons, task_id)
-                    
-        except Exception as e:
-            logger.error(f"❌ خطأ عام في إضافة الأزرار باستخدام bot client: {e}")
-            return False
-
-    async def _add_buttons_via_api(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
-        """Add inline buttons using direct Telegram Bot API"""
-        try:
-            from bot_package.config import BOT_TOKEN
-            import aiohttp
-            import json
-            
-            logger.info(f"🔧 محاولة إضافة الأزرار عبر Bot API للرسالة {message_id}")
-            
-            # Normalize chat ID (add -100 prefix if needed)
-            normalized_chat_id = self._normalize_chat_id(target_chat_id)
-            logger.info(f"🔄 معرف القناة المطبيع: {target_chat_id} -> {normalized_chat_id}")
-            
-            # Validate chat_id format first
-            if not self._validate_chat_id(normalized_chat_id):
-                logger.error(f"❌ معرف القناة غير صحيح: {normalized_chat_id}")
-            logger.info(f"🔧 محاولة إضافة الأزرار عبر API مباشر للرسالة {message_id}")
-            
-            # Validate chat_id format first
-            if not self._validate_chat_id(target_chat_id):
-                return False
-            
-            # Check bot permissions
-            if not await self._check_bot_permissions(target_chat_id):
-                logger.error(f"❌ البوت ليس لديه صلاحيات كافية في القناة {target_chat_id}")
-                return False
-            
-            # Convert inline_buttons to API format
-            keyboard = []
-            for row in inline_buttons:
-                keyboard_row = []
-                for button in row:
-                    if hasattr(button, 'url'):
-                        keyboard_row.append({
-                            "text": button.text,
-                            "url": button.url
-                        })
-                keyboard.append(keyboard_row)
-            
-            logger.info(f"🔘 تم تحويل {len(keyboard)} صف من الأزرار إلى تنسيق API")
-            
-            # Try to add buttons directly using editMessageText
-            success = await self._edit_message_with_buttons_via_bot(normalized_chat_id, message_id, keyboard)
-            
-            if success:
-                logger.info(f"✅ تم إضافة الأزرار بنجاح عبر Bot API للرسالة {message_id}")
-                return True
-            
-            # If direct edit fails, try to get message text and edit
-            logger.info(f"⚠️ فشل في التعديل المباشر، محاولة الحصول على نص الرسالة...")
-            # Get original message text
-            
-            if message_text:
-                # Try to edit with text and buttons
-                success = await self._edit_message_with_text_and_buttons(normalized_chat_id, message_id, message_text, keyboard)
-                if success:
-                    return True
-            
-            # If all else fails, try send new message and delete old
-            logger.info(f"⚠️ محاولة إرسال رسالة جديدة مع الأزرار...")
-            success = await self._send_new_message_with_buttons(normalized_chat_id, message_id, message_text or "تم إضافة الأزرار", keyboard)
-            
-            return success
-                        
-        except Exception as e:
-            logger.error(f"❌ خطأ في إضافة الأزرار عبر Bot API: {e}")
-            return False
-
-    async def _edit_message_with_buttons_via_bot(self, target_chat_id: str, message_id: int, keyboard: list):
-        """Edit message to add buttons via Bot API (without changing text)"""
-        try:
-            from bot_package.config import BOT_TOKEN
-            import aiohttp
-            
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageReplyMarkup"
-            
-            payload = {
-                "chat_id": target_chat_id,
-                "message_id": message_id,
-                "reply_markup": {
-                    "inline_keyboard": keyboard
-                }
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as response:
-                    result = await response.json()
-                    
-                    if result.get('ok'):
-                        logger.info(f"✅ تم إضافة الأزرار للرسالة {message_id} بنجاح")
-                        return True
-                    else:
-                        error_code = result.get('error_code', 'unknown')
-                        error_desc = result.get('description', 'unknown error')
-                        logger.warning(f"⚠️ فشل في إضافة الأزرار: {error_code} - {error_desc}")
-                        
-                        # Handle specific errors
-                        if "MESSAGE_NOT_MODIFIED" in error_desc:
-                            logger.info(f"ℹ️ الرسالة {message_id} تحتوي على أزرار بالفعل")
-                            return True
-                        elif "MESSAGE_EDIT_TIME_EXPIRED" in error_desc:
-                            logger.error(f"❌ انتهت صلاحية تعديل الرسالة {message_id}")
-                        elif "CHAT_NOT_FOUND" in error_desc:
-                            logger.error(f"❌ لم يتم العثور على القناة {target_chat_id}")
-                        elif "BOT_WAS_BLOCKED" in error_desc:
-                            logger.error(f"❌ تم حظر البوت من القناة {target_chat_id}")
-                        
-                        return False
-                        
-        except Exception as e:
-            logger.error(f"❌ خطأ في إضافة الأزرار: {e}")
-            return False
-
-    async def _get_message_text_via_bot(self, target_chat_id: str, message_id: int):
-        """Get message text via Bot API"""
-        try:
-            from bot_package.config import BOT_TOKEN
-            import aiohttp
-            
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    result = await response.json()
-                    
-                    if result.get('ok') and result.get('result'):
-                        updates = result['result']
-                        for update in updates:
-                            if 'message' in update:
-                                msg = update['message']
-                                if (str(msg.get('chat', {}).get('id')) == str(target_chat_id) and 
-                                    msg.get('message_id') == message_id):
-                                    return msg.get('text', 'تم إضافة الأزرار')
-            
-            # If not found in updates, return default text
-            return "تم إضافة الأزرار"
-            
-        except Exception as e:
-            logger.warning(f"⚠️ لا يمكن الحصول على نص الرسالة: {e}")
-            return "تم إضافة الأزرار"
-
-    async def _edit_message_with_text_and_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
-        """Edit message text and add buttons via Bot API"""
-        try:
-            # Get original message text first
-            message_text = await self._get_message_text_via_api(target_chat_id, message_id)
-            # Try method 1: Edit existing message
-            if await self._edit_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
-                return True
-            # Try method 2: Send new message with buttons and delete old one
-            if await self._replace_message_with_buttons(target_chat_id, message_id, message_text, keyboard):
-                return True
-            
-            return False
-        except Exception as e:
-            logger.error(f"❌ خطأ في إضافة الأزرار عبر API: {e}")
-            return False
-
-    async def _edit_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
-        """Try to edit existing message with buttons"""
-        try:
-            from bot_package.config import BOT_TOKEN
-            import aiohttp
-            
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-            
-            payload = {
-                "chat_id": target_chat_id,
-                "message_id": message_id,
-                "text": message_text,
-                "reply_markup": {
-                    "inline_keyboard": keyboard
-                }
-            }
-            
-            # Check if text contains HTML formatting
-            if '<' in message_text and '>' in message_text:
-                payload["parse_mode"] = "HTML"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as response:
-                    result = await response.json()
-                    
-                    if result.get('ok'):
-                        logger.info(f"✅ تم تعديل الرسالة {message_id} وإضافة الأزرار بنجاح")
-                        return True
-                    else:
-                        error_code = result.get('error_code', 'unknown')
-                        error_desc = result.get('description', 'unknown error')
-                        logger.warning(f"⚠️ فشل في تعديل الرسالة: {error_code} - {error_desc}")
-                        return False
-                        
-        except Exception as e:
-            logger.error(f"❌ خطأ في تعديل الرسالة: {e}")
-            return False
-
-    async def _send_new_message_with_buttons(self, target_chat_id: str, old_message_id: int, message_text: str, keyboard: list):
-        """Send new message with buttons and delete old message"""
-        try:
-            from bot_package.config import BOT_TOKEN
-            import aiohttp
-            
-            # Send new message with buttons
-            send_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            
-            payload = {
-                "chat_id": target_chat_id,
-                "text": message_text,
-                "reply_markup": {
-                    "inline_keyboard": keyboard
-                }
-            }
-            
-            # Check if text contains HTML formatting
-            if '<' in message_text and '>' in message_text:
-                payload["parse_mode"] = "HTML"
-            
-            async with aiohttp.ClientSession() as session:
-                # Send new message
-                async with session.post(send_url, json=payload) as response:
-                    result = await response.json()
-                    
-                    if result.get('ok'):
-                        new_message_id = result['result']['message_id']
-                        logger.info(f"✅ تم إرسال رسالة جديدة مع الأزرار: {new_message_id}")
-                        
-                        # Try to delete old message
-                        try:
-                            delete_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
-                            delete_payload = {
-                                "chat_id": target_chat_id,
-                                "message_id": old_message_id
-                            }
-                            
-                            async with session.post(delete_url, json=delete_payload) as delete_response:
-                                delete_result = await delete_response.json()
-                                if delete_result.get('ok'):
-                                    logger.info(f"✅ تم حذف الرسالة القديمة: {old_message_id}")
-                                else:
-                                    logger.warning(f"⚠️ لم يتم حذف الرسالة القديمة: {old_message_id}")
-                                    
-                        except Exception as delete_err:
-                            logger.warning(f"⚠️ خطأ في حذف الرسالة القديمة: {delete_err}")
-                        
-                        return True
-                    else:
-                        error_code = result.get('error_code', 'unknown')
-                        error_desc = result.get('description', 'unknown error')
-                        logger.error(f"❌ فشل في إرسال رسالة جديدة: {error_code} - {error_desc}")
-                        return False
-                        
-        except Exception as e:
-            logger.error(f"❌ خطأ في إرسال رسالة جديدة: {e}")
-            return False
-
     async def _replace_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
         """Send new message with buttons and delete old message"""
         try:
@@ -3046,35 +2769,6 @@ class UserbotService:
             logger.error(f"❌ خطأ في استبدال الرسالة: {e}")
             return False
 
-    async def _get_message_text_via_api(self, target_chat_id: str, message_id: int):
-        """Get original message text via Telegram Bot API"""
-        try:
-            from bot_package.config import BOT_TOKEN
-            import aiohttp
-            
-            # Try to get message info using getUpdates (limited but works for recent messages)
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    result = await response.json()
-                    
-                    if result.get('ok') and result.get('result'):
-                        updates = result['result']
-                        for update in updates:
-                            if 'message' in update:
-                                msg = update['message']
-                                if (str(msg.get('chat', {}).get('id')) == str(target_chat_id) and 
-                                    msg.get('message_id') == message_id):
-                                    return msg.get('text', 'تم إضافة الأزرار')
-            
-            # If not found in updates, return default text
-            return "تم إضافة الأزرار"
-            
-        except Exception as e:
-            logger.warning(f"⚠️ لا يمكن الحصول على نص الرسالة الأصلية: {e}")
-            return "تم إضافة الأزرار"
-
     def _validate_chat_id(self, target_chat_id: str) -> bool:
         """Validate chat ID format and detect phone numbers"""
         try:
@@ -3119,13 +2813,21 @@ class UserbotService:
             if not target_chat_id:
                 return target_chat_id
             
+            # Remove any existing -100 prefix first
+            clean_id = target_chat_id.replace('-100', '')
+            
             # If it's a large numeric ID (likely a channel ID without -100 prefix)
-            if target_chat_id.isdigit():
-                chat_id_int = int(target_chat_id)
-                if chat_id_int > 1000000000 and not target_chat_id.startswith('-100'):
-                    # This looks like a channel ID without -100 prefix
-                    normalized_id = f"-100{target_chat_id}"
+            if clean_id.isdigit():
+                chat_id_int = int(clean_id)
+                if chat_id_int > 1000000000:
+                    # This looks like a channel ID, ensure it has -100 prefix
+                    normalized_id = f"-100{clean_id}"
                     logger.info(f"🔄 تم تطبيع معرف القناة: {target_chat_id} -> {normalized_id}")
+                    return normalized_id
+                elif chat_id_int > 100000000:
+                    # This might be a supergroup ID, try with -100 prefix
+                    normalized_id = f"-100{clean_id}"
+                    logger.info(f"🔄 تم تطبيع معرف المجموعة الفائقة: {target_chat_id} -> {normalized_id}")
                     return normalized_id
             
             return target_chat_id
@@ -3133,6 +2835,60 @@ class UserbotService:
         except Exception as e:
             logger.error(f"❌ خطأ في تطبيع معرف القناة: {e}")
             return target_chat_id
+
+    async def _resolve_entity_safely(self, client, target_chat_id: str):
+        """Safely resolve entity with multiple fallback methods"""
+        try:
+            # First try: direct entity resolution
+            try:
+                entity = await client.get_entity(target_chat_id)
+                logger.info(f"✅ تم حل الكيان مباشرة: {target_chat_id}")
+                return entity
+            except Exception as e:
+                logger.warning(f"⚠️ فشل في الحل المباشر للكيان {target_chat_id}: {e}")
+            
+            # Second try: normalize chat ID and try again
+            normalized_id = self._normalize_chat_id(target_chat_id)
+            if normalized_id != target_chat_id:
+                try:
+                    entity = await client.get_entity(normalized_id)
+                    logger.info(f"✅ تم حل الكيان بعد التطبيع: {normalized_id}")
+                    return entity
+                except Exception as e:
+                    logger.warning(f"⚠️ فشل في حل الكيان بعد التطبيع {normalized_id}: {e}")
+            
+            # Third try: try as integer if it's numeric
+            if target_chat_id.replace('-', '').isdigit():
+                try:
+                    chat_id_int = int(target_chat_id)
+                    entity = await client.get_entity(chat_id_int)
+                    logger.info(f"✅ تم حل الكيان كرقم صحيح: {chat_id_int}")
+                    return entity
+                except Exception as e:
+                    logger.warning(f"⚠️ فشل في حل الكيان كرقم صحيح {chat_id_int}: {e}")
+            
+            # Fourth try: try with different prefixes
+            prefixes_to_try = ['-100', '-1001', '-1002']
+            clean_id = target_chat_id.replace('-100', '').replace('-1001', '').replace('-1002', '')
+            
+            if clean_id.isdigit():
+                for prefix in prefixes_to_try:
+                    try:
+                        test_id = f"{prefix}{clean_id}"
+                        entity = await client.get_entity(test_id)
+                        logger.info(f"✅ تم حل الكيان مع البادئة {prefix}: {test_id}")
+                        return entity
+                    except Exception as e:
+                        logger.warning(f"⚠️ فشل في حل الكيان مع البادئة {prefix}: {e}")
+                        continue
+            
+            # If all methods fail, return None
+            logger.error(f"❌ فشل في حل الكيان {target_chat_id} بجميع الطرق")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ خطأ غير متوقع في حل الكيان {target_chat_id}: {e}")
+            return None
 
     async def _check_bot_permissions(self, target_chat_id: str):
         """Check if bot has necessary permissions in the channel"""
@@ -3501,141 +3257,6 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في فحص حد المعدل: {e}")
             return True
-    async def _apply_forwarding_delay(self, task_id: int):
-        """Apply forwarding delay before sending message"""
-        try:
-            settings = self.db.get_forwarding_delay_settings(task_id)
-            if not settings or not settings.get('enabled', False):
-                return
-
-            delay_seconds = settings.get('delay_seconds', 0)
-            if delay_seconds <= 0:
-                return
-
-            logger.info(f"⏳ تطبيق تأخير التوجيه: {delay_seconds} ثانية للمهمة {task_id}")
-            await asyncio.sleep(delay_seconds)
-            logger.debug(f"✅ انتهى تأخير التوجيه للمهمة {task_id}")
-
-        except Exception as e:
-            logger.error(f"خطأ في تطبيق تأخير التوجيه: {e}")
-
-    async def _apply_sending_interval(self, task_id: int):
-        """Apply sending interval between messages to different targets"""
-        try:
-            settings = self.db.get_sending_interval_settings(task_id)
-            if not settings or not settings.get('enabled', False):
-                return
-
-            interval_seconds = settings.get('interval_seconds', 0)
-            if interval_seconds <= 0:
-                return
-
-            logger.info(f"⏱️ تطبيق فاصل الإرسال: {interval_seconds} ثانية للمهمة {task_id}")
-            await asyncio.sleep(interval_seconds)
-            logger.debug(f"✅ انتهى فاصل الإرسال للمهمة {task_id}")
-
-        except Exception as e:
-            logger.error(f"خطأ في تطبيق فاصل الإرسال: {e}")
-
-    async def _check_message_advanced_filters(self, task_id: int, message) -> tuple:
-        """Check advanced filters for forwarded messages and inline buttons
-        Returns: (should_block, should_remove_buttons, should_remove_forward)
-        """
-        try:
-            # Get advanced filter settings
-            advanced_settings = self.db.get_advanced_filters_settings(task_id)
-            
-            should_block = False
-            should_remove_buttons = False  
-            should_remove_forward = False
-            
-            # Check forwarded message filter
-            if advanced_settings.get('forwarded_message_filter_enabled', False):
-                forwarded_setting = self.db.get_forwarded_message_filter_setting(task_id)
-                
-                # Check if message is forwarded
-                is_forwarded = (hasattr(message, 'forward') and message.forward is not None)
-                
-                if is_forwarded:
-                    if forwarded_setting:  # True = block mode
-                        logger.info(f"🚫 رسالة معاد توجيهها - سيتم حظرها (وضع الحظر)")
-                        should_block = True
-                    else:  # False = remove forward mode
-                        logger.info(f"📋 رسالة معاد توجيهها - سيتم إرسالها كنسخة (وضع حذف علامة التوجيه)")
-                        should_remove_forward = True
-            
-            # Check inline button filter 
-            if not should_block:
-                inline_button_filter_enabled = advanced_settings.get('inline_button_filter_enabled', False)
-                inline_button_setting = self.db.get_inline_button_filter_setting(task_id)
-                
-                logger.debug(f"🔍 فحص فلتر الأزرار الشفافة: المهمة {task_id}, فلتر مفعل={inline_button_filter_enabled}, إعداد الحظر={inline_button_setting}")
-                
-                # Check if message has inline buttons first
-                has_buttons = (hasattr(message, 'reply_markup') and 
-                             message.reply_markup is not None and
-                             hasattr(message.reply_markup, 'rows') and
-                             message.reply_markup.rows)
-                
-                logger.debug(f"🔍 الرسالة تحتوي على أزرار: {has_buttons}")
-                
-                if has_buttons:
-                    # Case 1: Filter is enabled - use both settings
-                    if inline_button_filter_enabled:
-                        if inline_button_setting:  # True = block mode
-                            logger.info(f"🚫 رسالة تحتوي على أزرار شفافة - سيتم حظرها (وضع الحظر)")
-                            should_block = True
-                        else:  # False = remove buttons mode
-                            logger.info(f"🗑️ رسالة تحتوي على أزرار شفافة - سيتم حذف الأزرار (وضع الحذف)")
-                            should_remove_buttons = True
-                    # Case 2: Filter is disabled but block setting exists (legacy compatibility)
-                    elif not inline_button_filter_enabled and inline_button_setting:
-                        logger.info(f"⚠️ فلتر الأزرار معطل لكن إعداد الحظر مفعل - تجاهل الإعداد وتمرير الرسالة كما هي")
-                        # Don't block or remove buttons - pass message as is
-                    else:
-                        logger.debug(f"✅ فلتر الأزرار الشفافة غير مفعل - تمرير الرسالة كما هي")
-            
-            # Check duplicate filter
-            if not should_block and advanced_settings.get('duplicate_filter_enabled', False):
-                duplicate_detected = await self._check_duplicate_message(task_id, message)
-                if duplicate_detected:
-                    logger.info(f"🔄 رسالة مكررة - سيتم حظرها (فلتر التكرار)")
-                    should_block = True
-            
-            # Check language filter
-            if not should_block and advanced_settings.get('language_filter_enabled', False):
-                language_blocked = await self._check_language_filter(task_id, message)
-                if language_blocked:
-                    logger.info(f"🌍 رسالة محظورة بواسطة فلتر اللغة")
-                    should_block = True
-            
-            # Check day filter
-            if not should_block and advanced_settings.get('day_filter_enabled', False):
-                day_blocked = self._check_day_filter(task_id)
-                if day_blocked:
-                    logger.info(f"📅 رسالة محظورة بواسطة فلتر الأيام")
-                    should_block = True
-            
-            # Check admin filter
-            if not should_block and advanced_settings.get('admin_filter_enabled', False):
-                admin_blocked = await self._check_admin_filter(task_id, message)
-                if admin_blocked:
-                    logger.info(f"👮‍♂️ رسالة محظورة بواسطة فلتر المشرفين")
-                    should_block = True
-            
-            # Check working hours filter
-            if not should_block and advanced_settings.get('working_hours_enabled', False):
-                working_hours_blocked = self._check_working_hours_filter(task_id)
-                if working_hours_blocked:
-                    logger.info(f"⏰ رسالة محظورة بواسطة فلتر ساعات العمل")
-                    should_block = True
-            
-            return should_block, should_remove_buttons, should_remove_forward
-            
-        except Exception as e:
-            logger.error(f"خطأ في فحص الفلاتر المتقدمة: {e}")
-            return False, False, False
-
     def _check_day_filter(self, task_id: int) -> bool:
         """Check if current day is allowed by day filter"""
         try:
@@ -4169,7 +3790,6 @@ class UserbotService:
 📱 **المصدر:** {source_name}
 🕐 **التوقيت:** {message.date.strftime('%Y-%m-%d %H:%M:%S') if message.date else 'غير محدد'}
 📊 **النوع:** {message_data['media_type']}
-
 """
             
             if message.text:
@@ -4637,7 +4257,7 @@ class UserbotService:
                         # Don't try to auto-reconnect to avoid conflicts
                         # Just mark it as unhealthy in database
                         self.db.update_session_health(user_id, False, "فحص دوري - غير متصل")
-                
+
             except Exception as e:
                 logger.error(f"خطأ في مراقبة صحة الجلسات: {e}")
 
@@ -4792,7 +4412,6 @@ class UserbotService:
     async def fetch_channel_admins(self, user_id: int, channel_id: str, task_id: int) -> int:
         """Async wrapper for fetch_channel_admins_sync"""
         return self.fetch_channel_admins_sync(user_id, channel_id, task_id)
-
     def apply_text_formatting(self, task_id: int, message_text: str) -> str:
         """Apply text formatting to message based on task settings"""
         try:
@@ -4846,7 +4465,7 @@ class UserbotService:
             elif format_type == 'underline':
                 return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f"<s>{cleaned_text.strip()}</s>"
+                return f" {cleaned_text.strip()} {
             elif format_type == 'code':
                 return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
@@ -4913,7 +4532,7 @@ class UserbotService:
             elif format_type == 'underline':
                 return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f"<s>{cleaned_text.strip()}</s>"
+                return f" {cleaned_text.strip()} {
             elif format_type == 'code':
                 return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
@@ -4932,406 +4551,259 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في اختبار تنسيق النص: {e}")
             return message_text
-    
-    async def _send_message_with_spoiler_support(self, client, target_entity, text: str, **kwargs) -> any:
-        """
-        إرسال رسالة مع دعم spoiler entities
-        Send message with spoiler entities support
-        """
-        if not text:
-            text = "رسالة"
-            
-        processed_text, spoiler_entities = self._process_spoiler_entities(text)
-        
-        if spoiler_entities:
-            # Remove parse_mode if spoiler entities are present
-            kwargs.pop('parse_mode', None)
-            kwargs['formatting_entities'] = spoiler_entities
-        
-        return await client.send_message(target_entity, processed_text, **kwargs)
-    def _process_spoiler_entities(self, text: str) -> Tuple[str, List]:
-        """
-        معالجة علامات spoiler وتحويلها إلى MessageEntitySpoiler
-        Process spoiler markers and convert them to MessageEntitySpoiler entities
-        FIXED: حساب صحيح للمواضع والأطوال
-        """
-        if not text:
-            return text, []
-            
-        from telethon.tl.types import MessageEntitySpoiler
-        import re
-        
-        entities = []
-        pattern = r'TELETHON_SPOILER_START(.*?)TELETHON_SPOILER_END'
-        matches = list(re.finditer(pattern, text, re.DOTALL))
-        
-        if not matches:
-            return text, []
-        
-        logger.info(f"🔍 تم العثور على {len(matches)} علامة spoiler في النص")
-        
-        # إنشاء النص النهائي والكيانات بطريقة صحيحة
-        processed_text = text
-        offset_correction = 0  # تصحيح الموضع بسبب إزالة العلامات
-        
-        # معالجة المطابقات بترتيب عكسي للحفاظ على المواضع
-        for match in reversed(matches):
-            start_pos = match.start()
-            end_pos = match.end() 
-            spoiler_text = match.group(1)
-            
-            # استبدال العلامة بالنص المخفي فقط
-            processed_text = processed_text[:start_pos] + spoiler_text + processed_text[end_pos:]
-        
-        # الآن حساب المواضع الصحيحة في النص المُنظف
-        current_offset = 0
-        for match in matches:
-            spoiler_text = match.group(1)
-            
-            # البحث عن موضع النص المخفي في النص المُنظف
-            # نجد الموضع النسبي من بداية النص
-            text_before_marker = text[:match.start()]
-            # إزالة جميع علامات spoiler من النص السابق لحساب الموضع الصحيح
-            clean_text_before = re.sub(r'TELETHON_SPOILER_START.*?TELETHON_SPOILER_END', 
-                                       lambda m: m.group(1), text_before_marker, flags=re.DOTALL)
-            
-            correct_offset = len(clean_text_before)
-            
-            # إنشاء entity
-            entity = MessageEntitySpoiler(
-                offset=correct_offset,
-                length=len(spoiler_text)
-            )
-            entities.append(entity)
-            
-            logger.info(f"✅ Spoiler entity: offset={correct_offset}, length={len(spoiler_text)}, content='{spoiler_text[:30]}{'...' if len(spoiler_text) > 30 else ''}'")
-        
-        logger.info(f"🔄 تم معالجة {len(entities)} عنصر spoiler بنجاح")
-        logger.info(f"📝 النص الأصلي: '{text[:50]}{'...' if len(text) > 50 else ''}'")
-        logger.info(f"📝 النص المُعالج: '{processed_text[:50]}{'...' if len(processed_text) > 50 else ''}'")
-        
-        return processed_text, entities
 
-    def get_channel_admins_via_bot(self, bot_token: str, channel_id: int) -> List[Dict]:
-        """Get channel admins using Bot API instead of UserBot"""
+    async def _add_inline_buttons_with_bot(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
+        """Add inline buttons to a message using bot client"""
         try:
-            import requests
-            
-            # Use Telegram Bot API to get chat administrators
-            url = f"https://api.telegram.org/bot{bot_token}/getChatAdministrators"
-            params = {'chat_id': channel_id}
-            
-            logger.info(f"🔍 جلب مشرفي القناة {channel_id} من Bot API...")
-            response = requests.get(url, params=params, timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('ok'):
-                    admins = data.get('result', [])
-                    logger.info(f"📋 تم العثور على {len(admins)} إدارة إجمالية (بما في ذلك البوتات)")
-                    
-                    admins_data = []
-                    skipped_bots = 0
-                    
-                    for i, admin in enumerate(admins, 1):
-                        user = admin.get('user', {})
-                        user_id = user.get('id')
-                        username = user.get('username', '')
-                        first_name = user.get('first_name', '')
-                        last_name = user.get('last_name', '')
-                        is_bot = user.get('is_bot', False)
-                        status = admin.get('status', 'unknown')
-                        custom_title = admin.get('custom_title', '')
-                        
-                        logger.info(f"  {i}. ID={user_id}, User=@{username}, Name='{first_name} {last_name}', Bot={is_bot}, Status={status}, Title='{custom_title}'")
-                        
-                        if is_bot:
-                            skipped_bots += 1
-                            logger.debug(f"    ⏩ تخطي البوت: {username or first_name or user_id}")
-                            continue  # Skip bots
-                        
-                        # Build full name
-                        full_name = f"{first_name} {last_name}".strip()
-                        if not full_name:
-                            full_name = username or f"User {user_id}"
-                        
-                        admin_data = {
-                            'id': user_id,
-                            'username': username,
-                            'first_name': full_name,
-                            'is_bot': is_bot,
-                            'custom_title': custom_title,  # This is what appears in post_author
-                            'status': status
-                        }
-                        
-                        admins_data.append(admin_data)
-                        logger.info(f"    ✅ إضافة المشرف: {full_name} (توقيع: '{custom_title}')")
-                    
-                    logger.info(f"📊 النتيجة النهائية: {len(admins_data)} مشرف بشري + {skipped_bots} بوت تم تخطيهم")
-                    logger.info(f"✅ تم جلب {len(admins_data)} مشرف من القناة {channel_id} عبر Bot API")
-                    return admins_data
-                else:
-                    error_desc = data.get('description', 'Unknown error')
-                    logger.error(f"❌ Bot API error: {error_desc}")
-                    return []
-            else:
-                logger.error(f"❌ HTTP Error {response.status_code}: {response.text}")
-                return []
+            if not inline_buttons:
+                logger.warning(f"⚠️ لا توجد أزرار لإضافتها للرسالة {message_id} في المهمة {task_id}")
+                return False
                 
+            logger.info(f"🔘 بدء إضافة {len(inline_buttons)} صف من الأزرار للرسالة {message_id} في القناة {target_chat_id} - المهمة {task_id}")
+            
+            # Try direct API method first (more reliable)
+            if await self._add_buttons_via_api(target_chat_id, message_id, inline_buttons, task_id):
+                return True
+            
+            # Fallback to Telethon method
+            return await self._add_buttons_via_telethon(target_chat_id, message_id, inline_buttons, task_id)
+                    
         except Exception as e:
-            logger.error(f"❌ خطأ في جلب مشرفي القناة {channel_id} عبر Bot API: {e}")
-            import traceback
-            logger.error(f"تفاصيل الخطأ: {traceback.format_exc()}")
-            return []
-
-    def _determine_final_send_mode(self, forward_mode: str, requires_copy_mode: bool) -> str:
-        """تحديد الوضع النهائي للإرسال - إصلاح منطق التوجيه"""
-        if forward_mode == 'copy':
-            # وضع النسخ - دائماً نسخ
-            return 'copy'
-        elif forward_mode == 'forward':
-            if requires_copy_mode:
-                # وضع التوجيه مع تنسيق - إجبار النسخ
-                logger.info(f"🔄 إجبار النسخ في وضع التوجيه بسبب التنسيق")
-                return 'copy'
-            else:
-                # وضع التوجيه بدون تنسيق - توجيه عادي
-                return 'forward'
-        else:
-            # افتراضي - توجيه
-            return 'forward'
-
-# Global userbot instance
-userbot_instance = UserbotService()
-
-async def start_userbot_service():
-    """Start the userbot service"""
-    logger.info("🤖 بدء تشغيل خدمة UserBot...")
-    
-    try:
-        # Check if there are any sessions before starting
-        with userbot_instance.db.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT COUNT(*) FROM user_sessions 
-                WHERE is_authenticated = TRUE AND session_string IS NOT NULL AND session_string != ''
-            ''')
-            session_count = cursor.fetchone()[0]
-        
-        if session_count == 0:
-            logger.warning("⚠️ لا توجد جلسات محفوظة - UserBot لن يبدأ")
-            logger.info("💡 المستخدمين يمكنهم تسجيل الدخول عبر البوت /start")
+            logger.error(f"❌ خطأ عام في إضافة الأزرار باستخدام bot client: {e}")
             return False
-        
-        logger.info(f"📱 تم العثور على {session_count} جلسة محفوظة")
-        
-        # Attempt to start existing sessions
-        await userbot_instance.startup_existing_sessions()
-        
-        # Check if any sessions actually started successfully
-        active_clients = len(userbot_instance.clients)
-        
-        if active_clients > 0:
-            logger.info(f"✅ خدمة UserBot جاهزة مع {active_clients} جلسة نشطة")
-            return True
-        else:
-            logger.warning("⚠️ فشل في تشغيل أي جلسة UserBot - جميع الجلسات معطلة")
-            logger.info("💡 المستخدمين يحتاجون إعادة تسجيل الدخول عبر البوت")
-            return False
-            
-    except Exception as e:
-        logger.error(f"❌ خطأ في تشغيل خدمة UserBot: {e}")
-        return False
 
-async def stop_userbot_service():
-    """Stop the userbot service"""
-    logger.info("⏹️ إيقاف خدمة UserBot...")
-    await userbot_instance.stop_all()
-    logger.info("✅ تم إيقاف خدمة UserBot")
-
-# ===== معالجة الوسائط في الخلفية والإرسال المجمع =====
-
-async def _process_media_sync(self, event, task_id: int, watermark_enabled: bool, 
-                            audio_enabled: bool, is_audio_message: bool, cache_key: str):
-    """معالجة الوسائط بطريقة متزامنة مع التخزين المؤقت"""
-    try:
-        # فحص التخزين المؤقت أولاً
-        if hasattr(self, 'global_processed_media_cache') and cache_key in self.global_processed_media_cache:
-            processed_media, processed_filename = self.global_processed_media_cache[cache_key]
-            logger.info(f"🎯 استخدام الوسائط المعالجة من التخزين المؤقت: {processed_filename}")
-            return processed_media, processed_filename
-        
-        # بدء المعالجة الفعلية
-        processed_media = None
-        processed_filename = None
-        
-        if watermark_enabled:
-            logger.info("🏷️ تطبيق العلامة المائية مرة واحدة")
-            processed_media, processed_filename = await self.apply_watermark_to_media(event, task_id)
+    async def _add_buttons_via_api(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
+        """Add inline buttons using direct Telegram Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            import json
             
-            if processed_media and processed_media != event.message.media:
-                # حفظ في التخزين المؤقت
-                if not hasattr(self, 'global_processed_media_cache'):
-                    self.global_processed_media_cache = {}
-                self.global_processed_media_cache[cache_key] = (processed_media, processed_filename)
-                logger.info(f"✅ تم تطبيق العلامة المائية وحفظها: {processed_filename}")
-            else:
-                logger.info("🔄 لم يتم تطبيق العلامة المائية، استخدام الوسائط الأصلية")
-        
-        elif audio_enabled and is_audio_message:
-            logger.info("🎵 تطبيق وسوم الصوت مرة واحدة")
+            logger.info(f"🔧 محاولة إضافة الأزرار عبر Bot API للرسالة {message_id}")
             
-            # تحميل الوسائط واستخراج اسم مناسب
-            if not hasattr(self, '_current_media_cache'):
-                self._current_media_cache = {}
+            # Normalize chat ID (add -100 prefix if needed)
+            normalized_chat_id = self._normalize_chat_id(target_chat_id)
+            logger.info(f"🔄 معرف القناة المطبيع: {target_chat_id} -> {normalized_chat_id}")
             
-            media_cache_key_download = f"{event.message.id}_{event.chat_id}_download"
+            # Validate chat_id format first
+            if not self._validate_chat_id(normalized_chat_id):
+                logger.error(f"❌ معرف القناة غير صحيح: {normalized_chat_id}")
+                return False
             
-            if media_cache_key_download in self._current_media_cache:
-                media_bytes, file_name, file_ext = self._current_media_cache[media_cache_key_download]
-                logger.info("🔄 استخدام الوسائط المحمّلة من التخزين المؤقت")
-            else:
-                # تحميل مرة واحدة فقط
-                media_bytes = await event.message.download_media(bytes)
-                if not media_bytes:
-                    return event.message.media, None
-                
-                # استخراج اسم الملف وامتداده
-                file_name = "audio"
-                file_ext = ".mp3"
-                
-                if hasattr(event.message.media, 'document') and event.message.media.document:
-                    doc = event.message.media.document
-                    if hasattr(doc, 'attributes'):
-                        for attr in doc.attributes:
-                            if hasattr(attr, 'file_name') and attr.file_name:
-                                if '.' in attr.file_name:
-                                    file_name = attr.file_name.rsplit('.', 1)[0]
-                                    file_ext = '.' + attr.file_name.split('.')[-1].lower()
-                                else:
-                                    file_name = attr.file_name
-                                break
-                
-                # حفظ في التخزين المؤقت للتحميل
-                self._current_media_cache[media_cache_key_download] = (media_bytes, file_name, file_ext)
+            # Check bot permissions
+            if not await self._check_bot_permissions(normalized_chat_id):
+                logger.error(f"❌ البوت ليس لديه صلاحيات كافية في القناة {normalized_chat_id}")
+                return False
             
-            # تطبيق معالجة الصوت
-            processed_media, processed_filename = await self.apply_audio_metadata(
-                event, task_id, media_bytes, f"{file_name}{file_ext}"
-            )
+            # Convert inline_buttons to API format
+            keyboard = []
+            for row in inline_buttons:
+                keyboard_row = []
+                for button in row:
+                    if hasattr(button, 'url'):
+                        keyboard_row.append({
+                            "text": button.text,
+                            "url": button.url
+                        })
+                keyboard.append(keyboard_row)
             
-            if processed_media and isinstance(processed_media, (bytes, bytearray)):
-                # حفظ في التخزين المؤقت
-                if not hasattr(self, 'global_processed_media_cache'):
-                    self.global_processed_media_cache = {}
-                self.global_processed_media_cache[cache_key] = (processed_media, processed_filename)
-                logger.info(f"✅ تم تطبيق وسوم الصوت وحفظها: {processed_filename}")
-            else:
-                logger.info("🔄 لم يتم تطبيق وسوم الصوت، استخدام الوسائط الأصلية")
-        
-        return processed_media, processed_filename
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في المعالجة المتزامنة: {e}")
-        return None, None
-
-async def _apply_batch_send_delay(self, batch_key: str, target_chat_id: str, 
-                                message_data: dict, delay: float = 2.0):
-    """تطبيق تأخير الإرسال المجمع"""
-    try:
-        if BACKGROUND_PROCESSING_AVAILABLE:
-            # استخدام نظام الإرسال المجمع المتقدم
-            await queue_batch_message(batch_key, {
-                'target_chat_id': target_chat_id,
-                'message_data': message_data,
-                'send_callback': self._send_batch_message
-            }, delay)
-            return True
-        else:
-            # تأخير بسيط
-            await asyncio.sleep(delay)
-            return False
-    except Exception as e:
-        logger.error(f"❌ خطأ في تطبيق تأخير الإرسال المجمع: {e}")
-        return False
-
-async def _send_batch_message(self, message_data: dict):
-    """إرسال رسالة مجمعة"""
-    try:
-        # تنفيذ منطق الإرسال الفعلي هنا
-        target_chat_id = message_data.get('target_chat_id')
-        data = message_data.get('message_data', {})
-        
-        logger.info(f"📤 إرسال رسالة مجمعة إلى: {target_chat_id}")
-        # يمكن توسيع هذا لتنفيذ الإرسال الفعلي
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في إرسال رسالة مجمعة: {e}")
-
-async def _apply_enhanced_batch_delay(self, task: dict, media=None, filename=None):
-    """تطبيق تأخير محسن للإرسال المجمع بناءً على نوع الوسائط"""
-    try:
-        base_delay = 1.0  # تأخير أساسي بثانية واحدة
-        
-        # تحديد التأخير بناءً على نوع الوسائط
-        if media and filename:
-            if filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
-                # فيديو - تأخير أطول
-                delay = base_delay * 2.5
-                logger.info(f"🎬 تأخير إرسال فيديو: {delay}s")
-            elif filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
-                # صورة - تأخير متوسط
-                delay = base_delay * 1.5
-                logger.info(f"🖼️ تأخير إرسال صورة: {delay}s")
-            elif filename.lower().endswith(('.mp3', '.m4a', '.aac', '.ogg', '.wav')):
-                # صوت - تأخير قصير
-                delay = base_delay * 1.2
-                logger.info(f"🎵 تأخير إرسال صوت: {delay}s")
-            else:
-                # ملف عادي
-                delay = base_delay
-                logger.info(f"📄 تأخير إرسال ملف: {delay}s")
-        else:
-            # رسالة نصية
-            delay = base_delay * 0.5
-            logger.info(f"📝 تأخير إرسال نص: {delay}s")
-        
-        # تطبيق التأخير
-        await asyncio.sleep(delay)
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في تطبيق التأخير المحسن: {e}")
-        # تأخير بسيط كبديل
-        await asyncio.sleep(1.0)
-        return False
-
-async def _should_use_background_processing(self, event, processing_needed: bool) -> bool:
-    """تحديد ما إذا كان يجب استخدام المعالجة في الخلفية"""
-    try:
-        if not processing_needed or not self.background_media_processing:
-            return False
-        
-        # فحص حجم الملف
-        if hasattr(event.message, 'media') and hasattr(event.message.media, 'document'):
-            doc = event.message.media.document
-            if doc and hasattr(doc, 'size') and doc.size:
-                file_size = doc.size
-                # استخدام المعالجة في الخلفية للملفات أكبر من 3 ميجابايت
-                if file_size > 3 * 1024 * 1024:
-                    logger.info(f"📊 ملف كبير ({file_size / 1024 / 1024:.1f}MB) - يُفضل المعالجة في الخلفية")
+            logger.info(f"🔘 تم تحويل {len(keyboard)} صف من الأزرار إلى تنسيق API")
+            
+            # Try to add buttons directly using editMessageReplyMarkup
+            success = await self._edit_message_with_buttons_via_bot(normalized_chat_id, message_id, keyboard)
+            
+            if success:
+                logger.info(f"✅ تم إضافة الأزرار بنجاح عبر Bot API للرسالة {message_id}")
+                return True
+            
+            # If direct edit fails, try to get message text and edit
+            logger.info(f"⚠️ فشل في التعديل المباشر، محاولة الحصول على نص الرسالة...")
+            message_text = await self._get_message_text_via_api(normalized_chat_id, message_id)
+            
+            if message_text:
+                # Try to edit with text and buttons
+                success = await self._edit_message_with_text_and_buttons(normalized_chat_id, message_id, message_text, keyboard)
+                if success:
                     return True
-        
-        return False
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في تحديد نوع المعالجة: {e}")
-        return False
+            
+            # If all else fails, try send new message and delete old
+            logger.info(f"⚠️ محاولة إرسال رسالة جديدة مع الأزرار...")
+            success = await self._send_new_message_with_buttons(normalized_chat_id, message_id, message_text or "تم إضافة الأزرار", keyboard)
+            
+            return success
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار عبر Bot API: {e}")
+            return False
 
-# إضافة الوظائف للصف UserbotService
-UserbotService._process_media_sync = _process_media_sync
-UserbotService._apply_batch_send_delay = _apply_batch_send_delay
-UserbotService._send_batch_message = _send_batch_message
-UserbotService._apply_enhanced_batch_delay = _apply_enhanced_batch_delay
-UserbotService._should_use_background_processing = _should_use_background_processing
+    async def _edit_message_with_buttons_via_bot(self, target_chat_id: str, message_id: int, keyboard: list):
+        """Edit message to add buttons via Bot API (without changing text)"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageReplyMarkup"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "message_id": message_id,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        logger.info(f"✅ تم إضافة الأزرار للرسالة {message_id} بنجاح")
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.warning(f"⚠️ فشل في إضافة الأزرار: {error_code} - {error_desc}")
+                        
+                        # Handle specific errors
+                        if "MESSAGE_NOT_MODIFIED" in error_desc:
+                            logger.info(f"ℹ️ الرسالة {message_id} تحتوي على أزرار بالفعل")
+                            return True
+                        elif "MESSAGE_EDIT_TIME_EXPIRED" in error_desc:
+                            logger.error(f"❌ انتهت صلاحية تعديل الرسالة {message_id}")
+                        elif "CHAT_NOT_FOUND" in error_desc:
+                            logger.error(f"❌ لم يتم العثور على القناة {target_chat_id}")
+                        elif "BOT_WAS_BLOCKED" in error_desc:
+                            logger.error(f"❌ تم حظر البوت من القناة {target_chat_id}")
+                        
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة الأزرار: {e}")
+            return False
+
+    async def _get_message_text_via_api(self, target_chat_id: str, message_id: int):
+        """Get message text via Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Try to get message info using getChatHistory (more reliable)
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatHistory"
+            payload = {
+                "chat_id": target_chat_id,
+                "limit": 100
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok') and result.get('result'):
+                        messages = result['result']
+                        for msg in messages:
+                            if msg.get('message_id') == message_id:
+                                return msg.get('text', 'تم إضافة الأزرار')
+            
+            # If not found, return default text
+            return "تم إضافة الأزرار"
+            
+        except Exception as e:
+            logger.warning(f"⚠️ لا يمكن الحصول على نص الرسالة: {e}")
+            return "تم إضافة الأزرار"
+
+    async def _edit_message_with_text_and_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
+        """Edit message text and add buttons via Bot API"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "message_id": message_id,
+                "text": message_text,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            # Check if text contains HTML formatting
+            if '<' in message_text and '>' in message_text:
+                payload["parse_mode"] = "HTML"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        logger.info(f"✅ تم تعديل الرسالة {message_id} وإضافة الأزرار بنجاح")
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.warning(f"⚠️ فشل في تعديل الرسالة: {error_code} - {error_desc}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في تعديل الرسالة: {e}")
+            return False
+
+    async def _send_new_message_with_buttons(self, target_chat_id: str, old_message_id: int, message_text: str, keyboard: list):
+        """Send new message with buttons and delete old message"""
+        try:
+            from bot_package.config import BOT_TOKEN
+            import aiohttp
+            
+            # Send new message with buttons
+            send_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            
+            payload = {
+                "chat_id": target_chat_id,
+                "text": message_text,
+                "reply_markup": {
+                    "inline_keyboard": keyboard
+                }
+            }
+            
+            # Check if text contains HTML formatting
+            if '<' in message_text and '>' in message_text:
+                payload["parse_mode"] = "HTML"
+            
+            async with aiohttp.ClientSession() as session:
+                # Send new message
+                async with session.post(send_url, json=payload) as response:
+                    result = await response.json()
+                    
+                    if result.get('ok'):
+                        new_message_id = result['result']['message_id']
+                        logger.info(f"✅ تم إرسال رسالة جديدة مع الأزرار: {new_message_id}")
+                        
+                        # Try to delete old message
+                        try:
+                            delete_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+                            delete_payload = {
+                                "chat_id": target_chat_id,
+                                "message_id": old_message_id
+                            }
+                            
+                            async with session.post(delete_url, json=delete_payload) as delete_response:
+                                delete_result = await delete_response.json()
+                                if delete_result.get('ok'):
+                                    logger.info(f"✅ تم حذف الرسالة القديمة: {old_message_id}")
+                                else:
+                                    logger.warning(f"⚠️ لم يتم حذف الرسالة القديمة: {old_message_id}")
+                                    
+                        except Exception as delete_err:
+                            logger.warning(f"⚠️ خطأ في حذف الرسالة القديمة: {delete_err}")
+                        
+                        return True
+                    else:
+                        error_code = result.get('error_code', 'unknown')
+                        error_desc = result.get('description', 'unknown error')
+                        logger.error(f"❌ فشل في إرسال رسالة جديدة: {error_code} - {error_desc}")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ خطأ في إرسال رسالة جديدة: {e}")
+            return False
