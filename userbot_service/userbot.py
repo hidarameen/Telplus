@@ -27,6 +27,7 @@ from bot_package.config import API_ID, API_HASH
 import time
 from collections import defaultdict
 from watermark_processor import WatermarkProcessor
+from watermark_processor_optimized import optimized_processor
 from audio_processor import AudioProcessor
 import tempfile
 import os
@@ -2213,12 +2214,22 @@ class UserbotService:
             if apply_wm:
                 logger.info(f"🏷️ تطبيق العلامة المائية على {full_file_name} للمهمة {task_id}")
                 # CRITICAL FIX: Process media ONCE for all targets to prevent multiple uploads
-                watermarked_media = self.watermark_processor.process_media_once_for_all_targets(
-                    media_bytes,
-                    full_file_name,
-                    watermark_settings,
-                    task_id,
-                )
+                # استخدام المعالج المحسن للسرعة
+                try:
+                    watermarked_media = optimized_processor.process_media_once_for_all_targets_fast(
+                        media_bytes,
+                        full_file_name,
+                        watermark_settings,
+                        task_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"فشل في المعالج المحسن، استخدام المعالج الأصلي: {e}")
+                    watermarked_media = self.watermark_processor.process_media_once_for_all_targets(
+                        media_bytes,
+                        full_file_name,
+                        watermark_settings,
+                        task_id,
+                    )
             else:
                 logger.info(f"🏷️ العلامة المائية معطلة أو غير منطبقة - سيتم الانتقال مباشرة لمعالجة الصوت (إن وجد)")
 
