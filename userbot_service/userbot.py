@@ -28,6 +28,7 @@ import time
 from collections import defaultdict
 from watermark_processor import WatermarkProcessor
 from watermark_processor_optimized import optimized_processor
+from watermark_processor_ultra_optimized import ultra_optimized_processor
 from audio_processor import AudioProcessor
 import tempfile
 import os
@@ -2214,22 +2215,32 @@ class UserbotService:
             if apply_wm:
                 logger.info(f"🏷️ تطبيق العلامة المائية على {full_file_name} للمهمة {task_id}")
                 # CRITICAL FIX: Process media ONCE for all targets to prevent multiple uploads
-                # استخدام المعالج المحسن للسرعة
+                # استخدام المعالج المحسن للغاية للسرعة القصوى
                 try:
-                    watermarked_media = optimized_processor.process_media_once_for_all_targets_fast(
+                    watermarked_media = await ultra_optimized_processor.process_media_ultra_fast(
                         media_bytes,
                         full_file_name,
                         watermark_settings,
                         task_id,
                     )
+                    logger.info(f"🚀 تم استخدام المعالج المحسن للغاية: {full_file_name}")
                 except Exception as e:
-                    logger.warning(f"فشل في المعالج المحسن، استخدام المعالج الأصلي: {e}")
-                    watermarked_media = self.watermark_processor.process_media_once_for_all_targets(
-                        media_bytes,
-                        full_file_name,
-                        watermark_settings,
-                        task_id,
-                    )
+                    logger.warning(f"فشل في المعالج المحسن للغاية، استخدام المعالج المحسن: {e}")
+                    try:
+                        watermarked_media = optimized_processor.process_media_once_for_all_targets_fast(
+                            media_bytes,
+                            full_file_name,
+                            watermark_settings,
+                            task_id,
+                        )
+                    except Exception as e2:
+                        logger.warning(f"فشل في المعالج المحسن، استخدام المعالج الأصلي: {e2}")
+                        watermarked_media = self.watermark_processor.process_media_once_for_all_targets(
+                            media_bytes,
+                            full_file_name,
+                            watermark_settings,
+                            task_id,
+                        )
             else:
                 logger.info(f"🏷️ العلامة المائية معطلة أو غير منطبقة - سيتم الانتقال مباشرة لمعالجة الصوت (إن وجد)")
 
@@ -2257,6 +2268,21 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في تطبيق العلامة المائية: {e}")
             return event.message.media, None
+    
+    async def get_watermark_performance_stats(self) -> Dict:
+        """الحصول على إحصائيات أداء العلامة المائية"""
+        try:
+            stats = ultra_optimized_processor.get_performance_stats()
+            return {
+                'ultra_optimized': stats,
+                'status': 'active',
+                'ffmpeg_available': ultra_optimized_processor.ffmpeg_available,
+                'cache_efficiency': f"{stats.get('cache_hit_rate', 0):.1f}%",
+                'avg_processing_time': f"{stats.get('avg_processing_time', 0):.2f}s"
+            }
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على إحصائيات الأداء: {e}")
+            return {'status': 'error', 'message': str(e)}
     
     async def apply_audio_metadata(self, event, task_id: int, media_bytes: bytes, file_name: str):
         """
