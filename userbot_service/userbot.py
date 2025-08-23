@@ -2767,6 +2767,105 @@ class UserbotService:
 
         except Exception as e:
             logger.error(f"خطأ في تطبيق فاصل الإرسال: {e}")
+
+    async def _check_message_advanced_filters(self, task_id: int, message) -> tuple:
+        """Check advanced filters for forwarded messages and inline buttons
+        Returns: (should_block, should_remove_buttons, should_remove_forward)
+        """
+        try:
+            # Get advanced filter settings
+            advanced_settings = self.db.get_advanced_filters_settings(task_id)
+            
+            should_block = False
+            should_remove_buttons = False  
+            should_remove_forward = False
+            
+            # Check forwarded message filter
+            if advanced_settings.get('forwarded_message_filter_enabled', False):
+                forwarded_setting = self.db.get_forwarded_message_filter_setting(task_id)
+                
+                # Check if message is forwarded
+                is_forwarded = (hasattr(message, 'forward') and message.forward is not None)
+                
+                if is_forwarded:
+                    if forwarded_setting:  # True = block mode
+                        logger.info(f"🚫 رسالة معاد توجيهها - سيتم حظرها (وضع الحظر)")
+                        should_block = True
+                    else:  # False = remove forward mode
+                        logger.info(f"📋 رسالة معاد توجيهها - سيتم إرسالها كنسخة (وضع حذف علامة التوجيه)")
+                        should_remove_forward = True
+            
+            # Check inline button filter 
+            if not should_block:
+                inline_button_filter_enabled = advanced_settings.get('inline_button_filter_enabled', False)
+                inline_button_setting = self.db.get_inline_button_filter_setting(task_id)
+                
+                logger.debug(f"🔍 فحص فلتر الأزرار الشفافة: المهمة {task_id}, فلتر مفعل={inline_button_filter_enabled}, إعداد الحظر={inline_button_setting}")
+                
+                # Check if message has inline buttons first
+                has_buttons = (hasattr(message, 'reply_markup') and 
+                             message.reply_markup is not None and
+                             hasattr(message.reply_markup, 'rows') and
+                             message.reply_markup.rows)
+                
+                logger.debug(f"🔍 الرسالة تحتوي على أزرار: {has_buttons}")
+                
+                if has_buttons:
+                    # Case 1: Filter is enabled - use both settings
+                    if inline_button_filter_enabled:
+                        if inline_button_setting:  # True = block mode
+                            logger.info(f"🚫 رسالة تحتوي على أزرار شفافة - سيتم حظرها (وضع الحظر)")
+                            should_block = True
+                        else:  # False = remove buttons mode
+                            logger.info(f"🗑️ رسالة تحتوي على أزرار شفافة - سيتم حذف الأزرار (وضع الحذف)")
+                            should_remove_buttons = True
+                    # Case 2: Filter is disabled but block setting exists (legacy compatibility)
+                    elif not inline_button_filter_enabled and inline_button_setting:
+                        logger.info(f"⚠️ فلتر الأزرار معطل لكن إعداد الحظر مفعل - تجاهل الإعداد وتمرير الرسالة كما هي")
+                        # Don't block or remove buttons - pass message as is
+                    else:
+                        logger.debug(f"✅ فلتر الأزرار الشفافة غير مفعل - تمرير الرسالة كما هي")
+            
+            # Check duplicate filter
+            if not should_block and advanced_settings.get('duplicate_filter_enabled', False):
+                duplicate_detected = await self._check_duplicate_message(task_id, message)
+                if duplicate_detected:
+                    logger.info(f"🔄 رسالة مكررة - سيتم حظرها (فلتر التكرار)")
+                    should_block = True
+            
+            # Check language filter
+            if not should_block and advanced_settings.get('language_filter_enabled', False):
+                language_blocked = await self._check_language_filter(task_id, message)
+                if language_blocked:
+                    logger.info(f"🌍 رسالة محظورة بواسطة فلتر اللغة")
+                    should_block = True
+            
+            # Check day filter
+            if not should_block and advanced_settings.get('day_filter_enabled', False):
+                day_blocked = self._check_day_filter(task_id)
+                if day_blocked:
+                    logger.info(f"📅 رسالة محظورة بواسطة فلتر الأيام")
+                    should_block = True
+            
+            # Check admin filter
+            if not should_block and advanced_settings.get('admin_filter_enabled', False):
+                admin_blocked = await self._check_admin_filter(task_id, message)
+                if admin_blocked:
+                    logger.info(f"👮‍♂️ رسالة محظورة بواسطة فلتر المشرفين")
+                    should_block = True
+            
+            # Check working hours filter
+            if not should_block and advanced_settings.get('working_hours_enabled', False):
+                working_hours_blocked = self._check_working_hours_filter(task_id)
+                if working_hours_blocked:
+                    logger.info(f"⏰ رسالة محظورة بواسطة فلتر ساعات العمل")
+                    should_block = True
+            
+            return should_block, should_remove_buttons, should_remove_forward
+            
+        except Exception as e:
+            logger.error(f"خطأ في فحص الفلاتر المتقدمة: {e}")
+            return False, False, False
             
     async def _replace_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
         """Send new message with buttons and delete old message"""
