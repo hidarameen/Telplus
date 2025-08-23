@@ -600,7 +600,6 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في تنظيف النص للمهمة {task_id}: {e}")
             return message_text
-
     async def _setup_event_handlers(self, user_id: int, client: TelegramClient):
         """Set up message forwarding event handlers"""
 
@@ -1123,7 +1122,6 @@ class UserbotService:
                                 logger.error(f"❌ فشل التوجيه المباشر، التبديل للنسخ: {forward_err}")
                                 # Fallback to copy mode if forward fails
                                 final_send_mode = 'copy'
-
                         elif final_send_mode == 'copy':
                             # Optimization: use server-side copy when no modifications are required
                             try:
@@ -1907,7 +1905,6 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في تطبيق الاستبدالات النصية: {e}")
             return message_text  # Return original text on error
-
     async def apply_translation(self, task_id: int, message_text: str) -> str:
         """Apply translation to message text if enabled using deep-translator"""
         if not message_text or not TRANSLATION_AVAILABLE:
@@ -2131,13 +2128,22 @@ class UserbotService:
 
             # Check media type and watermark applicability
             is_photo = hasattr(event.message.media, 'photo') and event.message.media.photo is not None
+            # If it's a document with image/* mime, treat as photo for watermark gating
+            if (hasattr(event.message.media, 'document') and event.message.media.document and
+                getattr(event.message.media.document, 'mime_type', '') and
+                event.message.media.document.mime_type.startswith('image/')):
+                is_photo = True
             is_video = (
                 hasattr(event.message.media, 'document')
                 and event.message.media.document
                 and event.message.media.document.mime_type
                 and event.message.media.document.mime_type.startswith('video/')
             )
-            is_document = hasattr(event.message.media, 'document') and event.message.media.document and not is_video
+            # Documents include non-video; keep true for non-photo documents
+            is_document = (
+                hasattr(event.message.media, 'document') and event.message.media.document and
+                not is_video and not is_photo
+            )
 
             logger.info(f"🏷️ نوع الوسائط للمهمة {task_id}: صورة={is_photo}, فيديو={is_video}, مستند={is_document}")
 
@@ -2222,7 +2228,7 @@ class UserbotService:
             elif is_video and not watermark_settings.get('apply_to_videos', True):
                 apply_wm = False
             elif is_document and not watermark_settings.get('apply_to_documents', False):
-                # Documents include audio; watermark usually disabled for docs unless explicitly enabled
+                # Documents (non-image, non-video) include audio; disable unless explicitly enabled
                 apply_wm = False
 
             # Process watermark optionally
@@ -2706,7 +2712,6 @@ class UserbotService:
             
         if completed_keys:
             logger.info(f"🧹 تم تنظيف {len(completed_keys)} مهام حذف مكتملة من الذاكرة")
-
     async def _add_inline_buttons_with_bot(self, target_chat_id: str, message_id: int, inline_buttons, task_id: int):
         """Add inline buttons to a message using bot client"""
         try:
@@ -3496,7 +3501,6 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في فحص حد المعدل: {e}")
             return True
-
     async def _apply_forwarding_delay(self, task_id: int):
         """Apply forwarding delay before sending message"""
         try:
@@ -4161,7 +4165,6 @@ class UserbotService:
             # Prepare approval message
             approval_text = f"""
 🔔 **طلب موافقة نشر**
-
 📋 **المهمة:** {task_name}
 📱 **المصدر:** {source_name}
 🕐 **التوقيت:** {message.date.strftime('%Y-%m-%d %H:%M:%S') if message.date else 'غير محدد'}
@@ -4843,7 +4846,7 @@ class UserbotService:
             elif format_type == 'underline':
                 return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f"<s>{cleaned_text.strip()}</s>"
+                return f" {cleaned_text.strip()} { "
             elif format_type == 'code':
                 return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
@@ -4910,7 +4913,7 @@ class UserbotService:
             elif format_type == 'underline':
                 return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f"<s>{cleaned_text.strip()}</s>"
+                return f" {cleaned_text.strip()} { "
             elif format_type == 'code':
                 return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
@@ -4946,7 +4949,6 @@ class UserbotService:
             kwargs['formatting_entities'] = spoiler_entities
         
         return await client.send_message(target_entity, processed_text, **kwargs)
-
     def _process_spoiler_entities(self, text: str) -> Tuple[str, List]:
         """
         معالجة علامات spoiler وتحويلها إلى MessageEntitySpoiler
