@@ -271,35 +271,25 @@ class UltraOptimizedWatermarkProcessor:
         """إنشاء علامة مائية نصية بسرعة قصوى"""
         try:
             img_width, img_height = image_size
-            
-            # حساب حجم الخط محسن
             calculated_font_size = max(font_size, img_width // 20)
-            
-            # استخدام خط افتراضي سريع
             try:
                 font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", calculated_font_size)
             except:
                 font = ImageFont.load_default()
                 font = font.font_variant(size=calculated_font_size)
-            
-            # إنشاء صورة شفافة
-            watermark_img = Image.new('RGBA', (img_width, img_height), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(watermark_img)
-            
-            # حساب حجم النص
-            bbox = draw.textbbox((0, 0), text, font=font)
+            # احسب حجم النص على لوحة مؤقتة
+            tmp_img = Image.new('RGBA', (1, 1), (0, 0, 0, 0))
+            tmp_draw = ImageDraw.Draw(tmp_img)
+            bbox = tmp_draw.textbbox((0, 0), text, font=font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            
-            # حساب الموقع
-            position = self._calculate_position_ultra_fast((img_width, img_height), (text_width, text_height), 'bottom_right')
-            
-            # رسم النص
+            # أنشئ صورة العلامة المائية بحجم النص فقط
+            watermark_img = Image.new('RGBA', (text_width, text_height), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(watermark_img)
             alpha = int(255 * opacity / 100)
-            draw.text(position, text, font=font, fill=color + hex(alpha)[2:].zfill(2))
-            
+            draw.text((0, 0), text, font=font, fill=color + hex(alpha)[2:].zfill(2))
             return watermark_img
-            
+         
         except Exception as e:
             logger.error(f"خطأ في إنشاء العلامة المائية النصية: {e}")
             return None
@@ -407,9 +397,35 @@ class UltraOptimizedWatermarkProcessor:
                                             watermark_settings: dict) -> bool:
         """معالجة الفيديو باستخدام FFmpeg بشكل متوازي"""
         try:
-            # بناء أمر FFmpeg للسرعة القصوى
-            cmd = self._build_ultra_fast_ffmpeg_command(input_path, watermark_path, output_path, watermark_settings)
+            # إعدادات السرعة القصوى (قابلة للتخصيص من الإعدادات)
+            crf = int(watermark_settings.get('crf', self.ultra_fast_settings['crf']))
+            preset = watermark_settings.get('preset', self.ultra_fast_settings['preset'])
+            threads = int(watermark_settings.get('threads', self.ultra_fast_settings['threads']))
             
+            # حساب موقع العلامة المائية
+            position = watermark_settings.get('position', 'bottom_right')
+            offset_x = watermark_settings.get('offset_x', 0)
+            offset_y = watermark_settings.get('offset_y', 0)
+            
+            # بناء أمر FFmpeg للسرعة القصوى مع تصحيح الرايات
+            cmd = [
+                'ffmpeg', '-y', '-loglevel', 'error',
+                '-threads', str(threads),
+                '-i', input_path,               # الفيديو المدخل
+                '-i', watermark_path,           # صورة العلامة المائية
+                '-filter_complex', f'[0:v][1:v]overlay={self._get_overlay_position(position, offset_x, offset_y)}:eval=init',
+                '-map', '0:v',
+                '-map', '0:a?',                 # اجعل الصوت اختيارياً إن وجد
+                '-c:v', 'libx264',              # كودك الفيديو
+                '-preset', preset,              # preset سريع
+                '-crf', str(crf),               # جودة محسنة للسرعة
+                '-pix_fmt', 'yuv420p',          # توافق أعلى
+                '-movflags', '+faststart',      # تحسين بدء التشغيل
+                '-c:a', 'copy',                 # نسخ الصوت بدون إعادة ترميز
+                '-avoid_negative_ts', 'make_zero',
+                output_path
+            ]
+ 
             def run_ffmpeg():
                 return subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             
@@ -436,28 +452,25 @@ class UltraOptimizedWatermarkProcessor:
         offset_x = watermark_settings.get('offset_x', 0)
         offset_y = watermark_settings.get('offset_y', 0)
         
-        # بناء أمر FFmpeg للسرعة القصوى
+        # بناء أمر FFmpeg للسرعة القصوى مع تصحيح الرايات
         cmd = [
-            'ffmpeg', '-y',  # الكتابة فوق الملف الموجود
-            '-i', input_path,  # الفيديو المدخل
-            '-i', watermark_path,  # صورة العلامة المائية
-            '-filter_complex', f'[0:v][1:v]overlay={self._get_overlay_position(position, offset_x, offset_y)}',
-            '-c:v', 'libx264',  # كودك الفيديو
-            '-preset', preset,  # preset سريع
-            '-crf', str(crf),  # جودة محسنة للسرعة
-            '-threads', str(threads),  # استخدام جميع النوى
-            '-tile-columns', '6',  # تحسين الترميز أكثر
-            '-frame-parallel', '1',  # معالجة متوازية
-            '-tune', 'fastdecode',  # تحسين للسرعة
-            '-profile:v', 'baseline',  # profile بسيط للسرعة
-            '-level', '3.0',  # مستوى بسيط
-            '-x264opts', 'no-scenecut',  # إيقاف scene cut detection
-            '-movflags', '+faststart',  # تحسين التشغيل
-            '-c:a', 'copy',  # نسخ الصوت بدون إعادة ترميز
-            '-avoid_negative_ts', 'make_zero',  # تجنب مشاكل التوقيت
+            'ffmpeg', '-y', '-loglevel', 'error',
+            '-threads', str(threads),
+            '-i', input_path,               # الفيديو المدخل
+            '-i', watermark_path,           # صورة العلامة المائية
+            '-filter_complex', f'[0:v][1:v]overlay={self._get_overlay_position(position, offset_x, offset_y)}:eval=init[v]',
+            '-map', '[v]',
+            '-map', '0:a?',                 # اجعل الصوت اختيارياً إن وجد
+            '-c:v', 'libx264',              # كودك الفيديو
+            '-preset', preset,              # preset سريع
+            '-crf', str(crf),               # جودة محسنة للسرعة
+            '-pix_fmt', 'yuv420p',          # توافق أعلى
+            '-movflags', '+faststart',      # تحسين بدء التشغيل
+            '-c:a', 'copy',                 # نسخ الصوت بدون إعادة ترميز
+            '-avoid_negative_ts', 'make_zero',
             output_path
         ]
-        
+ 
         return cmd
     
     def _get_overlay_position(self, position: str, offset_x: int, offset_y: int) -> str:
