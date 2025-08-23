@@ -212,6 +212,35 @@ class OptimizedWatermarkProcessor:
             logger.error(f"خطأ في إنشاء صورة العلامة المائية: {e}")
             return None
     
+    def load_image_watermark_fast(self, image_path: str, size_percentage: int, opacity: int,
+                                  base_image_size: Tuple[int, int]) -> Optional[Image.Image]:
+        """تحميل وتحضير علامة مائية من صورة بسرعة"""
+        try:
+            if not image_path or not os.path.exists(image_path):
+                logger.error(f"ملف صورة العلامة غير موجود: {image_path}")
+                return None
+            watermark_img = Image.open(image_path)
+            if watermark_img.mode != 'RGBA':
+                watermark_img = watermark_img.convert('RGBA')
+            base_w, base_h = base_image_size
+            wm_w, wm_h = watermark_img.size
+            aspect = wm_w / wm_h if wm_h else 1
+            target_area = max(1, int(base_w * base_h * (max(1, size_percentage) / 100.0)))
+            new_h = int((target_area / aspect) ** 0.5)
+            new_w = int(new_h * aspect)
+            new_w = max(20, min(new_w, base_w - 10))
+            new_h = max(20, min(new_h, base_h - 10))
+            if (new_w, new_h) != watermark_img.size:
+                watermark_img = watermark_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            if 0 <= opacity < 100:
+                alpha = watermark_img.split()[-1]
+                alpha = alpha.point(lambda p: int(p * opacity / 100))
+                watermark_img.putalpha(alpha)
+            return watermark_img
+        except Exception as e:
+            logger.error(f"خطأ في تحميل صورة العلامة المائية: {e}")
+            return None
+
     def create_text_watermark_fast(self, text: str, font_size: int, color: str, opacity: int, 
                                  image_size: Tuple[int, int]) -> Optional[Image.Image]:
         """إنشاء علامة مائية نصية بسرعة"""
@@ -384,12 +413,15 @@ class OptimizedWatermarkProcessor:
             if watermark is None:
                 return image_bytes
             
+            # تحديد الموقع
+            position = self.calculate_position_fast(image.size, watermark.size,
+                                                   watermark_settings.get('position', 'bottom_right'))
             # تطبيق العلامة المائية
             if image.mode == 'RGBA':
-                image.paste(watermark, (0, 0), watermark)
+                image.paste(watermark, position, watermark)
             else:
                 image = image.convert('RGBA')
-                image.paste(watermark, (0, 0), watermark)
+                image.paste(watermark, position, watermark)
                 image = image.convert('RGB')
             
             # حفظ الصورة
