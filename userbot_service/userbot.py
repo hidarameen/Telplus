@@ -2819,6 +2819,9 @@ class UserbotService:
             # If it's a large numeric ID (likely a channel ID without -100 prefix)
             if clean_id.isdigit():
                 chat_id_int = int(clean_id)
+                
+                # Channel IDs are typically 13-14 digits and start with 1, 2, 3, 4, 5, 6, 7, 8, 9
+                # Supergroup IDs are typically 10-12 digits
                 if chat_id_int > 1000000000:
                     # This looks like a channel ID, ensure it has -100 prefix
                     normalized_id = f"-100{clean_id}"
@@ -2828,6 +2831,11 @@ class UserbotService:
                     # This might be a supergroup ID, try with -100 prefix
                     normalized_id = f"-100{clean_id}"
                     logger.info(f"🔄 تم تطبيع معرف المجموعة الفائقة: {target_chat_id} -> {normalized_id}")
+                    return normalized_id
+                elif chat_id_int > 10000000:
+                    # This might be a group ID, try with -100 prefix
+                    normalized_id = f"-100{clean_id}"
+                    logger.info(f"🔄 تم تطبيع معرف المجموعة: {target_chat_id} -> {normalized_id}")
                     return normalized_id
             
             return target_chat_id
@@ -4465,7 +4473,7 @@ class UserbotService:
             elif format_type == 'underline':
                 return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f" {cleaned_text.strip()} {
+                return f"<s>{cleaned_text.strip()}</s>"
             elif format_type == 'code':
                 return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
@@ -4532,7 +4540,7 @@ class UserbotService:
             elif format_type == 'underline':
                 return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f" {cleaned_text.strip()} {
+                return f"<s>{cleaned_text.strip()}</s>"
             elif format_type == 'code':
                 return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
