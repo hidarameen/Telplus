@@ -386,9 +386,35 @@ class UltraOptimizedWatermarkProcessor:
                 if watermark_img:
                     watermark_img.save(watermark_path, 'PNG', optimize=True)
                     return watermark_path
-            
+            elif watermark_settings['watermark_type'] == 'image' and watermark_settings.get('watermark_image_path'):
+                # تحميل صورة العلامة، تحجيمها، وتطبيق الشفافية
+                try:
+                    wm_img = Image.open(watermark_settings['watermark_image_path'])
+                    if wm_img.mode != 'RGBA':
+                        wm_img = wm_img.convert('RGBA')
+                    size_percentage = int(watermark_settings.get('size_percentage', 20))
+                    opacity = int(watermark_settings.get('opacity', 70))
+                    # حساب أبعاد مناسبة نسبةً إلى الفيديو
+                    wm_w, wm_h = wm_img.size
+                    aspect = wm_w / wm_h if wm_h else 1
+                    target_area = max(1, int(width * height * (max(1, size_percentage) / 100.0)))
+                    new_h = int((target_area / aspect) ** 0.5)
+                    new_w = int(new_h * aspect)
+                    new_w = max(20, min(new_w, width - 10))
+                    new_h = max(20, min(new_h, height - 10))
+                    if (new_w, new_h) != wm_img.size:
+                        wm_img = wm_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    if 0 <= opacity < 100:
+                        alpha = wm_img.split()[-1]
+                        alpha = alpha.point(lambda p: int(p * opacity / 100))
+                        wm_img.putalpha(alpha)
+                    wm_img.save(watermark_path, 'PNG', optimize=True)
+                    return watermark_path
+                except Exception as _e:
+                    logger.error(f"فشل تحميل/تحضير صورة العلامة: {_e}")
+             
             return None
-            
+             
         except Exception as e:
             logger.error(f"خطأ في إنشاء صورة العلامة المائية: {e}")
             return None
