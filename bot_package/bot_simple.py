@@ -219,6 +219,8 @@ class SimpleTelegramBot:
             [Button.inline(f"🖼️ صورة الغلاف ({art_status})", f"album_art_settings_{task_id}")],
             [Button.inline(f"🔗 دمج المقاطع ({merge_status})", f"audio_merge_settings_{task_id}")],
             [Button.inline("⚙️ إعدادات متقدمة", f"advanced_audio_settings_{task_id}")],
+            [Button.inline("🧹 تنظيف نصوص الوسوم", f"audio_text_cleaning_{task_id}")],
+            [Button.inline("🔄 استبدال نصوص الوسوم", f"audio_text_replacements_{task_id}")],
             [Button.inline("🔙 رجوع لإعدادات المهمة", f"task_settings_{task_id}")]
         ]
         message_text = (
@@ -1110,6 +1112,20 @@ class SimpleTelegramBot:
                     await self.advanced_audio_settings(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للإعدادات المتقدمة للوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_text_cleaning_"):
+                try:
+                    task_id = int(data.replace("audio_text_cleaning_", ""))
+                    await self.audio_text_cleaning(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتنظيف نصوص الوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_text_replacements_"):
+                try:
+                    task_id = int(data.replace("audio_text_replacements_", ""))
+                    await self.audio_text_replacements(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لاستبدال نصوص الوسوم: {e}")
                     await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_char_limit_"): # Toggle character limit
                 parts = data.split("_")
