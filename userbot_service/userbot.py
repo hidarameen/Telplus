@@ -2866,6 +2866,23 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في فحص الفلاتر المتقدمة: {e}")
             return False, False, False
+
+    def _determine_final_send_mode(self, forward_mode: str, requires_copy_mode: bool) -> str:
+        """تحديد الوضع النهائي للإرسال - إصلاح منطق التوجيه"""
+        if forward_mode == 'copy':
+            # وضع النسخ - دائماً نسخ
+            return 'copy'
+        elif forward_mode == 'forward':
+            if requires_copy_mode:
+                # وضع التوجيه مع تنسيق - إجبار النسخ
+                logger.info(f"🔄 إجبار النسخ في وضع التوجيه بسبب التنسيق")
+                return 'copy'
+            else:
+                # وضع التوجيه بدون تنسيق - توجيه عادي
+                return 'forward'
+        else:
+            # افتراضي - توجيه
+            return 'forward'
             
     async def _replace_message_with_buttons(self, target_chat_id: str, message_id: int, message_text: str, keyboard: list):
         """Send new message with buttons and delete old message"""
