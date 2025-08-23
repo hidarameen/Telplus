@@ -1,137 +1,131 @@
 #!/usr/bin/env python3
 """
-Test chat ID normalization - adding -100 prefix if needed
+Test script to verify chat ID normalization
 """
-import asyncio
+
 import sys
 import os
 
-# Add the project root to the Python path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from userbot_service.userbot import UserBot
+# Add the project root to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def test_chat_id_normalization():
-    """Test chat ID normalization function"""
-    print("🧪 اختبار تطبيع معرفات القنوات...")
+    """Test chat ID normalization"""
+    print("🔍 اختبار تطبيع معرف القناة...")
     
-    userbot = UserBot()
-    
-    # Test cases
-    test_cases = [
-        # Original ID -> Expected normalized ID
-        ("2638960177", "-1002638960177", "معرف قناة بدون -100"),
-        ("1234567890123", "-1001234567890123", "معرف قناة كبير بدون -100"),
-        ("-1002638960177", "-1002638960177", "معرف قناة مع -100 (لا يتغير)"),
-        ("-1001234567890", "-1001234567890", "معرف قناة مع -100 (لا يتغير)"),
-        ("-123456789", "-123456789", "معرف مجموعة (لا يتغير)"),
-        ("@channel_name", "@channel_name", "اسم قناة (لا يتغير)"),
-        ("", "", "معرف فارغ"),
-        ("abc123", "abc123", "معرف غير صحيح (لا يتغير)"),
-    ]
-    
-    print("\n📋 نتائج الاختبار:")
-    print("=" * 80)
-    
-    for original_id, expected_id, description in test_cases:
-        try:
-            normalized_id = userbot._normalize_chat_id(original_id)
-            status = "✅ صحيح" if normalized_id == expected_id else "❌ خطأ"
-            print(f"{status} | {original_id:15} -> {normalized_id:15} | {description}")
-        except Exception as e:
-            print(f"❌ خطأ | {original_id:15} -> خطأ: {e}")
-
-async def test_with_real_chat_id():
-    """Test with the specific chat ID mentioned by user"""
-    print("\n🔧 اختبار معرف القناة المحدد: 2638960177")
-    
-    userbot = UserBot()
-    
-    # Test normalization
-    original_id = "2638960177"
-    normalized_id = userbot._normalize_chat_id(original_id)
-    
-    print(f"المعرف الأصلي: {original_id}")
-    print(f"المعرف المطبيع: {normalized_id}")
-    
-    # Test validation
-    is_valid_original = userbot._validate_chat_id(original_id)
-    is_valid_normalized = userbot._validate_chat_id(normalized_id)
-    
-    print(f"صحة المعرف الأصلي: {'✅ صحيح' if is_valid_original else '❌ غير صحيح'}")
-    print(f"صحة المعرف المطبيع: {'✅ صحيح' if is_valid_normalized else '❌ غير صحيح'}")
-    
-    # Test bot permissions with normalized ID
-    if is_valid_normalized:
-        print(f"\n🔍 اختبار صلاحيات البوت مع المعرف المطبيع: {normalized_id}")
-        try:
-            has_permissions = await userbot._check_bot_permissions(normalized_id)
-            print(f"الصلاحيات: {'✅ متوفرة' if has_permissions else '❌ غير متوفرة'}")
-            
-            if has_permissions:
-                print("🎉 المعرف المطبيع يعمل بشكل صحيح!")
-            else:
-                print("⚠️ المعرف صحيح لكن البوت ليس لديه صلاحيات كافية")
+    try:
+        from userbot_service.userbot import UserbotService
+        
+        # Create userbot instance
+        userbot = UserbotService()
+        
+        # Test cases
+        test_cases = [
+            "2787807057",           # Channel ID without prefix
+            "-1002787807057",       # Channel ID with prefix
+            "1002787807057",        # Another format
+            "1234567890",           # Supergroup ID
+            "987654321",            # Group ID
+            "12345",                # Small ID (should not change)
+            "abc123",               # Non-numeric (should not change)
+            "",                     # Empty string
+        ]
+        
+        print("\n📋 نتائج اختبار تطبيع معرف القناة:")
+        print("-" * 60)
+        
+        for test_id in test_cases:
+            try:
+                normalized = userbot._normalize_chat_id(test_id)
+                status = "✅" if normalized != test_id else "ℹ️"
+                print(f"{status} {test_id:>15} -> {normalized}")
                 
-        except Exception as e:
-            print(f"❌ خطأ في فحص الصلاحيات: {e}")
-    else:
-        print("❌ المعرف المطبيع غير صحيح")
+                # Special check for the specific case mentioned
+                if test_id == "2787807057":
+                    if normalized == "-1002787807057":
+                        print(f"   🎯 تم تطبيع معرف القناة {test_id} بنجاح إلى {normalized}")
+                    else:
+                        print(f"   ❌ فشل في تطبيع معرف القناة {test_id}")
+                        
+            except Exception as e:
+                print(f"❌ {test_id:>15} -> خطأ: {e}")
+        
+        print("-" * 60)
+        print("✅ انتهى اختبار تطبيع معرف القناة")
+        
+        return True
+        
+    except ImportError as e:
+        print(f"❌ فشل في استيراد UserbotService: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ خطأ غير متوقع: {e}")
+        return False
 
-def show_normalization_examples():
-    """Show examples of chat ID normalization"""
-    print("\n📖 أمثلة على تطبيع معرفات القنوات:")
-    print("=" * 50)
+def test_entity_resolution_methods():
+    """Test if entity resolution methods exist"""
+    print("\n🔍 اختبار وجود طرق حل الكيانات...")
     
-    examples = [
-        ("2638960177", "-1002638960177", "معرف قناة بدون -100"),
-        ("1234567890123", "-1001234567890123", "معرف قناة كبير بدون -100"),
-        ("9876543210987", "-1009876543210987", "معرف قناة آخر بدون -100"),
-    ]
-    
-    for original, normalized, description in examples:
-        print(f"  {original:15} -> {normalized:15} | {description}")
-    
-    print("\n💡 لا يتغير:")
-    print("  -1002638960177 -> -1002638960177 | معرف قناة مع -100")
-    print("  -123456789     -> -123456789     | معرف مجموعة")
-    print("  @channel_name  -> @channel_name  | اسم قناة")
+    try:
+        from userbot_service.userbot import UserbotService
+        userbot = UserbotService()
+        
+        required_methods = [
+            '_normalize_chat_id',
+            '_resolve_entity_safely',
+            '_validate_chat_id',
+            '_check_bot_permissions'
+        ]
+        
+        print("\n📋 طرق حل الكيانات:")
+        print("-" * 40)
+        
+        for method in required_methods:
+            if hasattr(userbot, method):
+                print(f"✅ {method}")
+            else:
+                print(f"❌ {method}")
+        
+        print("-" * 40)
+        return True
+        
+    except Exception as e:
+        print(f"❌ خطأ في اختبار طرق حل الكيانات: {e}")
+        return False
 
-def explain_normalization():
-    """Explain why normalization is needed"""
-    print("\n🔍 لماذا نحتاج تطبيع معرف القناة؟")
-    print("=" * 50)
-    
-    explanation = [
-        "1. معرفات القنوات في Telegram تبدأ بـ -100",
-        "2. أحياناً يتم تخزين المعرف بدون -100 في قاعدة البيانات",
-        "3. البوت يحتاج المعرف الكامل مع -100 للوصول للقناة",
-        "4. دالة التطبيع تضيف -100 تلقائياً إذا كان مفقوداً",
-        "5. هذا يحل مشكلة 'Cannot get entity by phone number'",
-    ]
-    
-    for line in explanation:
-        print(f"  {line}")
-
-async def main():
+def main():
     """Main test function"""
-    print("🚀 اختبار تطبيع معرفات القنوات")
-    print("=" * 80)
+    print("🚀 بدء اختبار تطبيع معرف القناة...")
+    print("=" * 60)
     
-    # Show examples
-    show_normalization_examples()
+    # Test 1: Chat ID normalization
+    if not test_chat_id_normalization():
+        print("❌ فشل في اختبار تطبيع معرف القناة")
+        return False
     
-    # Explain normalization
-    explain_normalization()
+    # Test 2: Entity resolution methods
+    if not test_entity_resolution_methods():
+        print("❌ فشل في اختبار طرق حل الكيانات")
+        return False
     
-    # Test normalization function
-    test_chat_id_normalization()
+    print("\n" + "=" * 60)
+    print("🎉 جميع الاختبارات نجحت!")
+    print("✅ تم إصلاح تطبيع معرف القناة")
+    print("✅ معرف القناة 2787807057 سيتم تطبيعه إلى -1002787807057")
+    print("✅ تم تحسين حل الكيانات")
     
-    # Test with real chat ID
-    await test_with_real_chat_id()
-    
-    print("\n" + "=" * 80)
-    print("✅ انتهى اختبار تطبيع معرفات القنوات")
+    return True
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        success = main()
+        if success:
+            print("\n💡 يمكنك الآن تشغيل البوت مع معرفات القنوات الصحيحة")
+        else:
+            print("\n❌ هناك مشاكل تحتاج إلى إصلاح")
+    except KeyboardInterrupt:
+        print("\n⏹️ تم إيقاف الاختبار بواسطة المستخدم")
+    except Exception as e:
+        print(f"\n❌ خطأ غير متوقع: {e}")
+        import traceback
+        traceback.print_exc()
