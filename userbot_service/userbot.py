@@ -4846,7 +4846,7 @@ class UserbotService:
             elif format_type == 'underline':
                 return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f" {cleaned_text.strip()} { "
+                return f"<s>{cleaned_text.strip()}</s>"
             elif format_type == 'code':
                 return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
@@ -4913,7 +4913,7 @@ class UserbotService:
             elif format_type == 'underline':
                 return f"<u>{cleaned_text.strip()}</u>"
             elif format_type == 'strikethrough':
-                return f" {cleaned_text.strip()} { "
+                return f"<s>{cleaned_text.strip()}</s>"
             elif format_type == 'code':
                 return f"<code>{cleaned_text.strip()}</code>"
             elif format_type == 'monospace':
