@@ -29,6 +29,7 @@ from collections import defaultdict
 from watermark_processor import WatermarkProcessor
 from watermark_processor_optimized import optimized_processor
 from watermark_processor_ultra_optimized import ultra_optimized_processor
+from ffmpeg_installer import ffmpeg_installer
 from audio_processor import AudioProcessor
 import tempfile
 import os
@@ -115,6 +116,20 @@ class UserbotService:
         self.album_collectors: Dict[int, AlbumCollector] = {}  # user_id -> collector
         self.watermark_processor = WatermarkProcessor()  # معالج العلامة المائية
         self.audio_processor = AudioProcessor()  # معالج الوسوم الصوتية
+        
+        # التحقق من FFmpeg عند بدء البوت
+        self._check_ffmpeg_on_startup()
+    
+    def _check_ffmpeg_on_startup(self):
+        """التحقق من FFmpeg عند بدء البوت"""
+        try:
+            if ffmpeg_installer.check_ffmpeg_installed():
+                logger.info("✅ FFmpeg مثبت ومتاح للاستخدام")
+            else:
+                logger.warning("⚠️ FFmpeg غير مثبت - سيتم استخدام المعالج الأصلي (بطيء)")
+                logger.info("💡 يمكنك تثبيت FFmpeg يدوياً أو استخدام وظيفة التثبيت التلقائي")
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من FFmpeg: {e}")
         
         # بدء معالج الوسائط في الخلفية
         if BACKGROUND_PROCESSING_AVAILABLE:
@@ -2283,6 +2298,45 @@ class UserbotService:
         except Exception as e:
             logger.error(f"خطأ في الحصول على إحصائيات الأداء: {e}")
             return {'status': 'error', 'message': str(e)}
+    
+    async def check_and_install_ffmpeg(self) -> Dict:
+        """التحقق من FFmpeg وتثبيته تلقائياً إذا لزم الأمر"""
+        try:
+            # التحقق من التثبيت الحالي
+            if ffmpeg_installer.check_ffmpeg_installed():
+                return {
+                    'status': 'success',
+                    'message': 'FFmpeg مثبت بالفعل',
+                    'ffmpeg_available': True
+                }
+            
+            # محاولة التثبيت التلقائي
+            logger.info("🔍 FFmpeg غير مثبت، محاولة التثبيت التلقائي...")
+            success, message = ffmpeg_installer.install_ffmpeg()
+            
+            if success:
+                return {
+                    'status': 'success',
+                    'message': message,
+                    'ffmpeg_available': True
+                }
+            else:
+                # إرجاع تعليمات التثبيت اليدوي
+                instructions = ffmpeg_installer.get_installation_instructions()
+                return {
+                    'status': 'manual_install_required',
+                    'message': f"فشل في التثبيت التلقائي: {message}",
+                    'ffmpeg_available': False,
+                    'instructions': instructions
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من FFmpeg: {e}")
+            return {
+                'status': 'error',
+                'message': f"خطأ في التحقق من FFmpeg: {e}",
+                'ffmpeg_available': False
+            }
     
     async def apply_audio_metadata(self, event, task_id: int, media_bytes: bytes, file_name: str):
         """
