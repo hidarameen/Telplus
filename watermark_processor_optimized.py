@@ -324,9 +324,6 @@ class OptimizedWatermarkProcessor:
             '-movflags', '+faststart',      # تحسين بدء التشغيل
             '-c:a', 'copy',                 # نسخ الصوت بدون إعادة ترميز
             '-avoid_negative_ts', 'make_zero',
-            '-tune', tune,
-            '-profile:v', profile,
-            '-level', level,
             output_path
         ]
  

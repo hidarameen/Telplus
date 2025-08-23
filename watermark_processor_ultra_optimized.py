@@ -259,8 +259,11 @@ class UltraOptimizedWatermarkProcessor:
                     return video_bytes
                 
                 # معالجة الفيديو بسرعة قصوى
+                # حساب حارس الحجم والمعدل الأصلي
+                original_size = os.path.getsize(temp_input.name)
+                original_bitrate = int(video_info.get('bitrate') or (original_size * 8 / max(video_info.get('duration') or 1, 1)))
                 success = await self._process_video_with_ffmpeg_async(
-                    temp_input.name, watermark_path, temp_output.name, watermark_settings
+                    temp_input.name, watermark_path, temp_output.name, watermark_settings, original_bitrate, original_size
                 )
                 
                 if success and os.path.exists(temp_output.name):
@@ -275,6 +278,20 @@ class UltraOptimizedWatermarkProcessor:
                     
                     return result_bytes
                 else:
+                    # فولبك: محاولة المعالج المحسن
+                    try:
+                        from watermark_processor_optimized import OptimizedWatermarkProcessor
+                        _opt = OptimizedWatermarkProcessor()
+                        out_path = _opt.apply_watermark_to_video_fast(temp_input.name, watermark_settings)
+                        if out_path and os.path.exists(out_path):
+                            with open(out_path, 'rb') as f:
+                                data = f.read()
+                            os.unlink(out_path)
+                            os.unlink(temp_input.name)
+                            os.unlink(watermark_path)
+                            return data
+                    except Exception:
+                        pass
                     return video_bytes
                     
             except Exception as e:
@@ -380,14 +397,17 @@ class UltraOptimizedWatermarkProcessor:
             else:
                 fps = float(fps_str)
             
-            # الحصول على المدة
-            duration = float(info.get('format', {}).get('duration', 0))
+            # الحصول على المدة ومعدل البت
+            format_info = info.get('format', {})
+            duration = float(format_info.get('duration', 0))
+            bit_rate = int(format_info.get('bit_rate', 0)) if str(format_info.get('bit_rate', '0')).isdigit() else 0
             
             return {
                 'width': width,
                 'height': height,
                 'fps': fps,
-                'duration': duration
+                'duration': duration,
+                'bitrate': bit_rate
             }
             
         except Exception as e:
@@ -446,7 +466,7 @@ class UltraOptimizedWatermarkProcessor:
             return None
     
     async def _process_video_with_ffmpeg_async(self, input_path: str, watermark_path: str, output_path: str, 
-                                            watermark_settings: dict) -> bool:
+                                            watermark_settings: dict, original_bitrate: int, size_guard_bytes: int) -> bool:
         """معالجة الفيديو باستخدام FFmpeg بشكل متوازي"""
         try:
             # وضع الحفاظ على الجودة: CRF منخفض و preset أبطأ لضغط أفضل بدون فقد بصري
@@ -466,13 +486,15 @@ class UltraOptimizedWatermarkProcessor:
             offset_y = watermark_settings.get('offset_y', 0)
             
             # بناء أمر FFmpeg للسرعة القصوى مع تصحيح الرايات
+            maxrate = str(original_bitrate) if original_bitrate > 0 else None
+            bufsize = str(int(original_bitrate * 2)) if original_bitrate > 0 else None
             cmd = [
                 'ffmpeg', '-y', '-loglevel', 'error',
                 '-threads', str(threads),
                 '-i', input_path,               # الفيديو المدخل
                 '-i', watermark_path,           # صورة العلامة المائية
-                '-filter_complex', f'[0:v][1:v]overlay={self._get_overlay_position(position, offset_x, offset_y)}:eval=init',
-                '-map', '0:v',
+                '-filter_complex', f'[0:v][1:v]overlay={self._get_overlay_position(position, offset_x, offset_y)}:eval=init[v]',
+                '-map', '[v]',
                 '-map', '0:a?',                 # اجعل الصوت اختيارياً إن وجد
                 '-c:v', 'libx264',              # كودك الفيديو
                 '-preset', preset,              # preset سريع
@@ -481,16 +503,47 @@ class UltraOptimizedWatermarkProcessor:
                 '-movflags', '+faststart',      # تحسين بدء التشغيل
                 '-c:a', 'copy',                 # نسخ الصوت بدون إعادة ترميز
                 '-avoid_negative_ts', 'make_zero',
-                output_path
             ]
+            if maxrate and bufsize:
+                cmd.extend(['-maxrate', maxrate, '-bufsize', bufsize])
+            cmd.append(output_path)
  
             def run_ffmpeg():
-                return subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                return subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
             
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(self.executor, run_ffmpeg)
             
-            return result.returncode == 0 and os.path.exists(output_path)
+            if result.returncode != 0 or not os.path.exists(output_path):
+                return False
+            # حجم الإخراج وحارس الحجم
+            try:
+                out_size = os.path.getsize(output_path)
+                if size_guard_bytes and out_size > size_guard_bytes:
+                    # المحاولة الثانية: رفع CRF وتقليل السقف
+                    crf_bump = str(min(int(crf) + 6, 30))
+                    second = [
+                        'ffmpeg', '-y', '-loglevel', 'error', '-threads', str(threads),
+                        '-i', input_path, '-i', watermark_path,
+                        '-filter_complex', f'[0:v][1:v]overlay={self._get_overlay_position(position, offset_x, offset_y)}:eval=init[v]',
+                        '-map', '[v]', '-map', '0:a?',
+                        '-c:v', 'libx264', '-preset', preset, '-crf', crf_bump,
+                        '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-c:a', 'copy', '-avoid_negative_ts', 'make_zero'
+                    ]
+                    if maxrate and bufsize:
+                        second.extend(['-maxrate', maxrate, '-bufsize', bufsize])
+                    second.append(output_path)
+                    def run_ffmpeg2():
+                        return subprocess.run(second, capture_output=True, text=True, timeout=1200)
+                    res2 = await loop.run_in_executor(self.executor, run_ffmpeg2)
+                    if res2.returncode != 0:
+                        return False
+                    # تحقق الحجم ثانية
+                    out_size2 = os.path.getsize(output_path)
+                    return out_size2 <= size_guard_bytes or True
+            except Exception:
+                pass
+            return True
             
         except Exception as e:
             logger.error(f"خطأ في معالجة الفيديو بـ FFmpeg: {e}")
