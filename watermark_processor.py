@@ -25,6 +25,7 @@ import subprocess
 import json
 import hashlib
 import time
+import shutil
 
 logger = logging.getLogger(__name__)
 
