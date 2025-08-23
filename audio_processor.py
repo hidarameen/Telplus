@@ -23,6 +23,8 @@ from mutagen.id3 import ID3, TIT2, TPE1, TPE2, TALB, TDRC, TCON, TCOM, COMM, TRC
 from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 import subprocess
+import hashlib
+import json
 import re
 
 logger = logging.getLogger(__name__)
@@ -163,33 +165,33 @@ class AudioProcessor:
                     logger.error("فشل في الحصول على معلومات المقطع الصوتي")
                     return audio_bytes
                 
-                # إنشاء ملف مؤقت للمخرجات
-                temp_output = tempfile.mktemp(suffix='.mp3') if hasattr(tempfile, 'mktemp') else tempfile.NamedTemporaryFile(delete=False, suffix='.mp3').name
-                
-                # معالجة الوسوم
-                if self._apply_metadata_template(temp_input.name, temp_output, metadata_template, 
-                                               audio_info, album_art_path, apply_art_to_all):
-                    logger.info("✅ تم تطبيق الوسوم بنجاح")
-                    
+                # معالجة الوسوم في نفس الملف لتقليل I/O
+                if self._apply_metadata_template_inplace(
+                    temp_input.name,
+                    metadata_template,
+                    audio_info,
+                    album_art_path,
+                    apply_art_to_all
+                ):
+                    logger.info("✅ تم تطبيق الوسوم بنجاح (in-place)")
                     # دمج مقاطع صوتية إضافية إذا تم تحديدها
-                    final_output = temp_output
+                    final_path = temp_input.name
                     if audio_intro_path or audio_outro_path:
-                        final_output = self._merge_audio_segments(
-                            temp_output, audio_intro_path, audio_outro_path, intro_position
+                        merged = self._merge_audio_segments(
+                            temp_input.name, audio_intro_path, audio_outro_path, intro_position
                         )
-                        if final_output != temp_output:
-                            os.unlink(temp_output)
-                            temp_output = final_output
-                    
+                        final_path = merged
                     # قراءة الملف المعالج
-                    with open(temp_output, 'rb') as f:
+                    with open(final_path, 'rb') as f:
                         processed_bytes = f.read()
-                    
                     # تنظيف الملفات المؤقتة
-                    os.unlink(temp_input.name)
-                    if os.path.exists(temp_output):
-                        os.unlink(temp_output)
-                    
+                    if os.path.exists(temp_input.name):
+                        os.unlink(temp_input.name)
+                    if final_path != temp_input.name and os.path.exists(final_path):
+                        try:
+                            os.unlink(final_path)
+                        except Exception:
+                            pass
                     return processed_bytes
                 else:
                     logger.error("فشل في تطبيق الوسوم")
@@ -259,6 +261,38 @@ class AudioProcessor:
             
         except Exception as e:
             logger.error(f"خطأ في تطبيق قالب الوسوم: {e}")
+            return False
+
+    def _apply_metadata_template_inplace(self, path: str,
+                                         template: Dict[str, str], audio_info: Dict[str, Any],
+                                         album_art_path: Optional[str], apply_art_to_all: bool) -> bool:
+        """تطبيق قالب الوسوم على نفس الملف لتقليل عمليات I/O"""
+        try:
+            audio = mutagen.File(path)
+            if not audio:
+                return False
+            # إضافة tags إذا لم تكن موجودة (MP3 فقط)
+            if not audio.tags:
+                if path.lower().endswith('.mp3'):
+                    audio.add_tags()
+                else:
+                    # التنسيقات الأخرى تُعاد بدون تعديل لتجنب التحويل البطيء
+                    return False
+            for tag_key, tag_value in template.items():
+                if not tag_value:
+                    continue
+                processed_value = self._process_template_value(
+                    tag_value, audio_info, keep_newlines=(tag_key == 'lyrics')
+                )
+                if processed_value:
+                    self._set_audio_tag(audio, tag_key, processed_value)
+            # تطبيق صورة الغلاف
+            if album_art_path and (apply_art_to_all or not audio_info.get('has_cover', False)):
+                self._set_album_art(audio, album_art_path)
+            audio.save()
+            return True
+        except Exception as e:
+            logger.error(f"خطأ في تطبيق الوسوم in-place: {e}")
             return False
     
     def _process_template_value(self, template_value: str, audio_info: Dict[str, Any], keep_newlines: bool = False) -> str:
@@ -514,8 +548,12 @@ class AudioProcessor:
                                          task_id: int = 0) -> Optional[bytes]:
         """معالجة المقطع الصوتي مرة واحدة لإعادة الاستخدام"""
         try:
-            # إنشاء مفتاح cache
-            cache_key = f"{task_id}_{hash(audio_bytes)}_{file_name}"
+            # إنشاء مفتاح cache ثابت باستخدام MD5 لجزء من البداية والنهاية + القالب
+            head = audio_bytes[:1024*1024]
+            tail = audio_bytes[-1024*1024:] if len(audio_bytes) > 1024*1024 else b''
+            content_hash = hashlib.md5(head + tail if tail else head).hexdigest()
+            template_hash = hashlib.md5(json.dumps(metadata_template, sort_keys=True).encode()).hexdigest()
+            cache_key = f"{task_id}_{content_hash}_{template_hash}_{file_name}"
             
             # التحقق من cache
             if cache_key in self.processed_audio_cache:
