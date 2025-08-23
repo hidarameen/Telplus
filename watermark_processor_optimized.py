@@ -417,6 +417,13 @@ class OptimizedWatermarkProcessor:
                     watermark_settings.get('opacity', 70),
                     image.size
                 )
+            elif watermark_settings['watermark_type'] == 'image' and watermark_settings.get('watermark_image_path'):
+                watermark = self.load_image_watermark_fast(
+                    watermark_settings['watermark_image_path'],
+                    watermark_settings.get('size_percentage', 20),
+                    watermark_settings.get('opacity', 70),
+                    image.size
+                )
             
             if watermark is None:
                 return image_bytes
