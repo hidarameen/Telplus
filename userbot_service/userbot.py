@@ -4815,3 +4815,51 @@ class UserbotService:
         except Exception as e:
             logger.error(f"❌ خطأ في إرسال رسالة جديدة: {e}")
             return False
+
+# Global userbot instance
+userbot_instance = UserbotService()
+
+async def start_userbot_service():
+    """Start the userbot service"""
+    logger.info("🤖 بدء تشغيل خدمة UserBot...")
+    
+    try:
+        # Check if there are any sessions before starting
+        with userbot_instance.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM user_sessions 
+                WHERE is_authenticated = TRUE AND session_string IS NOT NULL AND session_string != ''
+            ''')
+            session_count = cursor.fetchone()[0]
+        
+        if session_count == 0:
+            logger.warning("⚠️ لا توجد جلسات محفوظة - UserBot لن يبدأ")
+            logger.info("💡 المستخدمين يمكنهم تسجيل الدخول عبر البوت /start")
+            return False
+        
+        logger.info(f"📱 تم العثور على {session_count} جلسة محفوظة")
+        
+        # Attempt to start existing sessions
+        await userbot_instance.startup_existing_sessions()
+        
+        # Check if any sessions actually started successfully
+        active_clients = len(userbot_instance.clients)
+        
+        if active_clients > 0:
+            logger.info(f"✅ خدمة UserBot جاهزة مع {active_clients} جلسة نشطة")
+            return True
+        else:
+            logger.warning("⚠️ فشل في تشغيل أي جلسة UserBot - جميع الجلسات معطلة")
+            logger.info("💡 المستخدمين يحتاجون إعادة تسجيل الدخول عبر البوت")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ خطأ في تشغيل خدمة UserBot: {e}")
+        return False
+
+async def stop_userbot_service():
+    """Stop the userbot service"""
+    logger.info("⏹️ إيقاف خدمة UserBot...")
+    await userbot_instance.stop_all()
+    logger.info("✅ تم إيقاف خدمة UserBot")
