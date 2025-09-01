@@ -1145,6 +1145,15 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتدوير وضع حد الأحرف: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("cycle_length_mode_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.cycle_length_mode(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتدوير نوع الحد: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("edit_char_min_"): # Edit character minimum limit
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -1162,6 +1171,15 @@ class SimpleTelegramBot:
                         await self.start_edit_char_max(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل الحد الأقصى: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_char_range_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.start_edit_character_range(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتعديل النطاق: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_rate_limit_"): # Toggle rate limit
                 parts = data.split("_")
@@ -3607,7 +3625,7 @@ class SimpleTelegramBot:
                 return
             elif state == 'editing_char_range': # Handle character range editing
                 task_id = int(data)
-                await self.handle_edit_character_range(event, task_id, event.text)
+                await self.handle_edit_character_range(event, task_id)
                 return
 
             elif state == 'editing_forwarding_delay': # Handle forwarding delay editing
@@ -10423,29 +10441,40 @@ class SimpleTelegramBot:
         
         status_text = "🟢 مفعل" if settings['enabled'] else "🔴 معطل"
         
-        # Mode display
+        # Mode display (allow/block) and length_mode (max/min/range)
         mode_map = {
             'allow': '✅ السماح',
             'block': '❌ الحظر'
         }
-        current_mode = settings['mode']
-        mode_text = mode_map.get(current_mode, current_mode)
+        length_mode_map = {
+            'max': 'الحد الأقصى',
+            'min': 'الحد الأدنى',
+            'range': 'نطاق محدد'
+        }
+        current_mode = settings.get('mode', 'allow')
+        current_length_mode = settings.get('length_mode', 'range')
+        mode_text = f"{mode_map.get(current_mode, current_mode)} — {length_mode_map.get(current_length_mode, current_length_mode)}"
         
         # Values display
-        if settings.get('use_range', True):
-            values_text = f"من {settings['min_chars']} إلى {settings['max_chars']} حرف"
-        else:
-            values_text = f"الحد الأقصى: {settings['max_chars']} حرف"
+        values_text = ""
+        if current_length_mode == 'range':
+            values_text = f"من {settings.get('min_chars', 0)} إلى {settings.get('max_chars', 4000)} حرف"
+        elif current_length_mode == 'max':
+            values_text = f"الحد الأقصى: {settings.get('max_chars', 4000)} حرف"
+        elif current_length_mode == 'min':
+            values_text = f"الحد الأدنى: {settings.get('min_chars', 0)} حرف"
         
         buttons = [
             [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_char_limit_{task_id}")],
-            [Button.inline(f"⚙️ تغيير الوضع ({mode_text})", f"cycle_char_mode_{task_id}")],
+            [Button.inline(f"⚙️ تغيير وضع الفلتر ({mode_text})", f"cycle_char_mode_{task_id}")],
+            [Button.inline("🔁 تبديل نوع الحد (أقصى/أدنى/نطاق)", f"cycle_length_mode_{task_id}")],
         ]
         
         # Add edit buttons
         buttons.extend([
             [Button.inline(f"✏️ تعديل الحد الأدنى", f"edit_char_min_{task_id}"),
              Button.inline(f"✏️ تعديل الحد الأقصى", f"edit_char_max_{task_id}")],
+            [Button.inline("✏️ تعديل النطاق (مثال: 50-1000)", f"edit_char_range_{task_id}")],
         ])
         
         buttons.append([Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")])
@@ -10514,6 +10543,27 @@ class SimpleTelegramBot:
         # Refresh display
         await self.show_character_limit_settings(event, task_id)
 
+    async def cycle_length_mode(self, event, task_id):
+        """Cycle through length modes: max -> min -> range"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Cycle in DB
+        new_length_mode = self.db.cycle_length_mode(task_id)
+        length_mode_names = {
+            'max': 'الحد الأقصى',
+            'min': 'الحد الأدنى',
+            'range': 'نطاق محدد'
+        }
+        await event.answer(f"✅ تم تغيير نوع الحد إلى: {length_mode_names.get(new_length_mode, new_length_mode)}")
+        # Force refresh UserBot tasks
+        await self._refresh_userbot_tasks(user_id)
+        await self.show_character_limit_settings(event, task_id)
+
     async def start_edit_char_min(self, event, task_id):
         """Start editing character minimum limit"""
         user_id = event.sender_id
@@ -10566,6 +10616,35 @@ class SimpleTelegramBot:
             f"📊 القيمة الحالية: {current_max} حرف\n\n"
             f"📝 أدخل الحد الأقصى الجديد (رقم من 1 إلى 10000):\n\n"
             f"💡 مثال: 1000"
+        )
+        
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_edit_character_range(self, event, task_id):
+        """Start editing character range (min-max)"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        # Set user state
+        self.set_user_state(user_id, 'editing_char_range', {'task_id': task_id})
+        
+        current_settings = self.db.get_character_limit_settings(task_id)
+        current_min = current_settings.get('min_chars', 0)
+        current_max = current_settings.get('max_chars', 4000)
+        
+        buttons = [
+            [Button.inline("❌ إلغاء", f"character_limit_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✏️ تعديل نطاق عدد الأحرف\n\n"
+            f"📊 القيمة الحالية: من {current_min} إلى {current_max} حرف\n\n"
+            f"📝 أدخل النطاق الجديد بصيغة 'الحد الأدنى-الحد الأقصى' (مثال: 50-1000)\n\n"
+            f"💡 ملاحظة: سيتم التبديل تلقائياً إلى وضع النطاق"
         )
         
         await self.edit_or_send_message(event, message_text, buttons=buttons)
@@ -10837,7 +10916,7 @@ class SimpleTelegramBot:
         self.clear_user_state(user_id)
 
     async def handle_edit_character_range(self, event, task_id):
-        """Handle character range input"""
+        """Handle character range input (e.g. "50-1000")"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         
@@ -10848,22 +10927,23 @@ class SimpleTelegramBot:
         message_text = event.message.text.strip()
         
         try:
-            value = int(message_text)
-            if value < 1:
-                await self.edit_or_send_message(event, "❌ يجب أن يكون العدد أكبر من 0")
+            parts = message_text.replace('—', '-').split('-')
+            if len(parts) != 2:
+                await self.edit_or_send_message(event, "❌ يرجى إدخال النطاق بصيغة '50-1000'")
                 return
-                
-            success = self.db.update_character_limit(task_id, value)
-            
+            min_chars = int(parts[0].strip())
+            max_chars = int(parts[1].strip())
+            if not (1 <= min_chars <= 10000 and 1 <= max_chars <= 10000 and min_chars <= max_chars):
+                await self.edit_or_send_message(event, "❌ يرجى إدخال نطاق صحيح بين 1 و 10000 وبصيغة '50-1000'")
+                return
+            success = self.db.update_character_limit_settings(task_id, min_chars=min_chars, max_chars=max_chars, use_range=True, length_mode='range')
             if success:
-                await self.edit_or_send_message(event, f"✅ تم تحديث حد الأحرف إلى {value}")
+                await self.edit_or_send_message(event, f"✅ تم تحديث النطاق إلى من {min_chars} إلى {max_chars} حرف")
+                await self._refresh_userbot_tasks(user_id)
             else:
-                await self.edit_or_send_message(event, "❌ فشل في تحديث حد الأحرف")
-                
-        except ValueError:
-            await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
+                await self.edit_or_send_message(event, "❌ فشل في تحديث النطاق")
         except Exception as e:
-            logger.error(f"خطأ في تحديث حد الأحرف: {e}")
+            logger.error(f"خطأ في تحديث نطاق حد الأحرف: {e}")
             await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
         
         # Clear user state

@@ -714,6 +714,7 @@ class Database:
                     task_id INTEGER NOT NULL,
                     enabled BOOLEAN DEFAULT FALSE,
                     mode TEXT DEFAULT 'allow' CHECK (mode IN ('allow', 'block')),
+                    length_mode TEXT DEFAULT 'range' CHECK (length_mode IN ('max', 'min', 'range')),
                     min_chars INTEGER DEFAULT 0,
                     max_chars INTEGER DEFAULT 4000,
                     use_range BOOLEAN DEFAULT TRUE,
@@ -3896,16 +3897,17 @@ class Database:
     # ===== Character Limit Settings =====
     
     def save_character_limit_settings(self, task_id: int, enabled: bool = False, mode: str = 'allow',
-                                    min_chars: int = 0, max_chars: int = 4000, use_range: bool = True) -> bool:
+                                    min_chars: int = 0, max_chars: int = 4000, use_range: bool = True,
+                                    length_mode: str = 'range') -> bool:
         """Save character limit settings for a task"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT OR REPLACE INTO task_character_limit_settings 
-                    (task_id, enabled, mode, min_chars, max_chars, use_range, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ''', (task_id, enabled, mode, min_chars, max_chars, use_range))
+                    (task_id, enabled, mode, min_chars, max_chars, use_range, length_mode, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (task_id, enabled, mode, min_chars, max_chars, use_range, length_mode))
                 conn.commit()
                 return True
         except Exception as e:
@@ -3917,7 +3919,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT enabled, mode, min_chars, max_chars, use_range
+                SELECT enabled, mode, min_chars, max_chars, use_range, length_mode
                 FROM task_character_limit_settings 
                 WHERE task_id = ?
             ''', (task_id,))
@@ -3928,14 +3930,16 @@ class Database:
                     'mode': result[1],
                     'min_chars': result[2],
                     'max_chars': result[3],
-                    'use_range': bool(result[4])
+                    'use_range': bool(result[4]),
+                    'length_mode': result[5] if result and len(result) >= 6 else 'range'
                 }
             return {
                 'enabled': False,
                 'mode': 'allow',
                 'min_chars': 0,
                 'max_chars': 4000,
-                'use_range': True
+                'use_range': True,
+                'length_mode': 'range'
             }
 
     def update_character_limit_settings(self, task_id: int, **kwargs) -> bool:
@@ -3950,15 +3954,15 @@ class Database:
                     # Create default settings if not exists
                     cursor.execute('''
                         INSERT INTO task_character_limit_settings 
-                        (task_id, enabled, mode, min_chars, max_chars, use_range)
-                        VALUES (?, FALSE, 'allow', 0, 4000, TRUE)
+                        (task_id, enabled, mode, min_chars, max_chars, use_range, length_mode)
+                        VALUES (?, FALSE, 'allow', 0, 4000, TRUE, 'range')
                     ''', (task_id,))
                 
                 updates = []
                 params = []
                 
                 for key, value in kwargs.items():
-                    if key in ['enabled', 'mode', 'min_chars', 'max_chars', 'use_range']:
+                    if key in ['enabled', 'mode', 'min_chars', 'max_chars', 'use_range', 'length_mode']:
                         updates.append(f"{key} = ?")
                         params.append(value)
                 
@@ -4453,6 +4457,23 @@ class Database:
             logger.error(f"خطأ في تدوير وضع حد الأحرف: {e}")
             return 'allow'
 
+    def cycle_length_mode(self, task_id: int) -> str:
+        """Cycle length_mode between max -> min -> range"""
+        try:
+            settings = self.get_character_limit_settings(task_id)
+            current = settings.get('length_mode', 'range')
+            if current == 'max':
+                new_mode = 'min'
+            elif current == 'min':
+                new_mode = 'range'
+            else:
+                new_mode = 'max'
+            self.update_character_limit_settings(task_id, length_mode=new_mode)
+            return new_mode
+        except Exception as e:
+            logger.error(f"خطأ في تدوير نوع الحد: {e}")
+            return 'range'
+
     def update_character_limit_values(self, task_id: int, min_chars: int = None, max_chars: int = None) -> bool:
         """Update character limit min/max values"""
         try:
@@ -4494,8 +4515,8 @@ class Database:
                     new_enabled = True
                     cursor.execute('''
                         INSERT INTO task_character_limit_settings 
-                        (task_id, enabled, mode, min_chars, max_chars, use_range)
-                        VALUES (?, ?, 'allow', 0, 4000, TRUE)
+                        (task_id, enabled, mode, min_chars, max_chars, use_range, length_mode)
+                        VALUES (?, ?, 'allow', 0, 4000, TRUE, 'range')
                     ''', (task_id, new_enabled))
                 
                 conn.commit()
@@ -4527,8 +4548,8 @@ class Database:
                     # Create default if not exists
                     cursor.execute('''
                         INSERT INTO task_character_limit_settings 
-                        (task_id, enabled, mode, min_chars, max_chars)
-                        VALUES (?, 1, 'allow', 10, 1000)
+                        (task_id, enabled, mode, min_chars, max_chars, use_range, length_mode)
+                        VALUES (?, 1, 'allow', 10, 1000, TRUE, 'range')
                     ''', (task_id,))
                     conn.commit()
                     return 'allow'
@@ -4841,12 +4862,16 @@ class Database:
                 if 'use_range' not in columns:
                     cursor.execute('ALTER TABLE task_character_limit_settings ADD COLUMN use_range BOOLEAN DEFAULT TRUE')
                     logger.info("✅ تم إضافة عمود use_range إلى جدول task_character_limit_settings")
+
+                if 'length_mode' not in columns:
+                    cursor.execute('ALTER TABLE task_character_limit_settings ADD COLUMN length_mode TEXT DEFAULT "range" CHECK (length_mode IN ("max", "min", "range"))')
+                    logger.info("✅ تم إضافة عمود length_mode إلى جدول task_character_limit_settings")
                 
                 # Update existing records to use new structure
                 cursor.execute('''
                     UPDATE task_character_limit_settings 
-                    SET mode = 'allow', use_range = TRUE 
-                    WHERE mode IS NULL OR use_range IS NULL
+                    SET mode = 'allow', use_range = TRUE, length_mode = COALESCE(length_mode, 'range') 
+                    WHERE mode IS NULL OR use_range IS NULL OR length_mode IS NULL
                 ''')
                 
                 conn.commit()
