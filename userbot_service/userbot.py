@@ -3361,47 +3361,41 @@ class UserbotService:
             max_chars = settings.get('max_chars', 4000)
             mode = settings.get('mode', 'allow')
             use_range = settings.get('use_range', True)
+            length_mode = settings.get('length_mode', 'range')
 
             logger.info(f"📏 فحص حد الأحرف للمهمة {task_id}: النص='{message_text[:50]}...' ({message_length} حرف), حد أدنى={min_chars}, حد أقصى={max_chars}, وضع={mode}")
 
-            # Character limit checking logic based on mode
-            if mode == 'allow':
-                # Allow mode: Allow messages that meet the criteria
-                if use_range and min_chars > 0 and max_chars > 0:
-                    # Range check: min_chars <= length <= max_chars
-                    if min_chars <= message_length <= max_chars:
-                        logger.info(f"✅ السماح - النطاق: الرسالة مقبولة ({min_chars} <= {message_length} <= {max_chars} حرف)")
-                        return True
-                    else:
-                        logger.info(f"🚫 السماح - النطاق: الرسالة مرفوضة ({message_length} خارج النطاق {min_chars}-{max_chars} حرف)")
-                        return False
-                else:
-                    # Max limit only: length <= max_chars
-                    if message_length <= max_chars:
-                        logger.info(f"✅ السماح - الحد الأقصى: الرسالة مقبولة ({message_length} <= {max_chars} حرف)")
-                        return True
-                    else:
-                        logger.info(f"🚫 السماح - الحد الأقصى: الرسالة مرفوضة ({message_length} > {max_chars} حرف)")
-                        return False
+            # Determine pass/fail based on length_mode
+            passes_length = True
+            if length_mode == 'range':
+                if use_range and (min_chars > 0 or max_chars > 0):
+                    if min_chars > 0 and max_chars > 0:
+                        passes_length = (min_chars <= message_length <= max_chars)
+                    elif max_chars > 0:
+                        passes_length = (message_length <= max_chars)
+                    elif min_chars > 0:
+                        passes_length = (message_length >= min_chars)
+            elif length_mode == 'max':
+                if max_chars > 0:
+                    passes_length = (message_length <= max_chars)
+            elif length_mode == 'min':
+                if min_chars > 0:
+                    passes_length = (message_length >= min_chars)
 
-            elif mode == 'block':
-                # Block mode: Block messages that don't meet the criteria
-                if use_range and min_chars > 0 and max_chars > 0:
-                    # Range check: block if outside min_chars <= length <= max_chars
-                    if min_chars <= message_length <= max_chars:
-                        logger.info(f"✅ الحظر - النطاق: الرسالة مقبولة ({min_chars} <= {message_length} <= {max_chars} حرف)")
-                        return True
-                    else:
-                        logger.info(f"🚫 الحظر - النطاق: الرسالة مرفوضة ({message_length} خارج النطاق {min_chars}-{max_chars} حرف)")
-                        return False
+            if mode == 'allow':
+                if passes_length:
+                    logger.info("✅ السماح: الرسالة مستوفية لشروط الطول")
+                    return True
                 else:
-                    # Max limit only: block if length > max_chars
-                    if message_length <= max_chars:
-                        logger.info(f"✅ الحظر - الحد الأقصى: الرسالة مقبولة ({message_length} <= {max_chars} حرف)")
-                        return True
-                    else:
-                        logger.info(f"🚫 الحظر - الحد الأقصى: الرسالة مرفوضة ({message_length} > {max_chars} حرف)")
-                        return False
+                    logger.info("🚫 السماح: الرسالة لا تستوفي شروط الطول")
+                    return False
+            elif mode == 'block':
+                if passes_length:
+                    logger.info("✅ الحظر: الرسالة مستوفية لشروط الطول")
+                    return True
+                else:
+                    logger.info("🚫 الحظر: الرسالة لا تستوفي شروط الطول")
+                    return False
             
             else:
                 logger.warning(f"⚠️ وضع فلتر غير معروف '{mode}' - السماح بالتوجيه")

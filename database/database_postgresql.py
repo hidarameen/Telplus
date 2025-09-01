@@ -502,9 +502,10 @@ class PostgreSQLDatabase:
                     task_id INTEGER NOT NULL,
                     enabled BOOLEAN DEFAULT FALSE,
                     mode TEXT DEFAULT 'block',
-                    min_length INTEGER DEFAULT 0,
-                    max_length INTEGER DEFAULT 4096,
-                    use_range BOOLEAN DEFAULT FALSE,
+                    length_mode TEXT DEFAULT 'range',
+                    min_chars INTEGER DEFAULT 0,
+                    max_chars INTEGER DEFAULT 4096,
+                    use_range BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
@@ -993,13 +994,122 @@ END$$;
             with self.get_connection() as conn:
                 cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cursor.execute('''
-                    SELECT * FROM task_character_limit_settings WHERE task_id = %s
+                    SELECT enabled, mode, length_mode, min_chars, max_chars, use_range
+                    FROM task_character_limit_settings WHERE task_id = %s
                 ''', (task_id,))
                 result = cursor.fetchone()
-                return dict(result) if result else None
+                if result:
+                    return dict(result)
+                else:
+                    # Create defaults if missing
+                    cursor.execute('''
+                        INSERT INTO task_character_limit_settings (task_id, enabled, mode, length_mode, min_chars, max_chars, use_range)
+                        VALUES (%s, FALSE, 'allow', 'range', 0, 4000, TRUE)
+                        RETURNING enabled, mode, length_mode, min_chars, max_chars, use_range
+                    ''', (task_id,))
+                    result = cursor.fetchone()
+                    conn.commit()
+                    return dict(result) if result else None
         except Exception as e:
             logger.error(f"Error getting character limit settings: {e}")
             return None
+
+    def update_character_limit_settings(self, task_id: int, **kwargs) -> bool:
+        """Update character limit settings for PostgreSQL"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Ensure row exists
+                cursor.execute('''
+                    INSERT INTO task_character_limit_settings (task_id)
+                    VALUES (%s)
+                    ON CONFLICT (task_id) DO NOTHING
+                ''', (task_id,))
+                if not kwargs:
+                    return False
+                updates = []
+                params = []
+                for key, value in kwargs.items():
+                    if key in ['enabled', 'mode', 'min_chars', 'max_chars', 'use_range', 'length_mode']:
+                        updates.append(f"{key} = %s")
+                        params.append(value)
+                if not updates:
+                    return False
+                params.append(task_id)
+                cursor.execute(f'''
+                    UPDATE task_character_limit_settings
+                    SET {', '.join(updates)}
+                    WHERE task_id = %s
+                ''', params)
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating character limit settings: {e}")
+            return False
+
+    def toggle_character_limit(self, task_id: int) -> bool:
+        """Toggle character limit enabled flag for PostgreSQL"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_character_limit_settings (task_id, enabled)
+                    VALUES (%s, TRUE)
+                    ON CONFLICT (task_id) DO UPDATE SET enabled = NOT task_character_limit_settings.enabled
+                    RETURNING enabled
+                ''', (task_id,))
+                result = cursor.fetchone()
+                conn.commit()
+                return result[0] if result else False
+        except Exception as e:
+            logger.error(f"Error toggling character limit: {e}")
+            return False
+
+    def cycle_character_limit_mode(self, task_id: int) -> str:
+        """Cycle allow/block mode for PostgreSQL"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_character_limit_settings (task_id, mode)
+                    VALUES (%s, 'allow')
+                    ON CONFLICT (task_id) DO NOTHING
+                ''', (task_id,))
+                cursor.execute('SELECT mode FROM task_character_limit_settings WHERE task_id = %s', (task_id,))
+                current = cursor.fetchone()
+                new_mode = 'block' if current and current[0] == 'allow' else 'allow'
+                cursor.execute('UPDATE task_character_limit_settings SET mode = %s WHERE task_id = %s', (new_mode, task_id))
+                conn.commit()
+                return new_mode
+        except Exception as e:
+            logger.error(f"Error cycling character limit mode: {e}")
+            return 'allow'
+
+    def cycle_length_mode(self, task_id: int) -> str:
+        """Cycle length_mode for PostgreSQL: max -> min -> range"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_character_limit_settings (task_id, length_mode)
+                    VALUES (%s, 'range')
+                    ON CONFLICT (task_id) DO NOTHING
+                ''', (task_id,))
+                cursor.execute('SELECT length_mode FROM task_character_limit_settings WHERE task_id = %s', (task_id,))
+                current = cursor.fetchone()
+                current_mode = current[0] if current else 'range'
+                if current_mode == 'max':
+                    new_mode = 'min'
+                elif current_mode == 'min':
+                    new_mode = 'range'
+                else:
+                    new_mode = 'max'
+                cursor.execute('UPDATE task_character_limit_settings SET length_mode = %s WHERE task_id = %s', (new_mode, task_id))
+                conn.commit()
+                return new_mode
+        except Exception as e:
+            logger.error(f"Error cycling length mode: {e}")
+            return 'range'
 
     # Rate limit methods
     def get_rate_limit_settings(self, task_id: int) -> Optional[Dict]:

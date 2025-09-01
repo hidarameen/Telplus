@@ -198,6 +198,32 @@ class MessageHandler:
                 await self._handle_char_min_edit(event, task_id, message_text)
             elif state == 'editing_char_max':
                 await self._handle_char_max_edit(event, task_id, message_text)
+            elif state == 'editing_char_range':
+                # إدخال بالشكل "50-1000"
+                try:
+                    parts = message_text.replace('—', '-').split('-')
+                    if len(parts) == 2:
+                        min_chars = int(parts[0].strip())
+                        max_chars = int(parts[1].strip())
+                        if 1 <= min_chars <= 10000 and 1 <= max_chars <= 10000 and min_chars <= max_chars:
+                            success = self.bot.db.update_character_limit_settings(
+                                task_id,
+                                min_chars=min_chars,
+                                max_chars=max_chars,
+                                use_range=True,
+                                length_mode='range'
+                            )
+                            if success:
+                                await self.bot.edit_or_send_message(event, f"✅ تم تحديث النطاق إلى من {min_chars} إلى {max_chars} حرف")
+                                await self.bot._refresh_userbot_tasks(event.sender_id)
+                            else:
+                                await self.bot.edit_or_send_message(event, "❌ فشل في تحديث النطاق")
+                        else:
+                            await self.bot.edit_or_send_message(event, "❌ يرجى إدخال نطاق صحيح بين 1 و 10000 وبصيغة '50-1000'")
+                    else:
+                        await self.bot.edit_or_send_message(event, "❌ يرجى إدخال النطاق بصيغة '50-1000'")
+                except Exception:
+                    await self.bot.edit_or_send_message(event, "❌ يرجى إدخال النطاق بصيغة صحيحة مثل '50-1000'")
                 
         except Exception as e:
             logger.error(f"خطأ في تعديل حدود الأحرف: {e}")
