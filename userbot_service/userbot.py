@@ -3359,11 +3359,11 @@ class UserbotService:
             message_length = len(message_text)
             min_chars = settings.get('min_chars', 0)
             max_chars = settings.get('max_chars', 4000)
-            mode = settings.get('mode', 'allow')
+            # Force allow-only semantics regardless of stored mode
             use_range = settings.get('use_range', True)
             length_mode = settings.get('length_mode', 'range')
 
-            logger.info(f"📏 فحص حد الأحرف للمهمة {task_id}: النص='{message_text[:50]}...' ({message_length} حرف), حد أدنى={min_chars}, حد أقصى={max_chars}, وضع={mode}")
+            logger.info(f"📏 فحص حد الأحرف للمهمة {task_id}: النص='{message_text[:50]}...' ({message_length} حرف), حد أدنى={min_chars}, حد أقصى={max_chars}, وضع الطول={length_mode}")
 
             # Determine pass/fail based on length_mode
             passes_length = True
@@ -3382,24 +3382,15 @@ class UserbotService:
                 if min_chars > 0:
                     passes_length = (message_length >= min_chars)
 
-            if mode == 'allow':
-                if passes_length:
-                    logger.info("✅ السماح: الرسالة مستوفية لشروط الطول")
-                    return True
-                else:
-                    logger.info("🚫 السماح: الرسالة لا تستوفي شروط الطول")
-                    return False
-            elif mode == 'block':
-                if passes_length:
-                    logger.info("✅ الحظر: الرسالة مستوفية لشروط الطول")
-                    return True
-                else:
-                    logger.info("🚫 الحظر: الرسالة لا تستوفي شروط الطول")
-                    return False
-            
-            else:
-                logger.warning(f"⚠️ وضع فلتر غير معروف '{mode}' - السماح بالتوجيه")
+            # Allow-only behavior
+            if passes_length:
+                logger.info("✅ السماح: الرسالة مستوفية لشروط الطول")
                 return True
+            else:
+                logger.info("🚫 السماح: الرسالة لا تستوفي شروط الطول")
+                return False
+            
+            
 
         except Exception as e:
             logger.error(f"خطأ في فحص حدود الأحرف: {e}")
