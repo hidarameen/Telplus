@@ -679,7 +679,8 @@ class SimpleTelegramBot:
             elif data == "list_channels":
                 await self.list_channels(event)
             elif data == "add_multiple_channels":
-                await self.start_add_multiple_channels(event)
+                # Redirect to single add flow which now supports multi-line input
+                await self.start_add_channel(event)
             elif data == "finish_add_channels":
                 await self.finish_add_channels(event)
             elif data == "create_task":
@@ -3523,38 +3524,73 @@ class SimpleTelegramBot:
             # Handle channels management states (single/multiple add)
             elif state == 'waiting_channel_link':
                 try:
-                    # Process a single channel link/id/user name
-                    added = await self.channels_management.process_channel_link(event, message_text.strip())
+                    # Accept multiple channels in one message (each line is a channel)
+                    lines = [ln.strip() for ln in message_text.splitlines() if ln.strip()]
+                    if not lines:
+                        await self.edit_or_send_message(event, "❌ يرجى إرسال رابط/معرف/رقم قناة واحد على الأقل")
+                        return
+
+                    added_list = []
+                    error_count = 0
+                    for ln in lines:
+                        try:
+                            added = await self.channels_management.process_channel_link(event, ln, silent=True)
+                            if added:
+                                added_list.append(added)
+                            else:
+                                error_count += 1
+                        except Exception:
+                            error_count += 1
+
                     # Clear state regardless to avoid being stuck
                     self.db.clear_conversation_state(user_id)
-                    if added:
-                        # Show updated channels list
-                        await self.list_channels(event)
+
+                    # Summary message
+                    if added_list:
+                        preview = "\n".join(
+                            [f"• {item.get('chat_name') or item.get('chat_id')}" for item in added_list[:5]]
+                        )
+                        more = f"\n... و {len(added_list)-5} قناة أخرى" if len(added_list) > 5 else ""
+                        summary = (
+                            f"✅ تم إضافة {len(added_list)} قناة" + (f"، وفشل {error_count}" if error_count else "") + "\n\n" + preview + more
+                        )
+                        await self.edit_or_send_message(event, summary)
+                    else:
+                        await self.edit_or_send_message(event, "❌ لم يتم إضافة أي قناة. تأكد من صحة المدخلات أو عضويتك في القنوات")
+
+                    # Show updated channels list
+                    await self.list_channels(event)
                     return
                 except Exception as e:
-                    logger.error(f"خطأ في معالجة رابط القناة للمستخدم {user_id}: {e}")
-                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء إضافة القناة. حاول مرة أخرى.")
+                    logger.error(f"خطأ في معالجة روابط القنوات للمستخدم {user_id}: {e}")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء إضافة القنوات. حاول مرة أخرى.")
                     self.db.clear_conversation_state(user_id)
                     return
             elif state == 'waiting_multiple_channels':
+                # Backward-compat fallback: treat same as waiting_channel_link (multi-line supported)
                 try:
-                    added = await self.channels_management.process_channel_link(event, message_text.strip())
-                    # Reload current state data from DB to ensure consistency
-                    refreshed = self.db.get_conversation_state(user_id)
-                    try:
-                        refreshed_data = json.loads(refreshed[1]) if refreshed and refreshed[1] else {}
-                    except Exception:
-                        refreshed_data = {}
-                    if added:
-                        channels_list = refreshed_data.get('channels', [])
-                        channels_list.append(added)
-                        refreshed_data['channels'] = channels_list
-                        self.db.set_conversation_state(user_id, 'waiting_multiple_channels', json.dumps(refreshed_data))
-                        await event.answer("✅ تم إضافة القناة. أرسل رابطاً آخر أو اضغط 'إنهاء الإضافة'.")
+                    lines = [ln.strip() for ln in message_text.splitlines() if ln.strip()]
+                    added_list = []
+                    error_count = 0
+                    for ln in lines:
+                        try:
+                            added = await self.channels_management.process_channel_link(event, ln, silent=True)
+                            if added:
+                                added_list.append(added)
+                            else:
+                                error_count += 1
+                        except Exception:
+                            error_count += 1
+                    self.db.clear_conversation_state(user_id)
+                    if added_list:
+                        await self.edit_or_send_message(event, f"✅ تم إضافة {len(added_list)} قناة")
+                        await self.list_channels(event)
+                    else:
+                        await self.edit_or_send_message(event, "❌ لم يتم إضافة أي قناة")
                     return
-                except Exception as e:
-                    logger.error(f"خطأ في إضافة قنوات متعددة للمستخدم {user_id}: {e}")
-                    await event.answer("❌ حدث خطأ أثناء إضافة القناة.")
+                except Exception:
+                    self.db.clear_conversation_state(user_id)
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء إضافة القنوات")
                     return
             elif state == 'adding_multiple_words': # Handle adding multiple words state
                 await self.handle_adding_multiple_words(event, state_data)

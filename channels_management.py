@@ -49,7 +49,6 @@ class ChannelsManagement:
 		buttons = [
 			[Button.inline("➕ إضافة قناة", b"add_channel")],
 			[Button.inline("📋 قائمة القنوات", b"list_channels")],
-			[Button.inline("📤 إضافة عدة قنوات", b"add_multiple_channels")],
 			[Button.inline("🔙 رجوع لإدارة المهام", b"manage_tasks")]
 		]
 
@@ -60,7 +59,7 @@ class ChannelsManagement:
 			f"• قنوات مشرف: {admin_channels}\n"
 			f"• قنوات عضو: {member_channels}\n\n"
 			f"💡 الميزات:\n"
-			f"• إضافة قناة واحدة أو عدة قنوات دفعة واحدة\n"
+			f"• إضافة قناة واحدة أو عدة قنوات دفعة واحدة عبر إدخال متعدد الأسطر\n"
 			f"• عرض قائمة القنوات مع الصلاحيات\n"
 			f"• استخدام القنوات كمصادر أو أهداف في المهام\n"
 			f"• عرض أسماء القنوات بدلاً من الأرقام\n\n"
@@ -88,10 +87,12 @@ class ChannelsManagement:
 
 		message_text = (
 			"➕ إضافة قناة جديدة\n\n"
-			"📋 **أرسل إحدى الصيغ التالية أو قم بتوجيه رسالة من القناة:**\n\n"
+			"📋 أرسل إحدى الصيغ التالية أو قم بتوجيه رسالة من القناة:\n\n"
 			"• رابط: https://t.me/channel_name\n"
 			"• معرف: @channel_name\n"
 			"• رقم: -1001234567890\n\n"
+			"✳️ يمكنك أيضاً إرسال عدة قنوات في رسالة واحدة، كل قناة في سطر منفصل.\n"
+			"سيتم إضافة جميع القنوات دفعة واحدة دون الحاجة لزر منفصل.\n\n"
 			"💡 يمكنك أيضًا توجيه أي رسالة منشورة من القناة وسنستخرج القناة تلقائيًا"
 		)
 		
@@ -367,7 +368,7 @@ class ChannelsManagement:
 			logger.error(f"❌ خطأ في إنهاء إضافة القنوات: {e}")
 			await self._notify(event, "❌ حدث خطأ في إنهاء إضافة القنوات")
 
-	async def process_channel_link(self, event, channel_link):
+	async def process_channel_link(self, event, channel_link, silent: bool = False):
 		"""Process channel link and add to database"""
 		user_id = event.sender_id
 		
@@ -417,7 +418,8 @@ class ChannelsManagement:
 									pass
 						except Exception:
 							pass
-						await self._notify(event, f"✅ تم إضافة القناة بالمعرف: {channel_id}")
+						if not silent:
+							await self._notify(event, f"✅ تم إضافة القناة بالمعرف: {channel_id}")
 						return {
 							'chat_id': channel_id,
 							'chat_name': channel_name,
@@ -425,17 +427,20 @@ class ChannelsManagement:
 							'is_admin': is_admin
 						}
 					else:
-						await self._notify(event, "❌ فشل في إضافة القناة")
+						if not silent:
+							await self._notify(event, "❌ فشل في إضافة القناة")
 						return False
 				except Exception as e:
 					logger.error(f"❌ خطأ في معالجة معرف القناة: {e}")
-					await self._notify(event, "❌ حدث خطأ في معالجة معرف القناة")
+					if not silent:
+						await self._notify(event, "❌ حدث خطأ في معالجة معرف القناة")
 					return False
 
 			# 2) Resolve link/username using UserBot
 			from userbot_service.userbot import userbot_instance
 			if user_id not in userbot_instance.clients:
-				await self._notify(event, "❌ UserBot غير متصل. يرجى إعادة تسجيل الدخول")
+				if not silent:
+					await self._notify(event, "❌ UserBot غير متصل. يرجى إعادة تسجيل الدخول")
 				return False
 
 			client = userbot_instance.clients[user_id]
@@ -473,14 +478,16 @@ class ChannelsManagement:
 					pass
 			except Exception as e:
 				logger.error(f"❌ خطأ في الحصول على معلومات القناة: {e}")
-				await self._notify(event, "❌ لا يمكن الوصول للقناة. تأكد من صحة الرابط وأنك عضو فيها")
+				if not silent:
+					await self._notify(event, "❌ لا يمكن الوصول للقناة. تأكد من صحة الرابط وأنك عضو فيها")
 				return False
 
 			# Add channel to database
 			success = self.channels_db.add_channel(user_id, channel_id, channel_name, username, is_admin)
 			if success:
 				status_text = "مشرف" if is_admin else "عضو"
-				await self._notify(event, f"✅ تم إضافة القناة: {channel_name} ({status_text})")
+				if not silent:
+					await self._notify(event, f"✅ تم إضافة القناة: {channel_name} ({status_text})")
 				return {
 					'chat_id': channel_id,
 					'chat_name': channel_name,
@@ -488,12 +495,14 @@ class ChannelsManagement:
 					'is_admin': is_admin
 				}
 			else:
-				await self._notify(event, "❌ فشل في إضافة القناة. قد تكون مضافة مسبقاً")
+				if not silent:
+					await self._notify(event, "❌ فشل في إضافة القناة. قد تكون مضافة مسبقاً")
 				return False
 				
 		except Exception as e:
 			logger.error(f"❌ خطأ في معالجة رابط القناة: {e}")
-			await self._notify(event, "❌ حدث خطأ في معالجة رابط القناة")
+			if not silent:
+				await self._notify(event, "❌ حدث خطأ في معالجة رابط القناة")
 			return False
 
 	async def show_channel_selection(self, event, task_id, selection_type):
