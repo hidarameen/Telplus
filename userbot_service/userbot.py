@@ -3642,10 +3642,20 @@ class UserbotService:
             logger.info(f"⏰ [DEBUG]   الساعات المُحددة: {sorted(enabled_hours) if enabled_hours else 'لا توجد'}")
             logger.info(f"⏰ [DEBUG]   الجدول: {schedule}")
             
-            # If no hours are configured, don't block
+            # Handle empty enabled hours based on mode
+            has_schedule_entries = bool(schedule)
             if not enabled_hours:
-                logger.info(f"⏰ لا توجد ساعات محددة في فلتر ساعات العمل للمهمة {task_id} - لن يتم حظر الرسائل")
-                return False
+                if mode == 'work_hours':
+                    # In work hours mode: no enabled hours (all 🔴) means block all forwarding
+                    if has_schedule_entries:
+                        logger.info(f"⏰ وضع ساعات العمل: لا توجد ساعات مفعلة (كلها 🔴) - سيتم حظر جميع الرسائل")
+                    else:
+                        logger.info(f"⏰ وضع ساعات العمل: لم يتم ضبط الجدول - سيتم حظر جميع الرسائل كافتراض آمن")
+                    return True
+                else:
+                    # In sleep hours mode: empty selection means no sleep hours -> don't block
+                    logger.info(f"⏰ وضع ساعات النوم: لا توجد ساعات نوم محددة - لن يتم حظر الرسائل")
+                    return False
             
             # Get current time with timezone offset (Riyadh = UTC+3)
             now = datetime.datetime.now() + datetime.timedelta(hours=timezone_offset)
