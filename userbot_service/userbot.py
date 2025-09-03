@@ -1046,6 +1046,17 @@ class UserbotService:
                                 translated_text != formatted_text  # Text formatting applied
                             )
 
+                        # Preserve reply: force copy if original message is a reply and preserve is enabled
+                        try:
+                            forwarding_settings_local = self.get_forwarding_settings(task['id'])
+                            preserve_reply_enabled = forwarding_settings_local.get('preserve_reply_enabled', True)
+                        except Exception:
+                            preserve_reply_enabled = True
+
+                        is_reply = hasattr(event.message, 'reply_to') and event.message.reply_to and getattr(event.message.reply_to, 'reply_to_msg_id', None)
+                        if preserve_reply_enabled and is_reply:
+                            requires_copy_mode = True
+
                         # Log changes if text was modified
                         if original_text != final_text and original_text:
                             logger.info(f"🔄 تم تطبيق تنسيق الرسالة: '{original_text}' → '{final_text}'")
@@ -1106,6 +1117,23 @@ class UserbotService:
                         forwarded_msg = None
                         spoiler_entities = []  # ضمان التهيئة لتفادي UnboundLocalError
                         processed_text = (final_text or (event.message.text if hasattr(event.message, 'text') else None) or "رسالة")
+
+                        # تحضير reply_to في الهدف عند الحاجة
+                        reply_to_msg_id = None
+                        try:
+                            if forwarding_settings.get('preserve_reply_enabled', True):
+                                # If the source message is a reply, map its replied-to source message to the target
+                                if hasattr(event.message, 'reply_to') and event.message.reply_to and getattr(event.message.reply_to, 'reply_to_msg_id', None):
+                                    replied_source_id = event.message.reply_to.reply_to_msg_id
+                                    # Look up mapping for the replied message in this task/source chat
+                                    mappings = self.db.get_message_mappings_by_source(task['id'], str(source_chat_id), replied_source_id)
+                                    if not mappings and str(source_chat_id).startswith('-100'):
+                                        legacy_chat_id = str(source_chat_id).replace('-100', '')
+                                        mappings = self.db.get_message_mappings_by_source(task['id'], legacy_chat_id, replied_source_id)
+                                    if mappings:
+                                        reply_to_msg_id = mappings[0]['target_message_id']
+                        except Exception as map_err:
+                            logger.debug(f"تعذر تعيين reply_to للهدف: {map_err}")
 
                         # إرسال الرسالة بالوضع المحدد
                         if final_send_mode == 'forward':
@@ -1192,6 +1220,16 @@ class UserbotService:
                                         await self.apply_post_forwarding_settings(
                                             client, target_entity, msg_id, forwarding_settings, task['id']
                                         )
+                                        try:
+                                            self.db.save_message_mapping(
+                                                task_id=task['id'],
+                                                source_chat_id=str(source_chat_id),
+                                                source_message_id=event.message.id,
+                                                target_chat_id=str(target_chat_id),
+                                                target_message_id=msg_id
+                                            )
+                                        except Exception as mapping_error:
+                                            logger.debug(f"فشل حفظ التطابق (copy text server): {mapping_error}")
                                 else:
                                     # Pure text copy
                                     message_text = event.message.text or final_text or "رسالة"
@@ -1200,7 +1238,8 @@ class UserbotService:
                                         message_text,
                                         link_preview=forwarding_settings['link_preview_enabled'],
                                         silent=forwarding_settings['silent_notifications'],
-                                        buttons=original_reply_markup
+                                        buttons=original_reply_markup,
+                                        reply_to=reply_to_msg_id if reply_to_msg_id else None
                                     )
                                     
                                     # Apply post-forwarding settings (pin, auto-delete)
@@ -1209,6 +1248,16 @@ class UserbotService:
                                         await self.apply_post_forwarding_settings(
                                             client, target_entity, msg_id, forwarding_settings, task['id']
                                         )
+                                        try:
+                                            self.db.save_message_mapping(
+                                                task_id=task['id'],
+                                                source_chat_id=str(source_chat_id),
+                                                source_message_id=event.message.id,
+                                                target_chat_id=str(target_chat_id),
+                                                target_message_id=msg_id
+                                            )
+                                        except Exception as mapping_error:
+                                            logger.debug(f"فشل حفظ التطابق (copy webpage): {mapping_error}")
                             else:
                                 # Copy mode: send as new message with all formatting applied
                                 if requires_copy_mode:
@@ -1238,6 +1287,16 @@ class UserbotService:
                                                 inline_buttons=inline_buttons,
                                                 has_original_buttons=bool(original_reply_markup)
                                             )
+                                            try:
+                                                self.db.save_message_mapping(
+                                                    task_id=task['id'],
+                                                    source_chat_id=str(source_chat_id),
+                                                    source_message_id=event.message.id,
+                                                    target_chat_id=str(target_chat_id),
+                                                    target_message_id=msg_id
+                                                )
+                                            except Exception as mapping_error:
+                                                logger.debug(f"فشل حفظ التطابق (processed audio): {mapping_error}")
                                     except Exception as direct_audio_err:
                                         logger.error(f"❌ فشل الرفع المباشر للملف الصوتي المعالج: {direct_audio_err}")
 
@@ -1257,6 +1316,7 @@ class UserbotService:
                                             silent=forwarding_settings["silent_notifications"],
                                             parse_mode="HTML",
                                             buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                            reply_to=reply_to_msg_id if reply_to_msg_id else None
                                         )
                                         
                                         # Apply post-forwarding settings (pin, auto-delete, inline buttons)
@@ -1318,6 +1378,16 @@ class UserbotService:
                                                     inline_buttons=inline_buttons,
                                                     has_original_buttons=bool(original_reply_markup)
                                                 )
+                                                try:
+                                                    self.db.save_message_mapping(
+                                                        task_id=task['id'],
+                                                        source_chat_id=str(source_chat_id),
+                                                        source_message_id=event.message.id,
+                                                        target_chat_id=str(target_chat_id),
+                                                        target_message_id=msg_id
+                                                    )
+                                                except Exception as mapping_error:
+                                                    logger.debug(f"فشل حفظ التطابق (send_file media): {mapping_error}")
                                 else:
                                     # Regular media message with caption handling
                                     # Check if caption should be removed
@@ -1359,6 +1429,16 @@ class UserbotService:
                                                     inline_buttons=inline_buttons,
                                                     has_original_buttons=bool(original_reply_markup)
                                                 )
+                                                try:
+                                                    self.db.save_message_mapping(
+                                                        task_id=task['id'],
+                                                        source_chat_id=str(source_chat_id),
+                                                        source_message_id=event.message.id,
+                                                        target_chat_id=str(target_chat_id),
+                                                        target_message_id=msg_id
+                                                    )
+                                                except Exception as mapping_error:
+                                                    logger.debug(f"فشل حفظ التطابق (album split processed): {mapping_error}")
                                         else:
                                             # Use original media if no processing was done
                                             if event.message.media:
@@ -1380,7 +1460,8 @@ class UserbotService:
                                                     link_preview=forwarding_settings['link_preview_enabled'],
                                                     silent=forwarding_settings['silent_notifications'],
                                                     parse_mode='HTML',
-                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
+                                                    buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                                    reply_to=reply_to_msg_id if reply_to_msg_id else None
                                                 )
                                             
                                             # Apply post-forwarding settings (pin, auto-delete, inline buttons)
@@ -1391,6 +1472,16 @@ class UserbotService:
                                                     inline_buttons=inline_buttons,
                                                     has_original_buttons=bool(original_reply_markup)
                                                 )
+                                                try:
+                                                    self.db.save_message_mapping(
+                                                        task_id=task['id'],
+                                                        source_chat_id=str(source_chat_id),
+                                                        source_message_id=event.message.id,
+                                                        target_chat_id=str(target_chat_id),
+                                                        target_message_id=msg_id
+                                                    )
+                                                except Exception as mapping_error:
+                                                    logger.debug(f"فشل حفظ التطابق (album split original media): {mapping_error}")
                                     else:
                                         # Keep album grouped: send as new media (copy mode)
                                         logger.info(f"📸 إبقاء الألبوم مجمع للمهمة {task['id']} (وضع النسخ)")
@@ -1418,6 +1509,16 @@ class UserbotService:
                                                     inline_buttons=inline_buttons,
                                                     has_original_buttons=bool(original_reply_markup)
                                                 )
+                                                try:
+                                                    self.db.save_message_mapping(
+                                                        task_id=task['id'],
+                                                        source_chat_id=str(source_chat_id),
+                                                        source_message_id=event.message.id,
+                                                        target_chat_id=str(target_chat_id),
+                                                        target_message_id=msg_id
+                                                    )
+                                                except Exception as mapping_error:
+                                                    logger.debug(f"فشل حفظ التطابق (album grouped processed): {mapping_error}")
                                         else:
                                             # Use original media if no processing was done
                                             if event.message.media:
@@ -1439,7 +1540,8 @@ class UserbotService:
                                                     link_preview=forwarding_settings['link_preview_enabled'],
                                                     silent=forwarding_settings['silent_notifications'],
                                                     parse_mode='HTML',
-                                                    buttons=original_reply_markup  # Only original buttons via userbot, inline buttons handled separately
+                                                    buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                                    reply_to=reply_to_msg_id if reply_to_msg_id else None
                                                 )
                                             
                                             # Apply post-forwarding settings (pin, auto-delete, inline buttons)
@@ -1450,6 +1552,16 @@ class UserbotService:
                                                     inline_buttons=inline_buttons,
                                                     has_original_buttons=bool(original_reply_markup)
                                                 )
+                                                try:
+                                                    self.db.save_message_mapping(
+                                                        task_id=task['id'],
+                                                        source_chat_id=str(source_chat_id),
+                                                        source_message_id=event.message.id,
+                                                        target_chat_id=str(target_chat_id),
+                                                        target_message_id=msg_id
+                                                    )
+                                                except Exception as mapping_error:
+                                                    logger.debug(f"فشل حفظ التطابق (album grouped original media): {mapping_error}")
                         else:
                             # No media
                             if (event.message.text or final_text):
@@ -1467,6 +1579,7 @@ class UserbotService:
                                         silent=forwarding_settings['silent_notifications'],
                                         formatting_entities=spoiler_entities,
                                         buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                        reply_to=reply_to_msg_id if reply_to_msg_id else None
                                     )
                                     
                                     # Apply post-forwarding settings (pin, auto-delete, inline buttons)
@@ -1477,6 +1590,16 @@ class UserbotService:
                                             inline_buttons=inline_buttons,
                                             has_original_buttons=bool(original_reply_markup)
                                         )
+                                        try:
+                                            self.db.save_message_mapping(
+                                                task_id=task['id'],
+                                                source_chat_id=str(source_chat_id),
+                                                source_message_id=event.message.id,
+                                                target_chat_id=str(target_chat_id),
+                                                target_message_id=msg_id
+                                            )
+                                        except Exception as mapping_error:
+                                            logger.debug(f"فشل حفظ التطابق (spoiler entities): {mapping_error}")
                                 else:
                                     # Send normally with buttons using spoiler support
                                     # Combine original and custom buttons for Telethon
@@ -1500,6 +1623,16 @@ class UserbotService:
                                             inline_buttons=inline_buttons,
                                             has_original_buttons=bool(combined_buttons)
                                         )
+                                        try:
+                                            self.db.save_message_mapping(
+                                                task_id=task['id'],
+                                                source_chat_id=str(source_chat_id),
+                                                source_message_id=event.message.id,
+                                                target_chat_id=str(target_chat_id),
+                                                target_message_id=msg_id
+                                            )
+                                        except Exception as mapping_error:
+                                            logger.debug(f"فشل حفظ التطابق (spoiler support): {mapping_error}")
                             else:
                                 # Fallback to forward for other types
                                 forwarded_msg = await client.forward_messages(
@@ -1711,6 +1844,83 @@ class UserbotService:
 
             except Exception as e:
                 logger.error(f"خطأ في معالج حذف الرسائل للمستخدم {user_id}: {e}")
+
+        @client.on(events.ChatAction)
+        async def chat_action_handler(event):
+            """Handle pin/unpin synchronization from source to targets if enabled"""
+            try:
+                # We only care about pin/unpin events in source chats
+                if not getattr(event, 'is_channel', False) and not getattr(event, 'is_group', False):
+                    return
+                source_chat_id = event.chat_id
+                # Determine if action is pin/unpin
+                action = getattr(event, 'action_message', None) or getattr(event, 'action', None)
+                is_pin = False
+                is_unpin = False
+                replied_msg_id = None
+                try:
+                    from telethon.tl.types import MessageActionPinMessage, MessageActionHistoryClear
+                    if action and getattr(action, 'action', None) and hasattr(action.action, 'to_dict'):
+                        pass
+                except Exception:
+                    pass
+                # Telethon provides helpers on event
+                if hasattr(event, 'new_pin') and event.new_pin:
+                    is_pin = True
+                if hasattr(event, 'unpin') and event.unpin:
+                    is_unpin = True
+                if hasattr(event, 'pinned_message') and event.pinned_message:
+                    replied_msg_id = getattr(event.pinned_message, 'id', None)
+
+                if not (is_pin or is_unpin):
+                    return
+
+                tasks = self.user_tasks.get(user_id, [])
+                matching_tasks = [task for task in tasks if str(task['source_chat_id']) == str(source_chat_id)]
+                if not matching_tasks:
+                    return
+
+                for task in matching_tasks:
+                    task_id = task['id']
+                    forwarding_settings = self.get_forwarding_settings(task_id)
+                    if not forwarding_settings.get('sync_pin_enabled', False):
+                        continue
+
+                    # Map pinned source message to target message id, if available
+                    target_reply_id = None
+                    if replied_msg_id:
+                        mappings = self.db.get_message_mappings_by_source(task_id, str(source_chat_id), replied_msg_id)
+                        if not mappings and str(source_chat_id).startswith('-100'):
+                            legacy_chat_id = str(source_chat_id).replace('-100', '')
+                            mappings = self.db.get_message_mappings_by_source(task_id, legacy_chat_id, replied_msg_id)
+                        if mappings:
+                            target_reply_id = mappings[0]['target_message_id']
+
+                    # For each target, pin/unpin
+                    target_chat_id = str(task['target_chat_id'])
+                    try:
+                        target_entity = await client.get_entity(int(target_chat_id)) if target_chat_id.replace('-', '').isdigit() else await client.get_entity(target_chat_id)
+                        if is_pin:
+                            if target_reply_id:
+                                try:
+                                    await client.pin_message(target_entity, target_reply_id, notify=not forwarding_settings.get('silent_notifications', False))
+                                except Exception:
+                                    # Fallback: pin latest message if specific message not found
+                                    await client.pin_message(target_entity)
+                            else:
+                                await client.pin_message(target_entity)
+                        elif is_unpin:
+                            try:
+                                if target_reply_id:
+                                    await client.unpin_message(target_entity, target_reply_id)
+                                else:
+                                    await client.unpin_message(target_entity)
+                            except Exception as unpin_err:
+                                logger.debug(f"تعذر إلغاء التثبيت: {unpin_err}")
+                    except Exception as pin_sync_err:
+                        logger.debug(f"خطأ في مزامنة التثبيت: {pin_sync_err}")
+            except Exception as e:
+                logger.error(f"خطأ في معالج إجراءات الدردشة (التثبيت): {e}")
 
     async def refresh_user_tasks(self, user_id: int):
         """Refresh user tasks from database"""
@@ -2640,6 +2850,31 @@ class UserbotService:
                 try:
                     await client.pin_message(target_entity, msg_id, notify=not forwarding_settings['silent_notifications'])
                     logger.info(f"📌 تم تثبيت الرسالة {msg_id} في {target_entity}")
+                    # Optionally clear pin notification service message
+                    if forwarding_settings.get('clear_pin_notification', False):
+                        try:
+                            clear_delay = int(forwarding_settings.get('pin_notification_clear_time', 0) or 0)
+                            from telethon.tl.types import MessageService, MessageActionPinMessage
+                            # Fetch recent service messages and delete pin notifications
+                            async def _clear_pin_notifications():
+                                try:
+                                    # Delay if configured
+                                    if clear_delay > 0:
+                                        await asyncio.sleep(clear_delay)
+                                    async for m in client.iter_messages(target_entity, limit=10):
+                                        if isinstance(m, MessageService) and getattr(m, 'action', None) and getattr(m.action, 'message', None) is None:
+                                            # Best-effort: check if it's a pin action
+                                            if m.action and m.action.__class__.__name__ == 'MessageActionPinMessage':
+                                                try:
+                                                    await client.delete_messages(target_entity, m.id)
+                                                    logger.info(f"🧹 تم مسح إشعار التثبيت في {target_entity}")
+                                                except Exception as del_err:
+                                                    logger.debug(f"تعذر مسح إشعار التثبيت: {del_err}")
+                                except Exception as sweep_err:
+                                    logger.debug(f"خطأ أثناء مسح إشعار التثبيت: {sweep_err}")
+                            asyncio.create_task(_clear_pin_notifications())
+                        except Exception as clear_err:
+                            logger.debug(f"خطأ في معالجة مسح إشعار التثبيت: {clear_err}")
                 except Exception as pin_error:
                     logger.error(f"❌ فشل في تثبيت الرسالة {msg_id}: {pin_error}")
 

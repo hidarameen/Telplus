@@ -320,6 +320,11 @@ class Database:
                     sync_delete_enabled BOOLEAN DEFAULT FALSE,
                     split_album_enabled BOOLEAN DEFAULT FALSE,
                     publishing_mode TEXT DEFAULT 'auto' CHECK (publishing_mode IN ('auto', 'manual')),
+                    -- New settings
+                    sync_pin_enabled BOOLEAN DEFAULT FALSE,
+                    clear_pin_notification BOOLEAN DEFAULT FALSE,
+                    pin_notification_clear_time INTEGER DEFAULT 0,
+                    preserve_reply_enabled BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
@@ -340,6 +345,24 @@ class Database:
                     UNIQUE(task_id, source_chat_id, source_message_id, target_chat_id)
                 )
             ''')
+            # Backfill new columns for existing databases (safe-guard)
+            try:
+                cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN sync_pin_enabled BOOLEAN DEFAULT FALSE")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN clear_pin_notification BOOLEAN DEFAULT FALSE")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN pin_notification_clear_time INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_forwarding_settings ADD COLUMN preserve_reply_enabled BOOLEAN DEFAULT TRUE")
+            except sqlite3.OperationalError:
+                pass
+
 
             # Pending messages table - for manual approval workflow
             cursor.execute('''
@@ -2161,7 +2184,11 @@ class Database:
             cursor.execute('''
                 SELECT link_preview_enabled, pin_message_enabled, silent_notifications, 
                        auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled,
-                       split_album_enabled, publishing_mode
+                       split_album_enabled, publishing_mode,
+                       COALESCE(sync_pin_enabled, 0) AS sync_pin_enabled,
+                       COALESCE(clear_pin_notification, 0) AS clear_pin_notification,
+                       COALESCE(pin_notification_clear_time, 0) AS pin_notification_clear_time,
+                       COALESCE(preserve_reply_enabled, 1) AS preserve_reply_enabled
                 FROM task_forwarding_settings 
                 WHERE task_id = ?
             ''', (task_id,))
@@ -2177,7 +2204,11 @@ class Database:
                     'sync_edit_enabled': result['sync_edit_enabled'],
                     'sync_delete_enabled': result['sync_delete_enabled'],
                     'split_album_enabled': result['split_album_enabled'] if 'split_album_enabled' in result.keys() else False,
-                    'publishing_mode': result['publishing_mode'] if 'publishing_mode' in result.keys() else 'auto'
+                    'publishing_mode': result['publishing_mode'] if 'publishing_mode' in result.keys() else 'auto',
+                    'sync_pin_enabled': bool(result['sync_pin_enabled']) if 'sync_pin_enabled' in result.keys() else False,
+                    'clear_pin_notification': bool(result['clear_pin_notification']) if 'clear_pin_notification' in result.keys() else False,
+                    'pin_notification_clear_time': int(result['pin_notification_clear_time']) if 'pin_notification_clear_time' in result.keys() else 0,
+                    'preserve_reply_enabled': bool(result['preserve_reply_enabled']) if 'preserve_reply_enabled' in result.keys() else True
                 }
             else:
                 # Return default settings
@@ -2190,7 +2221,11 @@ class Database:
                     'sync_edit_enabled': False,
                     'sync_delete_enabled': False,
                     'split_album_enabled': False,
-                    'publishing_mode': 'auto'
+                    'publishing_mode': 'auto',
+                    'sync_pin_enabled': False,
+                    'clear_pin_notification': False,
+                    'pin_notification_clear_time': 0,
+                    'preserve_reply_enabled': True
                 }
 
     def update_forwarding_settings(self, task_id: int, **kwargs):
@@ -2208,13 +2243,16 @@ class Database:
                 INSERT OR REPLACE INTO task_forwarding_settings 
                 (task_id, link_preview_enabled, pin_message_enabled, silent_notifications, 
                  auto_delete_enabled, auto_delete_time, sync_edit_enabled, sync_delete_enabled, 
-                 split_album_enabled, publishing_mode, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 split_album_enabled, publishing_mode, sync_pin_enabled, clear_pin_notification,
+                 pin_notification_clear_time, preserve_reply_enabled, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (task_id, current_settings['link_preview_enabled'], 
                   current_settings['pin_message_enabled'], current_settings['silent_notifications'],
                   current_settings['auto_delete_enabled'], current_settings['auto_delete_time'],
                   current_settings['sync_edit_enabled'], current_settings['sync_delete_enabled'],
-                  current_settings['split_album_enabled'], current_settings.get('publishing_mode', 'auto')))
+                  current_settings['split_album_enabled'], current_settings.get('publishing_mode', 'auto'),
+                  current_settings.get('sync_pin_enabled', False), current_settings.get('clear_pin_notification', False),
+                  current_settings.get('pin_notification_clear_time', 0), current_settings.get('preserve_reply_enabled', True)))
 
             conn.commit()
 
@@ -2265,6 +2303,33 @@ class Database:
         current_settings = self.get_forwarding_settings(task_id)
         new_state = not current_settings['split_album_enabled']
         self.update_forwarding_settings(task_id, split_album_enabled=new_state)
+        return new_state
+
+    def toggle_sync_pin(self, task_id: int) -> bool:
+        """Toggle synchronization of pin/unpin events"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings.get('sync_pin_enabled', False)
+        self.update_forwarding_settings(task_id, sync_pin_enabled=new_state)
+        return new_state
+
+    def toggle_clear_pin_notification(self, task_id: int) -> bool:
+        """Toggle clearing of pin notifications after pinning"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings.get('clear_pin_notification', False)
+        self.update_forwarding_settings(task_id, clear_pin_notification=new_state)
+        return new_state
+
+    def set_pin_notification_clear_time(self, task_id: int, seconds: int):
+        """Set delay for clearing pin notification messages"""
+        if seconds < 0:
+            seconds = 0
+        self.update_forwarding_settings(task_id, pin_notification_clear_time=int(seconds))
+
+    def toggle_preserve_reply(self, task_id: int) -> bool:
+        """Toggle preserving reply relationships in forwarded messages"""
+        current_settings = self.get_forwarding_settings(task_id)
+        new_state = not current_settings.get('preserve_reply_enabled', True)
+        self.update_forwarding_settings(task_id, preserve_reply_enabled=new_state)
         return new_state
 
     def toggle_publishing_mode(self, task_id: int) -> str:

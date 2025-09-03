@@ -196,6 +196,8 @@ class SimpleTelegramBot:
 
         # Start notification monitoring task
         asyncio.create_task(self.monitor_notifications())
+        # Start periodic cleanup of expired pending messages
+        asyncio.create_task(self._cleanup_expired_pending_messages_loop())
 
         logger.info("✅ Bot started successfully!")
         return True
@@ -2489,6 +2491,52 @@ class SimpleTelegramBot:
                         await self.toggle_sync_delete(event, task_id)
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل مزامنة الحذف: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_preserve_reply_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_preserve_reply(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل الحفاظ على الرد: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("pin_settings_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        task_id = int(parts[2])
+                        await self.show_pin_settings(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات التثبيت: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_sync_pin_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.toggle_sync_pin(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل مزامنة التثبيت: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_clear_pin_notif_"):
+                parts = data.split("_")
+                if len(parts) >= 5:
+                    try:
+                        task_id = int(parts[4])
+                        await self.toggle_clear_pin_notification(event, task_id)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة لتبديل مسح إشعار التثبيت: {e}")
+                        await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("set_pin_clear_time_"):
+                parts = data.split("_")
+                if len(parts) >= 6:
+                    try:
+                        task_id = int(parts[3])
+                        seconds = int(parts[4]) if parts[4].isdigit() else int(parts[5])
+                        await self.set_pin_clear_time_direct(event, task_id, seconds)
+                    except ValueError as e:
+                        logger.error(f"❌ خطأ في تحليل معرف المهمة/الوقت لمسح إشعار التثبيت: {e}")
                         await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("set_auto_delete_time_"): # Handler for setting auto delete time
                 parts = data.split("_")
@@ -8996,6 +9044,19 @@ class SimpleTelegramBot:
                 
             except Exception as e:
                 logger.error(f"❌ خطأ في مراقبة الإشعارات: {e}")
+
+    async def _cleanup_expired_pending_messages_loop(self):
+        """Periodically mark expired pending messages as expired."""
+        import asyncio
+        logger.info("🧹 بدء مهمة تنظيف الرسائل المعلقة منتهية الصلاحية")
+        while True:
+            try:
+                cleaned = self.db.cleanup_expired_pending_messages()
+                if cleaned:
+                    logger.info(f"🧹 تم وسم {cleaned} رسائل معلقة كمنتهية الصلاحية")
+            except Exception as e:
+                logger.debug(f"خطأ في تنظيف الرسائل المعلقة: {e}")
+            await asyncio.sleep(300)
                 await asyncio.sleep(5)
 
     async def add_inline_buttons_to_message(self, chat_id: int, message_id: int, task_id: int):
@@ -9807,6 +9868,9 @@ class SimpleTelegramBot:
         # Format status icons and time
         link_preview_status = "🟢 مفعل" if settings['link_preview_enabled'] else "🔴 معطل"
         pin_message_status = "🟢 مفعل" if settings['pin_message_enabled'] else "🔴 معطل"
+        sync_pin_status = "🟢 مفعل" if settings.get('sync_pin_enabled', False) else "🔴 معطل"
+        clear_pin_notif_status = "🟢 مسح" if settings.get('clear_pin_notification', False) else "🔴 إبقاء"
+        clear_pin_time = settings.get('pin_notification_clear_time', 0)
         silent_status = "🟢 بصمت" if settings['silent_notifications'] else "🔴 مع إشعار"
         auto_delete_status = "🟢 مفعل" if settings['auto_delete_enabled'] else "🔴 معطل"
         sync_edit_status = "🟢 مفعل" if settings['sync_edit_enabled'] else "🔴 معطل"
@@ -9825,7 +9889,7 @@ class SimpleTelegramBot:
         buttons = [
             # الصف الأول - معاينة الرابط وتثبيت الرسالة
             [Button.inline(f"🔗 معاينة الرابط {link_preview_status.split()[0]}", f"toggle_link_preview_{task_id}"),
-             Button.inline(f"📌 تثبيت الرسالة {pin_message_status.split()[0]}", f"toggle_pin_message_{task_id}")],
+             Button.inline(f"📌 إعدادات التثبيت", f"pin_settings_{task_id}")],
             
             # الصف الثاني - الإشعارات والألبومات
             [Button.inline(f"🔔 الإشعارات {silent_status.split()[0]}", f"toggle_silent_notifications_{task_id}"),
@@ -9835,8 +9899,9 @@ class SimpleTelegramBot:
             [Button.inline(f"🗑️ حذف تلقائي {auto_delete_status.split()[0]}", f"toggle_auto_delete_{task_id}"),
              Button.inline(f"🔄 مزامنة التعديل {sync_edit_status.split()[0]}", f"toggle_sync_edit_{task_id}")],
             
-            # الصف الرابع - مزامنة الحذف
-            [Button.inline(f"🗂️ مزامنة الحذف {sync_delete_status.split()[0]}", f"toggle_sync_delete_{task_id}")],
+            # الصف الرابع - مزامنة الحذف والحفاظ على الرد
+            [Button.inline(f"🗂️ مزامنة الحذف {sync_delete_status.split()[0]}", f"toggle_sync_delete_{task_id}"),
+             Button.inline(f"↩️ الحفاظ على الرد {('🟢' if settings.get('preserve_reply_enabled', True) else '🔴')}", f"toggle_preserve_reply_{task_id}")],
         ]
         
         # إضافة زر تعديل المدة إذا كان الحذف التلقائي مفعل
@@ -9873,6 +9938,9 @@ class SimpleTelegramBot:
             f"   └ تحديث الرسالة في الأهداف عند تعديلها في المصدر\n\n"
             f"🗂️ **مزامنة الحذف**: {sync_delete_status}\n"
             f"   └ حذف الرسالة من الأهداف عند حذفها من المصدر\n\n"
+            f"📌 **إعدادات التثبيت**: {pin_message_status}\n"
+            f"   └ مزامنة التثبيت: {sync_pin_status} | مسح إشعار التثبيت: {clear_pin_notif_status}"
+            + (f" | وقت المسح: {clear_pin_time}ث" if clear_pin_time else "") + "\n\n"
             f"🕐 آخر تحديث: {timestamp}"
         )
         
@@ -9907,6 +9975,86 @@ class SimpleTelegramBot:
         status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
         await event.answer(f"✅ {status_text} تثبيت الرسالة")
         await self.show_forwarding_settings(event, task_id)
+
+    async def toggle_preserve_reply(self, event, task_id):
+        """Toggle preserving reply mapping"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        new_state = self.db.toggle_preserve_reply(task_id)
+        status_text = "تم تفعيل" if new_state else "تم إلغاء تفعيل"
+        await event.answer(f"✅ {status_text} الحفاظ على الرد")
+        await self.show_forwarding_settings(event, task_id)
+
+    async def show_pin_settings(self, event, task_id):
+        """Show pin-related settings submenu"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        settings = self.db.get_forwarding_settings(task_id)
+        pin_message_status = "🟢 مفعل" if settings['pin_message_enabled'] else "🔴 معطل"
+        sync_pin_status = "🟢 مفعل" if settings.get('sync_pin_enabled', False) else "🔴 معطل"
+        clear_pin_status = "🟢 مسح" if settings.get('clear_pin_notification', False) else "🔴 إبقاء"
+        clear_time = settings.get('pin_notification_clear_time', 0)
+        buttons = [
+            [Button.inline(f"📌 تثبيت تلقائي {pin_message_status.split()[0]}", f"toggle_pin_message_{task_id}")],
+            [Button.inline(f"🔄 مزامنة التثبيت {sync_pin_status.split()[0]}", f"toggle_sync_pin_{task_id}")],
+            [Button.inline(f"🧹 مسح إشعار التثبيت {clear_pin_status.split()[0]}", f"toggle_clear_pin_notif_{task_id}")],
+        ]
+        # Add time options for clearing pin notification
+        time_options = [0, 5, 10, 30, 60, 300]
+        time_buttons_row = []
+        for t in time_options:
+            label = "فوري" if t == 0 else f"{t}s"
+            time_buttons_row.append(Button.inline(label, f"set_pin_clear_time_{task_id}_{t}"))
+        buttons.append(time_buttons_row)
+        buttons.append([Button.inline("🔙 رجوع", f"forwarding_settings_{task_id}")])
+        text = (
+            f"📌 إعدادات التثبيت للمهمة #{task_id}\n\n"
+            f"• التثبيت التلقائي عند الإرسال: {pin_message_status}\n"
+            f"• مزامنة التثبيت/إلغاء التثبيت من المصدر: {sync_pin_status}\n"
+            f"• مسح إشعار التثبيت: {clear_pin_status}\n"
+            f"• وقت المسح الحالي: {clear_time} ثانية"
+        )
+        await self.edit_or_send_message(event, text, buttons=buttons)
+
+    async def toggle_sync_pin(self, event, task_id):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        new_state = self.db.toggle_sync_pin(task_id)
+        await event.answer(f"✅ {'تم تفعيل' if new_state else 'تم إلغاء تفعيل'} مزامنة التثبيت")
+        await self.show_pin_settings(event, task_id)
+
+    async def toggle_clear_pin_notification(self, event, task_id):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        new_state = self.db.toggle_clear_pin_notification(task_id)
+        await event.answer(f"✅ {'تم تفعيل' if new_state else 'تم إلغاء'} مسح إشعار التثبيت")
+        await self.show_pin_settings(event, task_id)
+
+    async def start_set_pin_clear_time(self, event, task_id):
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        # Present quick options again (handled by callbacks with set_pin_clear_time_{task_id}_{seconds})
+        await self.show_pin_settings(event, task_id)
+
+    async def set_pin_clear_time_direct(self, event, task_id, seconds):
+        self.db.set_pin_notification_clear_time(task_id, int(seconds))
+        await event.answer(f"✅ تم تعيين وقت مسح إشعار التثبيت إلى {seconds} ثانية")
+        await self.show_pin_settings(event, task_id)
 
     async def toggle_silent_notifications(self, event, task_id):
         """Toggle silent notifications setting"""
