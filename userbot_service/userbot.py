@@ -1232,15 +1232,20 @@ class UserbotService:
                                             logger.debug(f"فشل حفظ التطابق (copy text server): {mapping_error}")
                                 else:
                                     # Pure text copy
-                                    message_text = event.message.text or final_text or "رسالة"
-                                    forwarded_msg = await client.send_message(
-                                        target_entity,
-                                        message_text,
-                                        link_preview=forwarding_settings['link_preview_enabled'],
-                                        silent=forwarding_settings['silent_notifications'],
-                                        buttons=original_reply_markup,
-                                        reply_to=reply_to_msg_id if reply_to_msg_id else None
-                                    )
+                                    message_text = (event.message.text or final_text or "").strip()
+                                    if not message_text:
+                                        # nothing to send
+                                        forwarded_msg = None
+                                    else:
+                                        forwarded_msg = await client.send_message(
+                                            target_entity,
+                                            message_text,
+                                            link_preview=forwarding_settings['link_preview_enabled'],
+                                            silent=forwarding_settings['silent_notifications'],
+                                            parse_mode='HTML',
+                                            buttons=original_reply_markup,
+                                            reply_to=reply_to_msg_id if reply_to_msg_id else None
+                                        )
                                     
                                     # Apply post-forwarding settings (pin, auto-delete)
                                     if forwarded_msg:
@@ -1566,73 +1571,39 @@ class UserbotService:
                             # No media
                             if (event.message.text or final_text):
                                 # Pure text message
-                                # Process spoiler entities if present
-                                message_text = final_text or "رسالة"
-                                processed_text, spoiler_entities = self._process_spoiler_entities(message_text)
+                                # Build text without falling back to generic placeholder
+                                message_text = final_text or (event.message.text or "")
+                                if not message_text:
+                                    # If truly empty, skip sending text
+                                    message_text = ""
+                                forwarded_msg = await client.send_message(
+                                    target_entity,
+                                    message_text,
+                                    link_preview=forwarding_settings['link_preview_enabled'],
+                                    silent=forwarding_settings['silent_notifications'],
+                                    parse_mode='HTML',
+                                    buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
+                                    reply_to=reply_to_msg_id if reply_to_msg_id else None
+                                )
                                 
-                                if spoiler_entities:
-                                    # Send with spoiler entities and buttons
-                                    forwarded_msg = await client.send_message(
-                                        target_entity,
-                                        processed_text,
-                                        link_preview=forwarding_settings['link_preview_enabled'],
-                                        silent=forwarding_settings['silent_notifications'],
-                                        formatting_entities=spoiler_entities,
-                                        buttons=original_reply_markup,  # Only original buttons via userbot, inline buttons handled separately
-                                        reply_to=reply_to_msg_id if reply_to_msg_id else None
+                                # Apply post-forwarding settings (pin, auto-delete, inline buttons)
+                                if forwarded_msg:
+                                    msg_id = forwarded_msg.id
+                                    await self.apply_post_forwarding_settings(
+                                        client, target_entity, msg_id, forwarding_settings, task['id'],
+                                        inline_buttons=inline_buttons,
+                                        has_original_buttons=bool(original_reply_markup)
                                     )
-                                    
-                                    # Apply post-forwarding settings (pin, auto-delete, inline buttons)
-                                    if forwarded_msg:
-                                        msg_id = forwarded_msg.id
-                                        await self.apply_post_forwarding_settings(
-                                            client, target_entity, msg_id, forwarding_settings, task['id'],
-                                            inline_buttons=inline_buttons,
-                                            has_original_buttons=bool(original_reply_markup)
+                                    try:
+                                        self.db.save_message_mapping(
+                                            task_id=task['id'],
+                                            source_chat_id=str(source_chat_id),
+                                            source_message_id=event.message.id,
+                                            target_chat_id=str(target_chat_id),
+                                            target_message_id=msg_id
                                         )
-                                        try:
-                                            self.db.save_message_mapping(
-                                                task_id=task['id'],
-                                                source_chat_id=str(source_chat_id),
-                                                source_message_id=event.message.id,
-                                                target_chat_id=str(target_chat_id),
-                                                target_message_id=msg_id
-                                            )
-                                        except Exception as mapping_error:
-                                            logger.debug(f"فشل حفظ التطابق (spoiler entities): {mapping_error}")
-                                else:
-                                    # Send normally with buttons using spoiler support
-                                    # Combine original and custom buttons for Telethon
-                                    combined_buttons = original_reply_markup or inline_buttons
-                                    
-                                    forwarded_msg = await self._send_message_with_spoiler_support(
-                                        client,
-                                        target_entity,
-                                        processed_text,
-                                        link_preview=forwarding_settings['link_preview_enabled'],
-                                        silent=forwarding_settings['silent_notifications'],
-                                        parse_mode='HTML',
-                                        buttons=combined_buttons
-                                    )
-                                    
-                                    # Apply post-forwarding settings (pin, auto-delete, inline buttons)
-                                    if forwarded_msg:
-                                        msg_id = forwarded_msg.id
-                                        await self.apply_post_forwarding_settings(
-                                            client, target_entity, msg_id, forwarding_settings, task['id'],
-                                            inline_buttons=inline_buttons,
-                                            has_original_buttons=bool(combined_buttons)
-                                        )
-                                        try:
-                                            self.db.save_message_mapping(
-                                                task_id=task['id'],
-                                                source_chat_id=str(source_chat_id),
-                                                source_message_id=event.message.id,
-                                                target_chat_id=str(target_chat_id),
-                                                target_message_id=msg_id
-                                            )
-                                        except Exception as mapping_error:
-                                            logger.debug(f"فشل حفظ التطابق (spoiler support): {mapping_error}")
+                                    except Exception as mapping_error:
+                                        logger.debug(f"فشل حفظ التطابق (text send): {mapping_error}")
                             else:
                                 # Fallback to forward for other types
                                 forwarded_msg = await client.forward_messages(
@@ -1730,10 +1701,11 @@ class UserbotService:
                             
                             # Apply text processing if enabled
                             if edited_text and message_settings['text_formatting_enabled']:
-                                processed_text, spoiler_entities = self._process_spoiler_entities(edited_text)
+                                # Prefer HTML spoiler entity via <tg-spoiler> to avoid literal markers
+                                processed_text = edited_text
                             else:
                                 processed_text = edited_text
-                                spoiler_entities = []
+                            spoiler_entities = []
                             
                             # Check if inline buttons should be applied
                             inline_buttons = None
@@ -1741,24 +1713,14 @@ class UserbotService:
                                 inline_buttons = self.build_inline_buttons(task_id)
                                 
                             # Update the target message
-                            if spoiler_entities:
-                                # Edit with spoiler entities
-                                await client.edit_message(
-                                    target_entity,
-                                    target_message_id,
-                                    processed_text,
-                                    formatting_entities=spoiler_entities,
-                                    file=None if not event.message.media else event.message.media
-                                )
-                            else:
-                                # Edit normally
-                                await client.edit_message(
-                                    target_entity,
-                                    target_message_id,
-                                    processed_text,
-                                    file=None if not event.message.media else event.message.media,
-                                    parse_mode='HTML'
-                                )
+                            # Edit normally (HTML parse will render <tg-spoiler>)
+                            await client.edit_message(
+                                target_entity,
+                                target_message_id,
+                                processed_text,
+                                file=None if not event.message.media else event.message.media,
+                                parse_mode='HTML'
+                            )
                             
                             # Add inline buttons if needed (can't edit buttons with userbot, use bot client)
                             if inline_buttons:
@@ -4958,8 +4920,8 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # For Telethon, spoiler needs MessageEntitySpoiler, return special marker
-                return f'TELETHON_SPOILER_START{cleaned_text.strip()}TELETHON_SPOILER_END'
+                # Use Telegram HTML spoiler tag to ensure correct rendering everywhere
+                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 hyperlink_url = formatting_settings.get('hyperlink_url', 'https://example.com')
                 # Use HTML anchor tag for proper HTML mode
@@ -5025,8 +4987,8 @@ class UserbotService:
                 # Use HTML blockquote for proper Telegram quote formatting
                 return f"<blockquote>{cleaned_text.strip()}</blockquote>"
             elif format_type == 'spoiler':
-                # For Telethon, spoiler needs MessageEntitySpoiler, return special marker
-                return f'TELETHON_SPOILER_START{cleaned_text.strip()}TELETHON_SPOILER_END'
+                # Use Telegram HTML spoiler tag to ensure correct rendering everywhere
+                return f'<tg-spoiler>{cleaned_text.strip()}</tg-spoiler>'
             elif format_type == 'hyperlink':
                 return f'<a href="https://example.com">{cleaned_text.strip()}</a>'
 
