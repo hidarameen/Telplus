@@ -9057,7 +9057,6 @@ class SimpleTelegramBot:
             except Exception as e:
                 logger.debug(f"خطأ في تنظيف الرسائل المعلقة: {e}")
             await asyncio.sleep(300)
-                await asyncio.sleep(5)
 
     async def add_inline_buttons_to_message(self, chat_id: int, message_id: int, task_id: int):
         """Add inline buttons to a specific message"""
