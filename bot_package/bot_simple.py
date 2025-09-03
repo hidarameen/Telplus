@@ -1830,6 +1830,14 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لمسح كلمات التنظيف: {e}, data='{data}'")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("remove_text_clean_keyword_"):
+                try:
+                    task_id = int(data.replace("remove_text_clean_keyword_", ""))
+                    user_id = event.sender_id
+                    self.db.set_conversation_state(user_id, 'removing_text_cleaning_keyword', json.dumps({'task_id': task_id}))
+                    await self.edit_or_send_message(event, "🗑️ أرسل الآن الكلمة/العبارة المراد حذفها من القائمة.")
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("text_formatting_"): # Handler for text formatting
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -3646,6 +3654,22 @@ class SimpleTelegramBot:
             elif state == 'adding_text_cleaning_keywords': # Handle adding text cleaning keywords
                 await self.handle_adding_text_cleaning_keywords(event, state_data)
                 return
+            elif state == 'removing_text_cleaning_keyword': # Handle removing one keyword
+                try:
+                    user_id = event.sender_id
+                    state, data = state_data
+                    if isinstance(data, str):
+                        stored = json.loads(data) if data.strip() else {}
+                    else:
+                        stored = data or {}
+                    task_id = int(stored.get('task_id'))
+                    text = (event.text or '').strip()
+                    self.db.clear_conversation_state(user_id)
+                    await self.handle_removing_text_cleaning_keyword(event, task_id, text)
+                except Exception as e:
+                    logger.error(f"خطأ في حذف كلمة التنظيف: {e}")
+                    await event.answer("❌ فشل في حذف الكلمة")
+                return
             elif state.startswith('watermark_text_input_'): # Handle watermark text input
                 try:
                     task_id = data.get('task_id')
@@ -3843,11 +3867,8 @@ class SimpleTelegramBot:
             logger.error(f"خطأ في فحص المحادثات الهدف: {e}")
 
         # Default response only if not a target chat and not forwarded and in private chat
-        if event.is_private:
-            # Use force_new_message to ensure we always show the main menu
-            await self.force_new_message(event, "👋 أهلاً! استخدم /start لعرض القائمة الرئيسية")
-        else:
-            logger.info(f"🚫 تجاهل الرد التلقائي في محادثة غير خاصة: {event.chat_id}")
+        # Disable auto-reply greeting by default
+        logger.info(f"ℹ️ لا يوجد رد تلقائي: user={event.sender_id}, chat={event.chat_id}")
 
     async def show_task_settings(self, event, task_id):
         """Show task settings menu"""
@@ -8378,6 +8399,16 @@ class SimpleTelegramBot:
         buttons.append([Button.inline("🔙 رجوع لتنظيف النصوص", f"text_cleaning_{task_id}")])
 
         await self.edit_or_send_message(event, message, buttons=buttons)
+
+    async def clear_text_cleaning_keywords(self, event, task_id: int):
+        """Clear all keywords for text-cleaning line removal"""
+        try:
+            cleared = self.db.clear_text_cleaning_keywords(task_id)
+            await event.answer("✅ تم حذف جميع الكلمات")
+            await self.manage_text_cleaning_keywords(event, task_id)
+        except Exception as e:
+            logger.error(f"خطأ في مسح كلمات التنظيف: {e}")
+            await event.answer("❌ فشل في مسح الكلمات")
 
     async def start_adding_text_cleaning_keywords(self, event, task_id):
         """Start adding text cleaning keywords"""
