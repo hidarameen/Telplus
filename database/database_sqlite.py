@@ -140,14 +140,16 @@ class Database:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    task_name TEXT,
-                    source_chat_id TEXT,
+                    user_id INTEGER NOT NULL,
+                    task_name TEXT DEFAULT 'مهمة توجيه',
+                    source_chat_id TEXT NOT NULL,
                     source_chat_name TEXT,
-                    target_chat_id TEXT,
+                    target_chat_id TEXT NOT NULL,
                     target_chat_name TEXT,
+                    forward_mode TEXT DEFAULT 'forward',
                     is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             
@@ -228,30 +230,74 @@ class Database:
             return cursor.fetchall()
 
     # Task Management
-    def create_task(self, user_id: int, task_name: str, source_chat_ids: list, 
-                   source_chat_names: list, target_chat_id: str, target_chat_name: str) -> int:
-        """Create new forwarding task"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            task_ids = []
-            
-            for i, source_chat_id in enumerate(source_chat_ids):
-                source_chat_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else source_chat_id
+    def create_task(self, user_id: int, task_name: str, source_chat_id: str, target_chat_id: str, **kwargs) -> int:
+        """Create a new task - compatible with PostgreSQL version"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
                 
-                if source_chat_name is None or source_chat_name == '':
-                    source_chat_name = source_chat_id
-                
+                # Ensure task_name is not None or empty
+                if not task_name or task_name.strip() == '':
+                    task_name = 'مهمة توجيه'
+                    
+                cursor.execute('''
+                    INSERT INTO tasks (user_id, task_name, source_chat_id, target_chat_id, forward_mode, updated_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (user_id, task_name, source_chat_id, target_chat_id, kwargs.get('forward_mode', 'forward')))
+                task_id = cursor.lastrowid
+                conn.commit()
+                return task_id
+        except Exception as e:
+            logger.error(f"Error creating task: {e}")
+            return None
+
+    def create_task_with_multiple_sources_targets(self, user_id: int, task_name: str, 
+                                                 source_chat_ids: list, source_chat_names: list,
+                                                 target_chat_ids: list, target_chat_names: list) -> int:
+        """Create new forwarding task with multiple sources and targets"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Ensure task_name is not None or empty
+                if not task_name or task_name.strip() == '':
+                    task_name = 'مهمة توجيه'
+
+                # Create main task with the first source and target
+                first_source_id = source_chat_ids[0] if source_chat_ids else ''
+                first_source_name = source_chat_names[0] if source_chat_names else first_source_id
+                first_target_id = target_chat_ids[0] if target_chat_ids else ''
+                first_target_name = target_chat_names[0] if target_chat_names else first_target_id
+
                 cursor.execute('''
                     INSERT INTO tasks 
-                    (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name))
-                
+                    (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (user_id, task_name, first_source_id, first_source_name, first_target_id, first_target_name))
+
                 task_id = cursor.lastrowid
-                task_ids.append(task_id)
-            
-            conn.commit()
-            return task_ids[0] if task_ids else None
+
+                # Add all sources to task_sources table
+                for i, source_id in enumerate(source_chat_ids):
+                    source_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else source_id
+                    cursor.execute('''
+                        INSERT INTO task_sources (task_id, chat_id, chat_name)
+                        VALUES (?, ?, ?)
+                    ''', (task_id, source_id, source_name))
+
+                # Add all targets to task_targets table
+                for i, target_id in enumerate(target_chat_ids):
+                    target_name = target_chat_names[i] if target_chat_names and i < len(target_chat_names) else target_id
+                    cursor.execute('''
+                        INSERT INTO task_targets (task_id, chat_id, chat_name)
+                        VALUES (?, ?, ?)
+                    ''', (task_id, target_id, target_name))
+
+                conn.commit()
+                return task_id
+        except Exception as e:
+            logger.error(f"Error creating task with multiple sources/targets: {e}")
+            return None
 
     def get_user_tasks(self, user_id: int):
         """Get all tasks for a user"""
