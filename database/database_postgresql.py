@@ -940,8 +940,8 @@ END$$;
                     task_name = 'مهمة توجيه'
                     
                 cursor.execute('''
-                    INSERT INTO tasks (user_id, task_name, source_chat_id, target_chat_id, forward_mode)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO tasks (user_id, task_name, source_chat_id, target_chat_id, forward_mode, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                     RETURNING id
                 ''', (user_id, task_name, source_chat_id, target_chat_id, kwargs.get('forward_mode', 'forward')))
                 task_id = cursor.fetchone()[0]
@@ -2711,8 +2711,8 @@ END$$;
 
                 cursor.execute('''
                     INSERT INTO tasks 
-                    (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                     RETURNING id
                 ''', (user_id, task_name, first_source_id, first_source_name, first_target_id, first_target_name))
 
