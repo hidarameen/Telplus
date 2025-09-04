@@ -241,6 +241,118 @@ class SimpleTelegramBot:
         )
         await self.edit_or_send_message(event, message_text, buttons=buttons)
 
+    async def show_recurring_posts(self, event, task_id: int):
+        """عرض وإدارة المنشورات المتكررة للمهمة"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        posts = self.db.list_recurring_posts(task_id)
+        count = len(posts)
+
+        buttons = []
+        # List existing posts
+        for p in posts[:20]:
+            status = "🟢" if p.get('enabled') else "🔴"
+            name = p.get('name') or f"منشور #{p['id']}"
+            buttons.append([
+                Button.inline(f"{status} {name}", f"recurring_edit_{p['id']}")
+            ])
+        if count > 20:
+            buttons.append([Button.inline(f"+ {count-20} أخرى...", b"noop")])
+
+        buttons.extend([
+            [Button.inline("➕ إضافة منشور عبر إعادة التوجيه", f"recurring_add_{task_id}")],
+            [Button.inline("🔙 رجوع للمميزات المتقدمة", f"advanced_features_{task_id}")]
+        ])
+
+        message_text = (
+            f"🔁 المنشورات المتكررة للمهمة: {task.get('task_name','')}\n\n"
+            f"• العدد: {count}\n"
+            f"• النشر لكل الأهداف المحددة في المهمة\n"
+            f"• يدعم الوسائط، الأزرار الإنلاين، والـ Markdown\n\n"
+            f"اختر إجراء:"
+        )
+
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def start_add_recurring_post(self, event, task_id: int):
+        """بدء إضافة منشور متكرر عبر إعادة توجيه رسالة من قناة محددة"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        # Save state to capture forwarded message
+        self.db.set_conversation_state(user_id, 'waiting_recurring_forward', str(task_id))
+
+        buttons = [
+            [Button.inline("❌ إلغاء", f"recurring_posts_{task_id}")]
+        ]
+        txt = (
+            "➕ أرسل الآن الرسالة عبر إعادة التوجيه من القناة المصدر التي تريد تكرارها.\n\n"
+            "- سيتم حفظ الرسالة كنموذج للنشر المتكرر.\n"
+            "- بعد الإرسال سنطلب الفترة بالثواني وخيار حذف المنشور السابق قبل إعادة النشر."
+        )
+        await self.edit_or_send_message(event, txt, buttons=buttons)
+
+    async def toggle_recurring_post(self, event, recurring_id: int):
+        post = self.db.get_recurring_post(recurring_id)
+        if not post:
+            await event.answer("❌ غير موجود")
+            return
+        new_state = not bool(post.get('enabled'))
+        self.db.update_recurring_post(recurring_id, enabled=new_state)
+        await event.answer("✅ تم التحديث")
+        await self.show_recurring_posts(event, post['task_id'])
+
+    async def delete_recurring_post_action(self, event, recurring_id: int):
+        post = self.db.get_recurring_post(recurring_id)
+        if not post:
+            await event.answer("❌ غير موجود")
+            return
+        self.db.delete_recurring_post(recurring_id)
+        await event.answer("✅ تم الحذف")
+        await self.show_recurring_posts(event, post['task_id'])
+
+    async def start_edit_recurring_post(self, event, recurring_id: int):
+        post = self.db.get_recurring_post(recurring_id)
+        if not post:
+            await event.answer("❌ غير موجود")
+            return
+        status = "🟢 مفعل" if post.get('enabled') else "🔴 معطل"
+        del_prev = "🟢 نعم" if post.get('delete_previous') else "🔴 لا"
+        interval = post.get('interval_seconds', 0)
+        name = post.get('name') or f"منشور #{post['id']}"
+
+        buttons = [
+            [Button.inline("🔄 تبديل الحالة", f"recurring_toggle_{recurring_id}")],
+            [Button.inline("⏱️ تعديل الفترة", f"recurring_set_interval_{recurring_id}")],
+            [Button.inline("🧹 تبديل حذف السابق", f"recurring_toggle_delete_{recurring_id}"),
+             Button.inline("🔘 حفظ أزرار الأصلية", f"recurring_toggle_preserve_{recurring_id}")],
+            [Button.inline("🗑️ حذف", f"recurring_delete_{recurring_id}")],
+            [Button.inline("🔙 رجوع", f"recurring_posts_{post['task_id']}")]
+        ]
+        msg = (
+            f"✏️ إعدادات المنشور المتكرر\n\n"
+            f"الاسم: {name}\n"
+            f"الحالة: {status}\n"
+            f"الفترة: {interval} ثانية\n"
+            f"حذف السابق: {del_prev}\n"
+        )
+        await self.edit_or_send_message(event, msg, buttons=buttons)
+
+    async def start_set_recurring_interval(self, event, recurring_id: int):
+        post = self.db.get_recurring_post(recurring_id)
+        if not post:
+            await event.answer("❌ غير موجود")
+            return
+        user_id = event.sender_id
+        self.db.set_conversation_state(user_id, 'editing_recurring_interval', str(recurring_id))
+        await self.edit_or_send_message(event, "⏱️ أرسل الآن الفترة بالثواني (مثال: 3600)")
     async def audio_text_cleaning(self, event, task_id):
         """Show audio tag text cleaning settings and controls"""
         user_id = event.sender_id
@@ -939,6 +1051,122 @@ class SimpleTelegramBot:
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للميزات المتقدمة: {e}, data='{data}'")
                     await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("recurring_posts_"):
+                try:
+                    task_id = int(data.replace("recurring_posts_", ""))
+                    await self.show_recurring_posts(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في معرف المهمة للمنشورات المتكررة: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("recurring_add_"):
+                try:
+                    task_id = int(data.replace("recurring_add_", ""))
+                    await self.start_add_recurring_post(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ")
+            elif data.startswith("recurring_toggle_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        recurring_id = int(parts[2])
+                        await self.toggle_recurring_post(event, recurring_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_delete_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        recurring_id = int(parts[2])
+                        await self.delete_recurring_post_action(event, recurring_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_edit_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        recurring_id = int(parts[2])
+                        await self.start_edit_recurring_post(event, recurring_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_set_interval_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        recurring_id = int(parts[3])
+                        await self.start_set_recurring_interval(event, recurring_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_toggle_delete_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        recurring_id = int(parts[3]) if len(parts) > 3 else int(parts[2])
+                        post = self.db.get_recurring_post(recurring_id)
+                        if post:
+                            new_val = not bool(post.get('delete_previous'))
+                            self.db.update_recurring_post(recurring_id, delete_previous=new_val)
+                            await event.answer("✅ تم التحديث")
+                            await self.start_edit_recurring_post(event, recurring_id)
+                    except Exception:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_toggle_preserve_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        recurring_id = int(parts[3]) if len(parts) > 3 else int(parts[2])
+                        post = self.db.get_recurring_post(recurring_id)
+                        if post:
+                            new_val = not bool(post.get('preserve_original_buttons', True))
+                            self.db.update_recurring_post(recurring_id, preserve_original_buttons=new_val)
+                            await event.answer("✅ تم التحديث")
+                            await self.start_edit_recurring_post(event, recurring_id)
+                    except Exception:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_posts_"):
+                try:
+                    task_id = int(data.replace("recurring_posts_", ""))
+                    await self.show_recurring_posts(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في معرف المهمة للمنشورات المتكررة: {e}, data='{data}'")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("recurring_add_"):
+                try:
+                    task_id = int(data.replace("recurring_add_", ""))
+                    await self.start_add_recurring_post(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ")
+            elif data.startswith("recurring_toggle_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        recurring_id = int(parts[2])
+                        await self.toggle_recurring_post(event, recurring_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_delete_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        recurring_id = int(parts[2])
+                        await self.delete_recurring_post_action(event, recurring_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_edit_"):
+                parts = data.split("_")
+                if len(parts) >= 3:
+                    try:
+                        recurring_id = int(parts[2])
+                        await self.start_edit_recurring_post(event, recurring_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
+            elif data.startswith("recurring_set_interval_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        recurring_id = int(parts[3])
+                        await self.start_set_recurring_interval(event, recurring_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ")
             elif data.startswith("character_limit_"): # Handler for character limit settings
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -3398,6 +3626,7 @@ class SimpleTelegramBot:
             [Button.inline(f"{delay_status} تأخير التوجيه", f"forwarding_delay_{task_id}"),
              Button.inline(f"{interval_status} فاصل الإرسال", f"sending_interval_{task_id}")],
             [Button.inline("📊 وضع النشر", f"publishing_mode_{task_id}")],
+            [Button.inline("🔁 المنشورات المتكررة", f"recurring_posts_{task_id}")],
             [Button.inline("🔙 رجوع للإعدادات", f"task_settings_{task_id}")]
         ]
         
@@ -3458,6 +3687,45 @@ class SimpleTelegramBot:
                                 return
                     except Exception as e:
                         logger.debug(f"تعذر استخراج القناة من الرسالة المحولة: {e}")
+        except Exception:
+            pass
+
+        # New: handle recurring post forward capture
+        try:
+            state_tuple = self.db.get_conversation_state(user_id)
+            if state_tuple and state_tuple[0] == 'waiting_recurring_forward':
+                task_id = int(state_tuple[1]) if state_tuple[1] else None
+                fwd = event.message.fwd_from
+                if not fwd or not getattr(fwd, 'from_id', None):
+                    await self.edit_or_send_message(event, "❌ يجب إعادة توجيه رسالة من القناة المصدر.")
+                    return
+                # Determine original source chat and message id
+                orig_peer_id = get_peer_id(fwd.from_id)
+                from userbot_service.userbot import userbot_instance
+                client = userbot_instance.clients.get(user_id)
+                if not client:
+                    await self.edit_or_send_message(event, "❌ UserBot غير متصل. يرجى تسجيل الدخول.")
+                    return
+                try:
+                    # Normalize entity and get original message id
+                    source_chat_id = str(orig_peer_id)
+                    source_message_id = getattr(fwd, 'channel_post', None) or getattr(fwd, 'msg_id', None) or event.message.id
+                    if not source_message_id:
+                        source_message_id = event.message.id
+                    # Ask for interval seconds
+                    import json
+                    payload = {
+                        'task_id': task_id,
+                        'source_chat_id': source_chat_id,
+                        'source_message_id': int(source_message_id)
+                    }
+                    self.db.set_conversation_state(user_id, 'editing_recurring_interval_init', json.dumps(payload))
+                    await self.edit_or_send_message(event, "⏱️ أدخل الفترة بالثواني للنشر المتكرر (مثال: 3600)")
+                    return
+                except Exception as e:
+                    logger.error(f"خطأ في استخراج معلومات الرسالة المحولة: {e}")
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء قراءة الرسالة.")
+                    return
         except Exception:
             pass
 
@@ -5570,6 +5838,57 @@ class SimpleTelegramBot:
                 await self.handle_code_input(event, message_text, data)
             elif state == 'waiting_password':
                 await self.handle_password_input(event, message_text, data)
+            elif state == 'editing_recurring_interval_init':
+                # First-time interval entry after forward
+                try:
+                    interval = int(message_text)
+                    if interval < 60 or interval > 60*60*24*7:
+                        await self.edit_or_send_message(event, "❌ يجب أن تكون الفترة بين 60 ثانية و 7 أيام")
+                        return
+                    payload = data or {}
+                    task_id = int(payload.get('task_id'))
+                    source_chat_id = payload.get('source_chat_id')
+                    source_message_id = int(payload.get('source_message_id'))
+                    new_id = self.db.create_recurring_post(
+                        task_id=task_id,
+                        source_chat_id=source_chat_id,
+                        source_message_id=source_message_id,
+                        interval_seconds=interval,
+                        delete_previous=False,
+                        preserve_original_buttons=True
+                    )
+                    self.db.clear_conversation_state(user_id)
+                    if new_id:
+                        await self.edit_or_send_message(event, f"✅ تم إضافة منشور متكرر (#{new_id})\nالفترة: {interval} ثانية")
+                        await self.show_recurring_posts(event, task_id)
+                    else:
+                        await self.edit_or_send_message(event, "❌ فشل في إضافة المنشور المتكرر")
+                except ValueError:
+                    await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
+            elif state == 'editing_recurring_interval':
+                try:
+                    recurring_id = int(data_str)
+                except Exception:
+                    recurring_id = None
+                if not recurring_id:
+                    await self.edit_or_send_message(event, "❌ بيانات غير صالحة")
+                    return
+                try:
+                    interval = int(message_text)
+                    if interval < 60 or interval > 60*60*24*7:
+                        await self.edit_or_send_message(event, "❌ يجب أن تكون الفترة بين 60 ثانية و 7 أيام")
+                        return
+                    ok = self.db.update_recurring_post(recurring_id, interval_seconds=interval)
+                    self.db.clear_conversation_state(user_id)
+                    if ok:
+                        post = self.db.get_recurring_post(recurring_id)
+                        await self.edit_or_send_message(event, f"✅ تم تحديث الفترة إلى {interval} ثانية")
+                        if post:
+                            await self.start_edit_recurring_post(event, recurring_id)
+                    else:
+                        await self.edit_or_send_message(event, "❌ فشل في التحديث")
+                except ValueError:
+                    await self.edit_or_send_message(event, "❌ يرجى إدخال رقم صحيح")
         except Exception as e:
             logger.error(f"خطأ في معالجة رسالة المحادثة: {e}")
             await self.edit_or_send_message(event, "❌ حدث خطأ، حاول مرة أخرى")

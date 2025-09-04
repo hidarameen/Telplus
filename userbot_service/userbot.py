@@ -1956,6 +1956,175 @@ class UserbotService:
             logger.error(f"خطأ في refresh_user_tasks للمستخدم {user_id}: {e}")
             return []
 
+    async def _recurring_posts_loop(self):
+        """Background loop to process recurring posts for all connected users"""
+        logger.info("🔁 بدء حلقة المنشورات المتكررة")
+        while self.running:
+            try:
+                # Iterate over connected clients
+                for user_id, client in list(self.clients.items()):
+                    try:
+                        # Get tasks for user
+                        tasks = self.user_tasks.get(user_id) or []
+                        if not tasks:
+                            continue
+                        # For each task, fetch due recurring posts
+                        for task in tasks:
+                            task_id = task['id']
+                            try:
+                                posts = self.db.list_recurring_posts(task_id)
+                            except Exception:
+                                posts = []
+                            now_ts = time.time()
+                            for post in posts:
+                                if not post.get('enabled', True):
+                                    continue
+                                # Check due
+                                next_run_at = post.get('next_run_at')
+                                due = True
+                                if next_run_at:
+                                    try:
+                                        from datetime import datetime
+                                        # SQLite stores as str; parse liberally
+                                        ts = datetime.fromisoformat(str(next_run_at).replace('Z','').split('.')[0])
+                                        due = (time.mktime(ts.timetuple()) <= now_ts)
+                                    except Exception:
+                                        due = True
+                                if not due:
+                                    continue
+
+                                # Process recurring posting
+                                await self._process_single_recurring_post(client, user_id, task, post)
+
+                                # Update next_run_at
+                                try:
+                                    self.db.update_recurring_post(post['id'], next_run_at=None)  # will be recalculated below if needed
+                                    # Set explicit next_run_at by adding interval
+                                    from datetime import datetime, timedelta
+                                    new_next = datetime.utcnow() + timedelta(seconds=int(post.get('interval_seconds', 3600)))
+                                    self.db.update_recurring_post(post['id'], next_run_at=new_next.isoformat(sep=' '))
+                                except Exception:
+                                    pass
+                    except Exception as user_err:
+                        logger.debug(f"Recurring loop user error: {user_err}")
+                        continue
+            except Exception as e:
+                logger.debug(f"Recurring loop error: {e}")
+            # Sleep a short tick
+            await asyncio.sleep(10)
+
+    async def _process_single_recurring_post(self, client: TelegramClient, user_id: int, task: Dict, post: Dict):
+        """Send the recurring post message to all targets with delete-before-repost handling"""
+        try:
+            task_id = task['id']
+            source_chat_id = int(post['source_chat_id']) if str(post['source_chat_id']).lstrip('-').isdigit() else post['source_chat_id']
+            source_message_id = int(post['source_message_id'])
+
+            # Fetch original message
+            message = await client.get_messages(source_chat_id, ids=source_message_id)
+            if not message:
+                logger.warning(f"❌ لم يتم العثور على الرسالة الأصلية للمنشور المتكرر #{post['id']}")
+                return
+
+            # Prepare settings
+            forwarding_settings = self.get_forwarding_settings(task_id)
+            message_settings = self.get_message_settings(task_id)
+
+            # Build inline buttons if needed
+            inline_buttons = None
+            if message_settings.get('inline_buttons_enabled', False):
+                try:
+                    inline_buttons = self.build_inline_buttons(task_id)
+                except Exception:
+                    inline_buttons = None
+
+            # Get all targets
+            targets = self.db.get_task_targets(task_id)
+            if not targets:
+                return
+
+            for target in targets:
+                try:
+                    target_chat_id = target['chat_id']
+                    try:
+                        target_entity = await client.get_entity(int(target_chat_id))
+                    except Exception:
+                        target_entity = await client.get_entity(str(target_chat_id))
+
+                    # Delete previous if configured
+                    if post.get('delete_previous'):
+                        delivery = self.db.get_recurring_delivery(post['id'], str(target_chat_id))
+                        if delivery and delivery.get('last_message_id'):
+                            try:
+                                await client.delete_messages(target_entity, delivery['last_message_id'])
+                            except Exception as del_err:
+                                logger.debug(f"فشل حذف الرسالة السابقة: {del_err}")
+
+                    # Choose send mode: forward/copy respecting settings
+                    forward_mode = task.get('forward_mode', 'forward')
+                    has_original_buttons = bool(getattr(message, 'reply_markup', None))
+
+                    # Prepare text formatting pipeline similar to live forwarding
+                    original_text = message.text or ""
+                    cleaned_text = self.apply_text_cleaning(original_text, task_id) if original_text else original_text
+                    modified_text = self.apply_text_replacements(task_id, cleaned_text) if cleaned_text else cleaned_text
+                    translated_text = await self.apply_translation(task_id, modified_text) if modified_text else modified_text
+                    formatted_text = self.apply_text_formatting(task_id, translated_text) if translated_text else translated_text
+                    final_text = self.apply_message_formatting(formatted_text, message_settings, is_media=bool(message.media))
+
+                    requires_copy_mode = (
+                        message_settings.get('header_enabled', False) or
+                        message_settings.get('footer_enabled', False) or
+                        (original_text != modified_text) or
+                        message_settings.get('inline_buttons_enabled', False)
+                    )
+                    final_send_mode = self._determine_final_send_mode(forward_mode, requires_copy_mode)
+
+                    sent = None
+                    if final_send_mode == 'forward' and not (message.media and hasattr(message.media, 'webpage') and message.media.webpage):
+                        sent = await client.forward_messages(target_entity, message, silent=forwarding_settings.get('silent_notifications', False))
+                        msg_id = sent[0].id if isinstance(sent, list) else sent.id
+                    else:
+                        if message.media:
+                            sent = await client.send_file(
+                                target_entity,
+                                file=message.media,
+                                caption=final_text or None,
+                                silent=forwarding_settings.get('silent_notifications', False),
+                                force_document=False,
+                                parse_mode='HTML' if final_text else None,
+                                buttons=message.reply_markup if (post.get('preserve_original_buttons', True) and message.reply_markup) else None
+                            )
+                            msg_id = sent[0].id if isinstance(sent, list) else sent.id
+                        else:
+                            sent = await client.send_message(
+                                target_entity,
+                                final_text or (message.text or ""),
+                                silent=forwarding_settings.get('silent_notifications', False),
+                                parse_mode='HTML' if final_text else None
+                            )
+                            msg_id = sent.id
+
+                    # Post-forward actions (pin/delete/inline buttons via bot)
+                    await self.apply_post_forwarding_settings(
+                        client, target_entity, msg_id, forwarding_settings, task_id,
+                        inline_buttons=inline_buttons,
+                        has_original_buttons=has_original_buttons
+                    )
+
+                    # Track delivery for delete-before-repost
+                    try:
+                        self.db.upsert_recurring_delivery(post['id'], str(target_chat_id), msg_id)
+                    except Exception:
+                        pass
+
+                    await asyncio.sleep(1)
+                except Exception as target_err:
+                    logger.debug(f"Recurring send error: {target_err}")
+                    continue
+        except Exception as e:
+            logger.debug(f"Recurring post processing error: {e}")
+
     async def notify_bot_to_add_buttons(self, chat_id: int, message_id: int, task_id: int):
         """Notify the bot to add inline buttons to a message"""
         try:
@@ -4560,6 +4729,13 @@ class UserbotService:
                                 logger.info(f"   📝 {task_name} - {task['source_chat_id']} → {task['target_chat_id']}")
                 else:
                     logger.warning("⚠️ لا توجد مهام نشطة - لن يتم توجيه أي رسائل")
+
+                # Start recurring posts loop once we have at least one active client
+                try:
+                    asyncio.create_task(self._recurring_posts_loop())
+                    logger.info("🔁 تم تشغيل حلقة المنشورات المتكررة")
+                except Exception as loop_err:
+                    logger.debug(f"تعذر بدء حلقة المنشورات المتكررة: {loop_err}")
             else:
                 logger.warning("⚠️ لم يتم تشغيل أي UserBot - تحقق من صحة الجلسات المحفوظة")
 
