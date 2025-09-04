@@ -1023,17 +1023,34 @@ class UserbotService:
                         # Apply text formatting
                         formatted_text = self.apply_text_formatting(task['id'], translated_text) if translated_text else translated_text
 
-                        # Apply header and footer formatting
-                        final_text = self.apply_message_formatting(formatted_text, message_settings)
+                        # Apply header and footer formatting (respect text/media scope)
+                        final_text = self.apply_message_formatting(
+                            formatted_text, message_settings, is_media=bool(event.message.media)
+                        )
                         
                         # Check if we need to use copy mode due to formatting or processed media
                         # Check if we MUST use copy mode due to actual content modifications
                         # Respect user forward_mode setting unless modifications require copy
+                        # Determine if header/footer actually apply for this message type
+                        is_media_message = bool(event.message.media)
+                        applies_header = (
+                            message_settings.get("header_enabled", False) and (
+                                (is_media_message and message_settings.get("apply_header_to_media", True)) or
+                                (not is_media_message and message_settings.get("apply_header_to_texts", True))
+                            )
+                        )
+                        applies_footer = (
+                            message_settings.get("footer_enabled", False) and (
+                                (is_media_message and message_settings.get("apply_footer_to_media", True)) or
+                                (not is_media_message and message_settings.get("apply_footer_to_texts", True))
+                            )
+                        )
+
                         requires_copy_mode = (
                             (processed_media is not None and processed_media != event.message.media) or  # Media actually changed
                             (processed_filename is not None) or  # Filename was modified during processing
-                            message_settings["header_enabled"] or  # Header enabled (adds content)
-                            message_settings["footer_enabled"] or  # Footer enabled (adds content) 
+                            applies_header or  # Header will add content
+                            applies_footer or  # Footer will add content
                             message_settings["inline_buttons_enabled"] or  # Inline buttons enabled (adds buttons)
                             original_text != modified_text or  # Text replacements applied
                             should_remove_forward  # Remove forward header filter requires copy
@@ -1693,29 +1710,39 @@ class UserbotService:
                             # Get target entity
                             target_entity = await client.get_entity(int(target_chat_id))
 
-                            # Get task settings for processing
-                            message_settings = self.get_message_processing_settings(task_id)
-                            
-                            # Process the edited text with same transformations as original
+                            # Process the edited text
                             edited_text = event.message.text or event.message.message or ""
-                            
-                            # Apply text processing if enabled
-                            if edited_text and message_settings['text_formatting_enabled']:
-                                # Prefer HTML spoiler entity via <tg-spoiler> to avoid literal markers
-                                processed_text = edited_text
-                            else:
+                            try:
+                                formatting_settings = self.db.get_text_formatting_settings(task_id)
+                                if formatting_settings and formatting_settings.get('text_formatting_enabled', False):
+                                    processed_text = self.apply_text_formatting(task_id, edited_text)
+                                else:
+                                    processed_text = edited_text
+                            except Exception:
                                 processed_text = edited_text
                             spoiler_entities = []
                             
                             # Check if inline buttons should be applied
                             inline_buttons = None
-                            if message_settings['inline_buttons_enabled']:
-                                inline_buttons = self.build_inline_buttons(task_id)
+                            try:
+                                message_settings_inline = self.get_message_settings(task_id)
+                                if message_settings_inline.get('inline_buttons_enabled', False):
+                                    inline_buttons = self.build_inline_buttons(task_id)
+                            except Exception:
+                                inline_buttons = None
                                 
                             # Update the target message
                             # Edit normally (HTML parse will render <tg-spoiler>)
+                            # Resolve the target entity robustly
+                            try:
+                                target_entity_resolved = await client.get_entity(int(target_chat_id))
+                            except Exception:
+                                try:
+                                    target_entity_resolved = await client.get_entity(str(target_chat_id))
+                                except Exception:
+                                    target_entity_resolved = target_entity
                             await client.edit_message(
-                                target_entity,
+                                target_entity_resolved,
                                 target_message_id,
                                 processed_text,
                                 file=None if not event.message.media else event.message.media,
@@ -2188,7 +2215,9 @@ class UserbotService:
                     modified_text = self.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
                     translated_text = await self.apply_translation(task['id'], modified_text) if modified_text else modified_text
                     formatted_text = self.apply_text_formatting(task['id'], translated_text) if translated_text else translated_text
-                    final_text = self.apply_message_formatting(formatted_text, message_settings)
+                    final_text = self.apply_message_formatting(
+                        formatted_text, message_settings, is_media=bool(first_message.media)
+                    )
                     
                     # Check if caption should be removed
                     text_cleaning_settings = self.db.get_text_cleaning_settings(task['id'])
@@ -2729,8 +2758,8 @@ class UserbotService:
                     client, target_entity, media_bytes, filename, **kwargs
                 )
 
-    def apply_message_formatting(self, text: str, settings: dict) -> str:
-        """Apply header and footer formatting to message text"""
+    def apply_message_formatting(self, text: str, settings: dict, is_media: bool) -> str:
+        """Apply header and footer formatting to message text with scope control"""
         if not text:
             text = ""
 
@@ -2744,13 +2773,19 @@ class UserbotService:
             except Exception:
                 return s
 
-        # Add header if enabled
-        if settings['header_enabled'] and settings['header_text']:
+        # Add header if enabled and applicable to this message type
+        if settings['header_enabled'] and settings['header_text'] and (
+            (is_media and settings.get('apply_header_to_media', True)) or
+            (not is_media and settings.get('apply_header_to_texts', True))
+        ):
             header_html = _md_to_html_links(settings['header_text'])
             final_text = header_html + "\n\n" + final_text
 
-        # Add footer if enabled
-        if settings['footer_enabled'] and settings['footer_text']:
+        # Add footer if enabled and applicable to this message type
+        if settings['footer_enabled'] and settings['footer_text'] and (
+            (is_media and settings.get('apply_footer_to_media', True)) or
+            (not is_media and settings.get('apply_footer_to_texts', True))
+        ):
             footer_html = _md_to_html_links(settings['footer_text'])
             final_text = final_text + "\n\n" + footer_html
 

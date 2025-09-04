@@ -2263,6 +2263,58 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف المهمة لإعدادات الذيل: {e}, data='{data}', parts={parts}")
                         await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_header_scope_texts_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        settings = self.db.get_message_settings(task_id)
+                        new_val = not bool(settings.get('apply_header_to_texts', True))
+                        self.db.update_message_settings_scope(task_id, apply_header_to_texts=new_val)
+                        await event.answer("✅ تم تحديث نطاق الرأس للنصوص")
+                        await self.show_header_settings(event, task_id)
+                    except Exception as e:
+                        logger.error(f"خطأ تحديث نطاق الرأس للنصوص: {e}")
+                        await event.answer("❌ فشل في التحديث")
+            elif data.startswith("toggle_header_scope_media_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        settings = self.db.get_message_settings(task_id)
+                        new_val = not bool(settings.get('apply_header_to_media', True))
+                        self.db.update_message_settings_scope(task_id, apply_header_to_media=new_val)
+                        await event.answer("✅ تم تحديث نطاق الرأس للوسائط")
+                        await self.show_header_settings(event, task_id)
+                    except Exception as e:
+                        logger.error(f"خطأ تحديث نطاق الرأس للوسائط: {e}")
+                        await event.answer("❌ فشل في التحديث")
+            elif data.startswith("toggle_footer_scope_texts_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        settings = self.db.get_message_settings(task_id)
+                        new_val = not bool(settings.get('apply_footer_to_texts', True))
+                        self.db.update_message_settings_scope(task_id, apply_footer_to_texts=new_val)
+                        await event.answer("✅ تم تحديث نطاق الذيل للنصوص")
+                        await self.show_footer_settings(event, task_id)
+                    except Exception as e:
+                        logger.error(f"خطأ تحديث نطاق الذيل للنصوص: {e}")
+                        await event.answer("❌ فشل في التحديث")
+            elif data.startswith("toggle_footer_scope_media_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        settings = self.db.get_message_settings(task_id)
+                        new_val = not bool(settings.get('apply_footer_to_media', True))
+                        self.db.update_message_settings_scope(task_id, apply_footer_to_media=new_val)
+                        await event.answer("✅ تم تحديث نطاق الذيل للوسائط")
+                        await self.show_footer_settings(event, task_id)
+                    except Exception as e:
+                        logger.error(f"خطأ تحديث نطاق الذيل للوسائط: {e}")
+                        await event.answer("❌ فشل في التحديث")
             elif data.startswith("inline_buttons_"): # Handler for inline buttons
                 parts = data.split("_")
                 if len(parts) >= 3:
@@ -2427,6 +2479,14 @@ class SimpleTelegramBot:
                     except ValueError as e:
                         logger.error(f"❌ خطأ في تحليل معرف الرسالة للموافقة: {e}")
                         await event.answer("❌ خطأ في معالجة الطلب")
+            elif data.startswith("word_filters_help_"):
+                parts = data.split("_")
+                if len(parts) >= 4:
+                    try:
+                        task_id = int(parts[3])
+                        await self.word_filters_help(event, task_id)
+                    except ValueError:
+                        await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("reject_message_"):
                 # Handle message rejection
                 parts = data.split("_")
@@ -8085,6 +8145,7 @@ class SimpleTelegramBot:
             [
                 Button.inline(f"🗑️ إفراغ القائمة", f"clear_filter_{task_id}_whitelist")
             ],
+            [Button.inline("ℹ️ تعليمات التنسيق", f"word_filters_help_{task_id}")],
             [Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]
         ]
 
@@ -8142,10 +8203,25 @@ class SimpleTelegramBot:
             [
                 Button.inline(f"🗑️ إفراغ القائمة", f"clear_filter_{task_id}_blacklist")
             ],
+            [Button.inline("ℹ️ تعليمات التنسيق", f"word_filters_help_{task_id}")],
             [Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]
         ]
 
         await self.edit_or_send_message(event, message, buttons=buttons)
+
+    async def word_filters_help(self, event, task_id):
+        """Show help for adding words with flags"""
+        help_text = (
+            "ℹ️ تعليمات تنسيق الكلمات\n\n"
+            "- أضف '#حساس' لجعل المطابقة حساسة لحالة الأحرف\n"
+            "- أضف '#كلمة' لمطابقة الكلمة كاملة فقط (تجاهل مثل نعمات)\n\n"
+            "أمثلة:\n"
+            "- نعم #كلمة\n"
+            "- Promo #حساس\n"
+            "- Offer #حساس #كلمة\n"
+        )
+        buttons = [[Button.inline("🔙 رجوع لفلاتر الكلمات", f"word_filters_{task_id}")]]
+        await self.edit_or_send_message(event, help_text, buttons=buttons)
 
     async def clear_filter_with_confirmation(self, event, task_id, filter_type):
         """Ask for confirmation before clearing a filter"""
@@ -8940,13 +9016,30 @@ class SimpleTelegramBot:
             await self.edit_or_send_message(event, "❌ لم يتم إدخال أي كلمات صحيحة")
             return
 
-        # Add each word
+        # Add each word (support flags: #حساس for case-sensitive, #كلمة for whole-word)
         added_count = 0
         for word in words:
             if len(word) > 200:  # Limit word length
                 continue
-            
-            success = self.db.add_word_to_filter(task_id, filter_type, word)
+
+            is_case_sensitive = False
+            is_whole_word = False
+            # Flags at the end of the token
+            if word.endswith('#حساس'):
+                is_case_sensitive = True
+                word = word.replace('#حساس', '').strip()
+            if word.endswith('#كلمة'):
+                is_whole_word = True
+                word = word.replace('#كلمة', '').strip()
+            # Also support both flags regardless of order
+            if '#حساس' in word:
+                is_case_sensitive = True
+                word = word.replace('#حساس', '').strip()
+            if '#كلمة' in word:
+                is_whole_word = True
+                word = word.replace('#كلمة', '').strip()
+
+            success = self.db.add_word_to_filter(task_id, filter_type, word, is_case_sensitive=is_case_sensitive, is_whole_word=is_whole_word)
             if success:
                 added_count += 1
 
@@ -9476,6 +9569,8 @@ class SimpleTelegramBot:
         buttons = [
             [Button.inline(toggle_text, f"toggle_header_{task_id}")],
             [Button.inline("✏️ تعديل النص", f"edit_header_{task_id}")],
+            [Button.inline(f"تطبيق على النصوص: {'✅' if settings.get('apply_header_to_texts', True) else '❌'}", f"toggle_header_scope_texts_{task_id}")],
+            [Button.inline(f"تطبيق على الوسائط: {'✅' if settings.get('apply_header_to_media', True) else '❌'}", f"toggle_header_scope_media_{task_id}")],
             [Button.inline("🔙 عودة للإعدادات", f"task_settings_{task_id}")]
         ]
 
@@ -9571,6 +9666,8 @@ class SimpleTelegramBot:
         buttons = [
             [Button.inline(toggle_text, f"toggle_footer_{task_id}")],
             [Button.inline("✏️ تعديل النص", f"edit_footer_{task_id}")],
+            [Button.inline(f"تطبيق على النصوص: {'✅' if settings.get('apply_footer_to_texts', True) else '❌'}", f"toggle_footer_scope_texts_{task_id}")],
+            [Button.inline(f"تطبيق على الوسائط: {'✅' if settings.get('apply_footer_to_media', True) else '❌'}", f"toggle_footer_scope_media_{task_id}")],
             [Button.inline("🔙 عودة للإعدادات", f"task_settings_{task_id}")]
         ]
 
@@ -10487,21 +10584,88 @@ class SimpleTelegramBot:
                     
                 # Get all targets for this task
                 targets = userbot_instance.db.get_task_targets(pending_message['task_id'])
-                
+
                 success_count = 0
                 for target in targets:
                     try:
-                        # Forward the message to each target
-                        await userbot_instance._forward_or_copy_message(
-                            message, task, user_id, client, target['chat_id']
+                        target_chat_id = target['chat_id']
+
+                        # Use the same full sending pipeline as auto mode
+                        ub = userbot_instance
+                        message_settings = ub.get_message_settings(task['id'])
+                        forwarding_settings = ub.get_forwarding_settings(task['id'])
+
+                        # Resolve target entity
+                        try:
+                            target_entity = await client.get_entity(int(target_chat_id))
+                        except Exception:
+                            target_entity = await client.get_entity(str(target_chat_id))
+
+                        # Prepare final text
+                        original_text = message.text or ""
+                        cleaned_text = ub.apply_text_cleaning(original_text, task['id']) if original_text else original_text
+                        modified_text = ub.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
+                        translated_text = await ub.apply_translation(task['id'], modified_text) if modified_text else modified_text
+                        formatted_text = ub.apply_text_formatting(task['id'], translated_text) if translated_text else translated_text
+                        final_text = ub.apply_message_formatting(formatted_text, message_settings, is_media=bool(message.media))
+
+                        forward_mode = task.get('forward_mode', 'forward')
+                        applies_header = message_settings.get('header_enabled', False)
+                        applies_footer = message_settings.get('footer_enabled', False)
+                        requires_copy_mode = (
+                            applies_header or applies_footer or
+                            (original_text != modified_text) or
+                            message_settings.get('inline_buttons_enabled', False)
                         )
+                        final_mode = ub._determine_final_send_mode(forward_mode, requires_copy_mode)
+
+                        if final_mode == 'forward' and not (message.media and hasattr(message.media, 'webpage') and message.media.webpage):
+                            forwarded_msg = await client.forward_messages(
+                                target_entity,
+                                message,
+                                silent=forwarding_settings.get('silent_notifications', False)
+                            )
+                            msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                        else:
+                            if message.media:
+                                forwarded_msg = await client.send_file(
+                                    target_entity,
+                                    file=message.media,
+                                    caption=final_text or None,
+                                    silent=forwarding_settings.get('silent_notifications', False),
+                                    force_document=False
+                                )
+                            else:
+                                forwarded_msg = await client.send_message(
+                                    target_entity,
+                                    final_text or (message.text or ""),
+                                    silent=forwarding_settings.get('silent_notifications', False)
+                                )
+                            msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+
+                        # Post-forwarding settings and mapping
+                        try:
+                            inline_buttons = None
+                            if message_settings.get('inline_buttons_enabled', False):
+                                inline_buttons = ub.build_inline_buttons(task['id'])
+                            await ub.apply_post_forwarding_settings(client, target_entity, msg_id, forwarding_settings, task['id'], inline_buttons=inline_buttons, has_original_buttons=bool(getattr(message, 'reply_markup', None)))
+                            ub.db.save_message_mapping(
+                                task_id=task['id'],
+                                source_chat_id=str(source_chat_id),
+                                source_message_id=source_message_id,
+                                target_chat_id=str(target_chat_id),
+                                target_message_id=msg_id
+                            )
+                        except Exception as post_err:
+                            logger.debug(f"خطأ في تطبيق إعدادات ما بعد الإرسال/حفظ التطابق: {post_err}")
+
                         success_count += 1
-                        logger.info(f"✅ تم إرسال رسالة موافق عليها إلى {target['chat_id']}")
-                        
+                        logger.info(f"✅ تم إرسال رسالة موافق عليها إلى {target_chat_id}")
+
                         # Add delay between targets
                         import asyncio
                         await asyncio.sleep(1)
-                        
+
                     except Exception as target_error:
                         logger.error(f"❌ فشل في إرسال الرسالة إلى {target['chat_id']}: {target_error}")
                         continue

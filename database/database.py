@@ -209,17 +209,24 @@ class Database:
                 )
             ''')
 
-            # Word filter entries table
+            # Word filter entries table (with case sensitivity and whole-word support)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS word_filter_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     filter_id INTEGER NOT NULL,
                     word_or_phrase TEXT NOT NULL,
                     is_case_sensitive BOOLEAN DEFAULT FALSE,
+                    is_whole_word BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (filter_id) REFERENCES task_word_filters (id) ON DELETE CASCADE
                 )
             ''')
+
+            # Backfill missing columns for existing databases
+            try:
+                cursor.execute("ALTER TABLE word_filter_entries ADD COLUMN is_whole_word BOOLEAN DEFAULT FALSE")
+            except sqlite3.OperationalError:
+                pass
 
             # Task text replacements table
             cursor.execute('''
@@ -299,12 +306,35 @@ class Database:
                     header_text TEXT DEFAULT '',
                     footer_enabled BOOLEAN DEFAULT FALSE,
                     footer_text TEXT DEFAULT '',
+                    -- New scope flags for header/footer application
+                    apply_header_to_texts BOOLEAN DEFAULT TRUE,
+                    apply_header_to_media BOOLEAN DEFAULT TRUE,
+                    apply_footer_to_texts BOOLEAN DEFAULT TRUE,
+                    apply_footer_to_media BOOLEAN DEFAULT TRUE,
                     inline_buttons_enabled BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
+
+            # Backfill missing scope columns for existing databases
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN apply_header_to_texts BOOLEAN DEFAULT TRUE")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN apply_header_to_media BOOLEAN DEFAULT TRUE")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN apply_footer_to_texts BOOLEAN DEFAULT TRUE")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE task_message_settings ADD COLUMN apply_footer_to_media BOOLEAN DEFAULT TRUE")
+            except sqlite3.OperationalError:
+                pass
 
             # Task forwarding settings table - for advanced forwarding options
             cursor.execute('''
@@ -1552,7 +1582,7 @@ class Database:
             conn.commit()
             return cursor.lastrowid
 
-    def add_word_to_filter(self, task_id: int, filter_type: str, word_or_phrase: str, is_case_sensitive: bool = False):
+    def add_word_to_filter(self, task_id: int, filter_type: str, word_or_phrase: str, is_case_sensitive: bool = False, is_whole_word: bool = False):
         """Add word/phrase to filter list"""
         filter_id = self.get_word_filter_id(task_id, filter_type)
 
@@ -1568,9 +1598,9 @@ class Database:
                 return False  # Word already exists
 
             cursor.execute('''
-                INSERT INTO word_filter_entries (filter_id, word_or_phrase, is_case_sensitive)
-                VALUES (?, ?, ?)
-            ''', (filter_id, word_or_phrase, is_case_sensitive))
+                INSERT INTO word_filter_entries (filter_id, word_or_phrase, is_case_sensitive, is_whole_word)
+                VALUES (?, ?, ?, ?)
+            ''', (filter_id, word_or_phrase, is_case_sensitive, is_whole_word))
             conn.commit()
             return cursor.lastrowid
 
@@ -1594,7 +1624,7 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, word_or_phrase, is_case_sensitive FROM word_filter_entries
+                SELECT id, word_or_phrase, is_case_sensitive, COALESCE(is_whole_word, 0) AS is_whole_word FROM word_filter_entries
                 WHERE filter_id = ?
                 ORDER BY word_or_phrase
             ''', (filter_id,))
@@ -1603,7 +1633,7 @@ class Database:
             # This includes case sensitivity info to avoid separate queries
             words = []
             for row in cursor.fetchall():
-                words.append((row['id'], filter_id, row['word_or_phrase'], row['is_case_sensitive']))
+                words.append((row['id'], filter_id, row['word_or_phrase'], row['is_case_sensitive'], row['is_whole_word']))
             return words
 
     def get_word_id(self, task_id: int, filter_type: str, word: str):
@@ -1684,17 +1714,26 @@ class Database:
                 found_match = False
 
                 for word_data in whitelist_words:
-                    word = word_data[2]  # word_or_phrase from tuple
-                    is_case_sensitive = word_data[3]  # is_case_sensitive from tuple
+                    word = word_data[2]  # word_or_phrase
+                    is_case_sensitive = bool(word_data[3])
+                    is_whole_word = bool(word_data[4]) if len(word_data) > 4 else False
 
-                    if is_case_sensitive:
-                        if word in message_text:
+                    if is_whole_word:
+                        import re
+                        flags = 0 if is_case_sensitive else re.IGNORECASE
+                        pattern = r'\b' + re.escape(word) + r'\b'
+                        if re.search(pattern, message_text, flags=flags):
                             found_match = True
                             break
                     else:
-                        if word.lower() in message_lower:
-                            found_match = True
-                            break
+                        if is_case_sensitive:
+                            if word in message_text:
+                                found_match = True
+                                break
+                        else:
+                            if word.lower() in message_lower:
+                                found_match = True
+                                break
 
                 if not found_match:
                     logger.info(f"🚫 الرسالة محظورة: لا تحتوي على كلمات من القائمة البيضاء")
@@ -1706,17 +1745,26 @@ class Database:
             message_lower = message_text.lower()
 
             for word_data in blacklist_words:
-                word = word_data[2]  # word_or_phrase from tuple
-                is_case_sensitive = word_data[3]  # is_case_sensitive from tuple
+                word = word_data[2]
+                is_case_sensitive = bool(word_data[3])
+                is_whole_word = bool(word_data[4]) if len(word_data) > 4 else False
 
-                if is_case_sensitive:
-                    if word in message_text:
-                        logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
+                if is_whole_word:
+                    import re
+                    flags = 0 if is_case_sensitive else re.IGNORECASE
+                    pattern = r'\b' + re.escape(word) + r'\b'
+                    if re.search(pattern, message_text, flags=flags):
+                        logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}' (تطابق كلمة كاملة)")
                         return False
                 else:
-                    if word.lower() in message_lower:
-                        logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
-                        return False
+                    if is_case_sensitive:
+                        if word in message_text:
+                            logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
+                            return False
+                    else:
+                        if word.lower() in message_lower:
+                            logger.info(f"🚫 الرسالة محظورة: تحتوي على كلمة محظورة '{word}'")
+                            return False
 
         return True  # Message is allowed
 
@@ -2012,14 +2060,41 @@ class Database:
                     ''', (task_id,))
                     conn.commit()
                     inline_buttons_enabled = False
+                    apply_header_to_texts = True
+                    apply_header_to_media = True
+                    apply_footer_to_texts = True
+                    apply_footer_to_media = True
                 else:
                     inline_buttons_enabled = bool(settings_result[0])
+                    # Backfill and read scope flags safely
+                    try:
+                        cursor.execute('SELECT apply_header_to_texts, apply_header_to_media, apply_footer_to_texts, apply_footer_to_media FROM task_message_settings WHERE task_id = ?', (task_id,))
+                        scope_row = cursor.fetchone()
+                        if scope_row:
+                            apply_header_to_texts = bool(scope_row['apply_header_to_texts'])
+                            apply_header_to_media = bool(scope_row['apply_header_to_media'])
+                            apply_footer_to_texts = bool(scope_row['apply_footer_to_texts'])
+                            apply_footer_to_media = bool(scope_row['apply_footer_to_media'])
+                        else:
+                            apply_header_to_texts = True
+                            apply_header_to_media = True
+                            apply_footer_to_texts = True
+                            apply_footer_to_media = True
+                    except Exception:
+                        apply_header_to_texts = True
+                        apply_header_to_media = True
+                        apply_footer_to_texts = True
+                        apply_footer_to_media = True
 
                 return {
                     'header_enabled': header_result[0] if header_result else False,
                     'header_text': header_result[1] if header_result else None,
                     'footer_enabled': footer_result[0] if footer_result else False,
                     'footer_text': footer_result[1] if footer_result else None,
+                    'apply_header_to_texts': apply_header_to_texts,
+                    'apply_header_to_media': apply_header_to_media,
+                    'apply_footer_to_texts': apply_footer_to_texts,
+                    'apply_footer_to_media': apply_footer_to_media,
                     'inline_buttons_enabled': inline_buttons_enabled
                 }
         except Exception as e:
@@ -2029,6 +2104,10 @@ class Database:
                 'header_text': None,
                 'footer_enabled': False,
                 'footer_text': None,
+                'apply_header_to_texts': True,
+                'apply_header_to_media': True,
+                'apply_footer_to_texts': True,
+                'apply_footer_to_media': True,
                 'inline_buttons_enabled': False
             }
 
@@ -2081,6 +2160,28 @@ class Database:
                 ''', (task_id, enabled, footer_text))
 
             conn.commit()
+
+    def update_message_settings_scope(self, task_id: int, **kwargs):
+        """Update scope flags for header/footer application (texts/media)"""
+        allowed_keys = {
+            'apply_header_to_texts', 'apply_header_to_media',
+            'apply_footer_to_texts', 'apply_footer_to_media'
+        }
+        updates = {k: bool(v) for k, v in kwargs.items() if k in allowed_keys}
+        if not updates:
+            return False
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Ensure row exists
+            cursor.execute('INSERT OR IGNORE INTO task_message_settings (task_id) VALUES (?)', (task_id,))
+            set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
+            values = list(updates.values()) + [task_id]
+            cursor.execute(
+                f"UPDATE task_message_settings SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?",
+                values
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def update_inline_buttons_enabled(self, task_id: int, enabled: bool):
         """Update inline buttons enabled status"""
