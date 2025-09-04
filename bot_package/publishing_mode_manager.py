@@ -340,10 +340,77 @@ class PublishingModeManager:
                     try:
                         target_chat_id = target['chat_id']
                         
-                        # إرسال الرسالة إلى الهدف
-                        await self._forward_message_to_target(
-                            message, task, user_id, client, target_chat_id
+                        # إرسال الرسالة باستخدام المنطق الكامل للإرسال كما في الوضع التلقائي
+                        from userbot_service.userbot import userbot_instance
+                        ub = userbot_instance
+                        message_settings = ub.get_message_settings(task['id'])
+                        forwarding_settings = ub.get_forwarding_settings(task['id'])
+
+                        # تحديد الكيان الهدف
+                        try:
+                            target_entity = await client.get_entity(int(target_chat_id))
+                        except Exception:
+                            target_entity = await client.get_entity(str(target_chat_id))
+
+                        # تجهيز النص النهائي وفق نفس مسار التحويل
+                        original_text = message.text or ""
+                        cleaned_text = ub.apply_text_cleaning(original_text, task['id']) if original_text else original_text
+                        modified_text = ub.apply_text_replacements(task['id'], cleaned_text) if cleaned_text else cleaned_text
+                        translated_text = await ub.apply_translation(task['id'], modified_text) if modified_text else modified_text
+                        formatted_text = ub.apply_text_formatting(task['id'], translated_text) if translated_text else translated_text
+                        final_text = ub.apply_message_formatting(formatted_text, message_settings, is_media=bool(message.media))
+
+                        forward_mode = task.get('forward_mode', 'forward')
+                        # تقدير الحاجة لوضع النسخ
+                        applies_header = message_settings.get('header_enabled', False)
+                        applies_footer = message_settings.get('footer_enabled', False)
+                        requires_copy_mode = (
+                            applies_header or applies_footer or
+                            (original_text != modified_text) or
+                            message_settings.get('inline_buttons_enabled', False)
                         )
+                        final_mode = ub._determine_final_send_mode(forward_mode, requires_copy_mode)
+
+                        if final_mode == 'forward' and not (message.media and hasattr(message.media, 'webpage') and message.media.webpage):
+                            forwarded_msg = await client.forward_messages(
+                                target_entity,
+                                message,
+                                silent=forwarding_settings.get('silent_notifications', False)
+                            )
+                            msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+                        else:
+                            if message.media:
+                                forwarded_msg = await client.send_file(
+                                    target_entity,
+                                    file=message.media,
+                                    caption=final_text or None,
+                                    silent=forwarding_settings.get('silent_notifications', False),
+                                    force_document=False
+                                )
+                            else:
+                                forwarded_msg = await client.send_message(
+                                    target_entity,
+                                    final_text or (message.text or ""),
+                                    silent=forwarding_settings.get('silent_notifications', False)
+                                )
+                            msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
+
+                        # تطبيق إعدادات ما بعد الإرسال وتخزين التطابق
+                        try:
+                            inline_buttons = None
+                            if message_settings.get('inline_buttons_enabled', False):
+                                inline_buttons = ub.build_inline_buttons(task['id'])
+                            await ub.apply_post_forwarding_settings(client, target_entity, msg_id, forwarding_settings, task['id'], inline_buttons=inline_buttons, has_original_buttons=bool(getattr(message, 'reply_markup', None)))
+                            ub.db.save_message_mapping(
+                                task_id=task['id'],
+                                source_chat_id=str(message.chat_id),
+                                source_message_id=message.id,
+                                target_chat_id=str(target_chat_id),
+                                target_message_id=msg_id
+                            )
+                        except Exception as post_err:
+                            logger.debug(f"خطأ في إعدادات ما بعد الإرسال/حفظ التطابق: {post_err}")
+
                         success_count += 1
                         logger.info(f"✅ تم إرسال رسالة موافق عليها إلى {target_chat_id}")
                         
