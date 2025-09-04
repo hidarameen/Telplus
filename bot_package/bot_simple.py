@@ -170,14 +170,21 @@ class SimpleTelegramBot:
             logger.error("❌ BOT_TOKEN غير محدد في متغيرات البيئة")
             return False
 
-        # Create bot client with unique session name
-        self.bot = TelegramClient('simple_bot_session', API_ID, API_HASH)
-        await self.bot.start(bot_token=BOT_TOKEN)
-        
-        # CRITICAL FIX: Ensure session file has correct permissions after creation
+        # Create bot client with session file in persistent directory
         import os
         import stat
-        session_file = 'simple_bot_session.session'
+        data_dir = os.getenv('DATA_DIR', '/app/data')
+        sessions_dir = os.getenv('SESSIONS_DIR', os.path.join(data_dir, 'sessions'))
+        try:
+            os.makedirs(sessions_dir, exist_ok=True)
+        except Exception:
+            pass
+        session_name_path = os.path.join(sessions_dir, 'simple_bot_session')
+        self.bot = TelegramClient(session_name_path, API_ID, API_HASH)
+        await self.bot.start(bot_token=BOT_TOKEN)
+        
+        # Ensure session file has correct permissions after creation
+        session_file = session_name_path if session_name_path.endswith('.session') else f'{session_name_path}.session'
         if os.path.exists(session_file):
             os.chmod(session_file, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)  # 666
             logger.info(f"✅ تم تصحيح صلاحيات ملف الجلسة: {session_file}")
@@ -7449,9 +7456,16 @@ class SimpleTelegramBot:
         # Create temporary Telegram client for authentication
         temp_client = None
         try:
-            # Create unique session for this authentication attempt
+            # Create unique session for this authentication attempt in persistent sessions directory
+            data_dir = os.getenv('DATA_DIR', '/app/data')
+            sessions_dir = os.getenv('SESSIONS_DIR', os.path.join(data_dir, 'sessions'))
+            try:
+                os.makedirs(sessions_dir, exist_ok=True)
+            except Exception:
+                pass
             session_name = f'auth_{user_id}_{int(datetime.now().timestamp())}'
-            temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
+            session_path = os.path.join(sessions_dir, session_name)
+            temp_client = TelegramClient(session_path, int(API_ID), API_HASH)
 
             # Connect with timeout
             await asyncio.wait_for(temp_client.connect(), timeout=10)
@@ -7469,7 +7483,7 @@ class SimpleTelegramBot:
             auth_data = {
                 'phone': phone,
                 'phone_code_hash': sent_code.phone_code_hash,
-                'session_name': session_name
+                'session_name': session_path
             }
             self.db.set_conversation_state(user_id, 'waiting_code', json.dumps(auth_data))
 
@@ -7583,7 +7597,16 @@ class SimpleTelegramBot:
             phone_code_hash = auth_data['phone_code_hash']
 
             # Create client and sign in
+            data_dir = os.getenv('DATA_DIR', '/app/data')
+            sessions_dir = os.getenv('SESSIONS_DIR', os.path.join(data_dir, 'sessions'))
+            try:
+                os.makedirs(sessions_dir, exist_ok=True)
+            except Exception:
+                pass
             session_name = auth_data.get('session_name', f'auth_{user_id}_{int(datetime.now().timestamp())}')
+            # If old auth_data stored a bare name, place it under sessions_dir
+            if not os.path.isabs(session_name):
+                session_name = os.path.join(sessions_dir, session_name)
             temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
             await temp_client.connect()
 
