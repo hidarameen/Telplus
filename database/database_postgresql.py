@@ -621,6 +621,51 @@ class PostgreSQLDatabase:
                     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
                 )
             ''')
+            
+            # Task audio text cleaning settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_text_cleaning_settings (
+                    id SERIAL PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    clean_links BOOLEAN DEFAULT FALSE,
+                    clean_mentions BOOLEAN DEFAULT FALSE,
+                    clean_hashtags BOOLEAN DEFAULT FALSE,
+                    clean_emojis BOOLEAN DEFAULT FALSE,
+                    clean_extra_spaces BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+            
+            # Task audio text replacements settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_text_replacements_settings (
+                    id SERIAL PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+            
+            # Task audio tag cleaning settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_audio_tag_cleaning_settings (
+                    id SERIAL PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    enabled BOOLEAN DEFAULT FALSE,
+                    clean_title BOOLEAN DEFAULT FALSE,
+                    clean_artist BOOLEAN DEFAULT FALSE,
+                    clean_album BOOLEAN DEFAULT FALSE,
+                    clean_genre BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
 
             # Message duplicates table
             cursor.execute('''
@@ -774,6 +819,19 @@ END$$;
             except Exception:
                 pass
 
+            # Task approval settings table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS task_approval_settings (
+                    id SERIAL PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    approval_enabled BOOLEAN DEFAULT FALSE,
+                    auto_approve_admins BOOLEAN DEFAULT FALSE,
+                    approval_timeout_minutes INTEGER DEFAULT 60,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+            
             # Compatibility columns for message settings / inline buttons / duplicates
             try:
                 cursor.execute("ALTER TABLE task_message_settings ADD COLUMN IF NOT EXISTS header_enabled BOOLEAN DEFAULT FALSE")
@@ -2223,6 +2281,84 @@ END$$;
             logger.error(f"Error clearing language filters: {e}")
             return False
 
+    # ===== Header and Footer Settings Functions =====
+    
+    def update_header_settings(self, task_id: int, enabled: bool, header_text: str = None) -> bool:
+        """Update header settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_headers (task_id, header_text, is_active)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET 
+                        header_text = EXCLUDED.header_text,
+                        is_active = EXCLUDED.is_active,
+                        created_at = CURRENT_TIMESTAMP
+                ''', (task_id, header_text, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating header settings: {e}")
+            return False
+    
+    def update_footer_settings(self, task_id: int, enabled: bool, footer_text: str = None) -> bool:
+        """Update footer settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_footers (task_id, footer_text, is_active)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET 
+                        footer_text = EXCLUDED.footer_text,
+                        is_active = EXCLUDED.is_active,
+                        created_at = CURRENT_TIMESTAMP
+                ''', (task_id, footer_text, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating footer settings: {e}")
+            return False
+    
+    def get_header_settings(self, task_id: int) -> Optional[Dict]:
+        """Get header settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT header_text, is_active FROM task_headers WHERE task_id = %s
+                ''', (task_id,))
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'enabled': bool(result['is_active']),
+                        'header_text': result['header_text']
+                    }
+                return {'enabled': False, 'header_text': None}
+        except Exception as e:
+            logger.error(f"Error getting header settings: {e}")
+            return {'enabled': False, 'header_text': None}
+    
+    def get_footer_settings(self, task_id: int) -> Optional[Dict]:
+        """Get footer settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT footer_text, is_active FROM task_footers WHERE task_id = %s
+                ''', (task_id,))
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'enabled': bool(result['is_active']),
+                        'footer_text': result['footer_text']
+                    }
+                return {'enabled': False, 'footer_text': None}
+        except Exception as e:
+            logger.error(f"Error getting footer settings: {e}")
+            return {'enabled': False, 'footer_text': None}
+
     # ===== Pending messages =====
     def get_pending_message_by_source(self, task_id: int, user_id: int, source_chat_id: str, source_message_id: int):
         try:
@@ -2589,3 +2725,408 @@ END$$;
         except Exception as e:
             logger.error(f"Error creating task with multiple sources/targets: {e}")
             return None
+
+    # ===== Inline Buttons Management Functions =====
+    
+    def get_inline_buttons(self, task_id: int) -> List[Dict]:
+        """Get inline buttons for task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT id, button_text, button_url, button_callback, button_order, 
+                           row_position, col_position, is_active
+                    FROM task_inline_buttons 
+                    WHERE task_id = %s AND is_active = TRUE
+                    ORDER BY button_order, row_position, col_position
+                ''', (task_id,))
+                results = cursor.fetchall()
+                
+                return [{
+                    'id': row['id'],
+                    'task_id': task_id,
+                    'button_text': row['button_text'],
+                    'button_url': row['button_url'],
+                    'button_callback': row['button_callback'],
+                    'row_position': row['row_position'] or 0,
+                    'col_position': row['col_position'] or 0,
+                    'button_order': row['button_order'] or 0
+                } for row in results]
+        except Exception as e:
+            logger.error(f"Error getting inline buttons: {e}")
+            return []
+    
+    def add_inline_button(self, task_id: int, button_text: str, button_url: str, 
+                         row_pos: int = 0, col_pos: int = 0) -> Optional[int]:
+        """Add inline button"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_inline_buttons 
+                    (task_id, button_text, button_url, row_position, col_position, is_active)
+                    VALUES (%s, %s, %s, %s, %s, TRUE)
+                    RETURNING id
+                ''', (task_id, button_text, button_url, row_pos, col_pos))
+                button_id = cursor.fetchone()[0]
+                conn.commit()
+                return button_id
+        except Exception as e:
+            logger.error(f"Error adding inline button: {e}")
+            return None
+    
+    def update_inline_button(self, button_id: int, button_text: str, button_url: str, 
+                           row_pos: int, col_pos: int) -> bool:
+        """Update inline button"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE task_inline_buttons 
+                    SET button_text = %s, button_url = %s, row_position = %s, col_position = %s
+                    WHERE id = %s
+                ''', (button_text, button_url, row_pos, col_pos, button_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating inline button: {e}")
+            return False
+    
+    def delete_inline_button(self, button_id: int) -> bool:
+        """Delete inline button"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_inline_buttons WHERE id = %s', (button_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting inline button: {e}")
+            return False
+    
+    def clear_inline_buttons(self, task_id: int) -> int:
+        """Clear all inline buttons for task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_inline_buttons WHERE task_id = %s', (task_id,))
+                deleted_count = cursor.rowcount
+                conn.commit()
+                return deleted_count
+        except Exception as e:
+            logger.error(f"Error clearing inline buttons: {e}")
+            return 0
+
+    # ===== Text Cleaning and Formatting Functions =====
+    
+    def update_text_cleaning_setting(self, task_id: int, setting_name: str, value: bool) -> bool:
+        """Update a specific text cleaning setting"""
+        try:
+            allowed_settings = {
+                'remove_links': 'clean_links',
+                'remove_emojis': 'clean_emojis', 
+                'remove_hashtags': 'clean_hashtags',
+                'remove_mentions': 'clean_mentions',
+                'remove_empty_lines': 'clean_extra_spaces',
+                'remove_lines_with_keywords': 'clean_extra_spaces'  # Map to available column
+            }
+            
+            if setting_name not in allowed_settings:
+                return False
+                
+            column_name = allowed_settings[setting_name]
+            
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    INSERT INTO task_text_cleaning_settings (task_id, {column_name}, is_active)
+                    VALUES (%s, %s, TRUE)
+                    ON CONFLICT (task_id) DO UPDATE SET 
+                        {column_name} = EXCLUDED.{column_name},
+                        is_active = TRUE
+                ''', (task_id, value))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating text cleaning setting: {e}")
+            return False
+    
+    def add_text_cleaning_keywords(self, task_id: int, keywords: List[str]) -> int:
+        """Add text cleaning keywords for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get or create cleaning settings
+                cursor.execute('''
+                    INSERT INTO task_text_cleaning_settings (task_id, is_active)
+                    VALUES (%s, TRUE)
+                    ON CONFLICT (task_id) DO NOTHING
+                    RETURNING id
+                ''', (task_id,))
+                
+                cursor.execute('SELECT id FROM task_text_cleaning_settings WHERE task_id = %s', (task_id,))
+                settings_id = cursor.fetchone()[0]
+                
+                added_count = 0
+                for keyword in keywords:
+                    keyword = keyword.strip()
+                    if keyword:
+                        # Check if keyword already exists
+                        cursor.execute('''
+                            SELECT id FROM task_text_cleaning_keywords
+                            WHERE cleaning_settings_id = %s AND keyword = %s
+                        ''', (settings_id, keyword))
+                        
+                        if not cursor.fetchone():
+                            cursor.execute('''
+                                INSERT INTO task_text_cleaning_keywords (cleaning_settings_id, keyword)
+                                VALUES (%s, %s)
+                            ''', (settings_id, keyword))
+                            added_count += 1
+                
+                conn.commit()
+                return added_count
+        except Exception as e:
+            logger.error(f"Error adding text cleaning keywords: {e}")
+            return 0
+    
+    def remove_text_cleaning_keyword(self, task_id: int, keyword: str) -> bool:
+        """Remove a text cleaning keyword"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM task_text_cleaning_keywords 
+                    WHERE cleaning_settings_id IN (
+                        SELECT id FROM task_text_cleaning_settings WHERE task_id = %s
+                    ) AND keyword = %s
+                ''', (task_id, keyword))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing text cleaning keyword: {e}")
+            return False
+    
+    def clear_text_cleaning_keywords(self, task_id: int) -> bool:
+        """Clear all text cleaning keywords for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM task_text_cleaning_keywords 
+                    WHERE cleaning_settings_id IN (
+                        SELECT id FROM task_text_cleaning_settings WHERE task_id = %s
+                    )
+                ''', (task_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error clearing text cleaning keywords: {e}")
+            return False
+    
+    def update_text_formatting_settings(self, task_id: int, text_formatting_enabled: bool = None,
+                                       format_type: str = None, hyperlink_text: str = None, 
+                                       hyperlink_url: str = None) -> bool:
+        """Update text formatting settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current settings or create defaults
+                cursor.execute('''
+                    SELECT * FROM task_text_formatting_settings WHERE task_id = %s
+                ''', (task_id,))
+                current = cursor.fetchone()
+                
+                if current:
+                    # Update existing settings
+                    updates = []
+                    params = []
+                    
+                    if text_formatting_enabled is not None:
+                        updates.append('is_active = %s')
+                        params.append(text_formatting_enabled)
+                    
+                    if format_type is not None:
+                        # Map format types to available columns
+                        if format_type == 'bold':
+                            updates.append('bold_links = %s')
+                            params.append(True)
+                        elif format_type == 'italic':
+                            updates.append('italic_mentions = %s')
+                            params.append(True)
+                    
+                    if updates:
+                        params.append(task_id)
+                        cursor.execute(f'''
+                            UPDATE task_text_formatting_settings 
+                            SET {', '.join(updates)}
+                            WHERE task_id = %s
+                        ''', params)
+                else:
+                    # Create new settings
+                    cursor.execute('''
+                        INSERT INTO task_text_formatting_settings 
+                        (task_id, is_active, bold_links, italic_mentions)
+                        VALUES (%s, %s, %s, %s)
+                    ''', (task_id, text_formatting_enabled or False, 
+                          format_type == 'bold', format_type == 'italic'))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating text formatting settings: {e}")
+            return False
+    
+    def toggle_text_formatting(self, task_id: int) -> bool:
+        """Toggle text formatting on/off for a task"""
+        try:
+            current_settings = self.get_text_formatting_settings(task_id)
+            new_enabled = not (current_settings and current_settings.get('is_active', False))
+            return self.update_text_formatting_settings(task_id, text_formatting_enabled=new_enabled)
+        except Exception as e:
+            logger.error(f"Error toggling text formatting: {e}")
+            return False
+
+    # ===== Complete Message Settings Functions =====
+    
+    def get_complete_message_settings(self, task_id: int) -> dict:
+        """Get comprehensive message formatting settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                # Get header settings
+                header_settings = self.get_header_settings(task_id)
+                
+                # Get footer settings  
+                footer_settings = self.get_footer_settings(task_id)
+                
+                # Get inline buttons count
+                cursor.execute('SELECT COUNT(*) as count FROM task_inline_buttons WHERE task_id = %s AND is_active = TRUE', (task_id,))
+                buttons_count = cursor.fetchone()['count']
+                
+                # Get text cleaning settings
+                text_cleaning = self.get_text_cleaning_settings(task_id)
+                
+                # Get text formatting settings
+                text_formatting = self.get_text_formatting_settings(task_id)
+                
+                return {
+                    'header_enabled': header_settings.get('enabled', False),
+                    'header_text': header_settings.get('header_text'),
+                    'footer_enabled': footer_settings.get('enabled', False), 
+                    'footer_text': footer_settings.get('footer_text'),
+                    'inline_buttons_enabled': buttons_count > 0,
+                    'text_cleaning_enabled': text_cleaning and text_cleaning.get('is_active', False),
+                    'text_formatting_enabled': text_formatting and text_formatting.get('is_active', False)
+                }
+        except Exception as e:
+            logger.error(f"Error getting complete message settings: {e}")
+            return {
+                'header_enabled': False,
+                'header_text': None,
+                'footer_enabled': False,
+                'footer_text': None,
+                'inline_buttons_enabled': False,
+                'text_cleaning_enabled': False,
+                'text_formatting_enabled': False
+            }
+    
+    # ===== Advanced Task Settings Functions =====
+    
+    def get_task_advanced_settings(self, task_id: int) -> dict:
+        """Get all advanced settings for a task"""
+        try:
+            return {
+                'audio_metadata': self.get_audio_metadata_settings(task_id),
+                'audio_template': self.get_audio_template_settings(task_id),
+                'character_limit': self.get_character_limit_settings(task_id),
+                'rate_limit': self.get_rate_limit_settings(task_id),
+                'forwarding_delay': self.get_forwarding_delay_settings(task_id),
+                'sending_interval': self.get_sending_interval_settings(task_id),
+                'working_hours': self.get_working_hours(task_id),
+                'duplicate_settings': self.get_duplicate_settings(task_id),
+                'watermark_settings': self.get_watermark_settings(task_id),
+                'translation_settings': self.get_translation_settings(task_id),
+                'advanced_filters': self.get_advanced_filters_settings(task_id)
+            }
+        except Exception as e:
+            logger.error(f"Error getting task advanced settings: {e}")
+            return {}
+    
+    def update_task_setting(self, task_id: int, setting_type: str, setting_key: str, value) -> bool:
+        """Generic function to update any task setting"""
+        try:
+            setting_map = {
+                'character_limit': self.update_character_limit_settings,
+                'audio_metadata': self.update_audio_metadata_setting,
+                'text_cleaning': self.update_text_cleaning_setting,
+                'text_formatting': self.update_text_formatting_settings
+            }
+            
+            if setting_type in setting_map:
+                if setting_type == 'character_limit':
+                    return setting_map[setting_type](task_id, **{setting_key: value})
+                elif setting_type == 'audio_metadata':
+                    return setting_map[setting_type](task_id, setting_key, value)
+                elif setting_type == 'text_cleaning':
+                    return setting_map[setting_type](task_id, setting_key, value)
+                elif setting_type == 'text_formatting':
+                    return setting_map[setting_type](task_id, **{setting_key: value})
+            
+            return False
+        except Exception as e:
+            logger.error(f"Error updating task setting: {e}")
+            return False
+    
+    # ===== Task Approval Settings Functions =====
+    
+    def get_task_approval_settings(self, task_id: int) -> Optional[Dict]:
+        """Get task approval settings"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT * FROM task_approval_settings WHERE task_id = %s
+                ''', (task_id,))
+                result = cursor.fetchone()
+                return dict(result) if result else {
+                    'approval_enabled': False,
+                    'auto_approve_admins': False,
+                    'approval_timeout_minutes': 60
+                }
+        except Exception as e:
+            logger.error(f"Error getting task approval settings: {e}")
+            return {'approval_enabled': False, 'auto_approve_admins': False, 'approval_timeout_minutes': 60}
+    
+    def update_task_approval_settings(self, task_id: int, **kwargs) -> bool:
+        """Update task approval settings"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                allowed_keys = ['approval_enabled', 'auto_approve_admins', 'approval_timeout_minutes']
+                updates = []
+                params = []
+                
+                for key, value in kwargs.items():
+                    if key in allowed_keys:
+                        updates.append(f"{key} = %s")
+                        params.append(value)
+                
+                if updates:
+                    params.append(task_id)
+                    cursor.execute(f'''
+                        INSERT INTO task_approval_settings (task_id, {', '.join(allowed_keys)})
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (task_id) DO UPDATE SET
+                            {', '.join(updates)}
+                    ''', [task_id] + [kwargs.get(key, False) for key in allowed_keys] + params[:-1])
+                    conn.commit()
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"Error updating task approval settings: {e}")
+            return False
