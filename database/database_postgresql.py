@@ -2484,3 +2484,108 @@ END$$;
     def get_audio_tag_cleaning_settings(self, task_id: int) -> Optional[Dict]:
         """Alias for get_audio_tag_text_cleaning_settings"""
         return self.get_audio_tag_text_cleaning_settings(task_id)
+
+    # ===== Missing Methods from Main Database =====
+    
+    def get_user_session_health(self, user_id: int) -> dict:
+        """Get session health status for a specific user"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT is_healthy, last_activity, connection_errors, last_error_time, last_error_message
+                    FROM user_sessions 
+                    WHERE user_id = %s AND is_authenticated = TRUE
+                ''', (user_id,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'is_healthy': bool(row['is_healthy']),
+                        'last_activity': row['last_activity'],
+                        'connection_errors': row['connection_errors'] or 0,
+                        'last_error_time': row['last_error_time'],
+                        'last_error': row['last_error_message']
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error getting user session health: {e}")
+            return None
+
+    def get_user_settings(self, user_id):
+        """Get user settings including timezone and language"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT timezone, language 
+                    FROM user_settings 
+                    WHERE user_id = %s
+                ''', (user_id,))
+                
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'timezone': result['timezone'],
+                        'language': result['language']
+                    }
+                else:
+                    # Create default settings if not exist
+                    cursor.execute('''
+                        INSERT INTO user_settings (user_id, timezone, language)
+                        VALUES (%s, 'Asia/Riyadh', 'ar')
+                        RETURNING timezone, language
+                    ''', (user_id,))
+                    result = cursor.fetchone()
+                    conn.commit()
+                    return {
+                        'timezone': result['timezone'],
+                        'language': result['language']
+                    }
+        except Exception as e:
+            logger.error(f"Error getting user settings: {e}")
+            return {'timezone': 'Asia/Riyadh', 'language': 'ar'}
+
+    def create_task_with_multiple_sources_targets(self, user_id: int, task_name: str, 
+                                                 source_chat_ids: list, source_chat_names: list,
+                                                 target_chat_ids: list, target_chat_names: list) -> int:
+        """Create new forwarding task with multiple sources and targets"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Create main task with the first source and target
+                first_source_id = source_chat_ids[0] if source_chat_ids else ''
+                first_source_name = source_chat_names[0] if source_chat_names else first_source_id
+                first_target_id = target_chat_ids[0] if target_chat_ids else ''
+                first_target_name = target_chat_names[0] if target_chat_names else first_target_id
+
+                cursor.execute('''
+                    INSERT INTO tasks 
+                    (user_id, task_name, source_chat_id, source_chat_name, target_chat_id, target_chat_name)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                ''', (user_id, task_name, first_source_id, first_source_name, first_target_id, first_target_name))
+
+                task_id = cursor.fetchone()[0]
+
+                # Add all sources to task_sources table
+                for i, source_id in enumerate(source_chat_ids):
+                    source_name = source_chat_names[i] if source_chat_names and i < len(source_chat_names) else source_id
+                    cursor.execute('''
+                        INSERT INTO task_sources (task_id, chat_id, chat_name)
+                        VALUES (%s, %s, %s)
+                    ''', (task_id, source_id, source_name))
+
+                # Add all targets to task_targets table
+                for i, target_id in enumerate(target_chat_ids):
+                    target_name = target_chat_names[i] if target_chat_names and i < len(target_chat_names) else target_id
+                    cursor.execute('''
+                        INSERT INTO task_targets (task_id, chat_id, chat_name)
+                        VALUES (%s, %s, %s)
+                    ''', (task_id, target_id, target_name))
+
+                conn.commit()
+                return task_id
+        except Exception as e:
+            logger.error(f"Error creating task with multiple sources/targets: {e}")
+            return None
