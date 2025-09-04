@@ -223,6 +223,9 @@ class SimpleTelegramBot:
             [Button.inline("⚙️ إعدادات متقدمة", f"advanced_audio_settings_{task_id}")],
             [Button.inline("🧹 تنظيف نصوص الوسوم", f"audio_text_cleaning_{task_id}")],
             [Button.inline("🔄 استبدال نصوص الوسوم", f"audio_text_replacements_{task_id}")],
+            [Button.inline("📝 فلاتر كلمات الوسوم", f"audio_word_filters_{task_id}")],
+            [Button.inline("📄 هيدر وفوتر الوسوم", f"audio_header_footer_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للمعالجة", f"audio_tag_selection_{task_id}")],
             [Button.inline("🔙 رجوع لإعدادات المهمة", f"task_settings_{task_id}")]
         ]
         message_text = (
@@ -239,7 +242,7 @@ class SimpleTelegramBot:
             f"• دمج مقاطع صوتية إضافية\n"
             f"• الحفاظ على الجودة 100%"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_recurring_posts(self, event, task_id: int):
         """عرض وإدارة المنشورات المتكررة للمهمة"""
@@ -276,7 +279,7 @@ class SimpleTelegramBot:
             f"اختر إجراء:"
         )
 
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_add_recurring_post(self, event, task_id: int):
         """بدء إضافة منشور متكرر عبر إعادة توجيه رسالة من قناة محددة"""
@@ -354,60 +357,86 @@ class SimpleTelegramBot:
         self.db.set_conversation_state(user_id, 'editing_recurring_interval', str(recurring_id))
         await self.edit_or_send_message(event, "⏱️ أرسل الآن الفترة بالثواني (مثال: 3600)")
     async def audio_text_cleaning(self, event, task_id):
-        """Show audio tag text cleaning settings and controls"""
+        """Show audio text cleaning settings"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
             await event.answer("❌ المهمة غير موجودة")
             return
-
+        
         task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get text cleaning settings for audio tags
         try:
-            settings = self.db.get_audio_tag_text_cleaning_settings(task_id)
-            status_text = "🟢 مفعل" if settings.get('enabled', False) else "🔴 معطل"
-        except Exception:
+            audio_cleaning = self.db.get_audio_text_cleaning_settings(task_id)
+            status_text = "🟢 مفعل" if audio_cleaning.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
             status_text = "🔴 معطل"
-
+        
         buttons = [
             [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_cleaning_{task_id}")],
+            [Button.inline("🧹 حذف الروابط", f"audio_clean_links_{task_id}"),
+             Button.inline("😀 حذف الرموز التعبيرية", f"audio_clean_emojis_{task_id}")],
+            [Button.inline("# حذف الهاشتاج", f"audio_clean_hashtags_{task_id}"),
+             Button.inline("📞 حذف أرقام الهاتف", f"audio_clean_phones_{task_id}")],
+            [Button.inline("📝 حذف السطور الفارغة", f"audio_clean_empty_{task_id}"),
+             Button.inline("🔤 حذف كلمات محددة", f"audio_clean_keywords_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للتنظيف", f"audio_clean_tag_selection_{task_id}")],
             [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
         ]
-
+        
         message_text = (
             f"🧹 تنظيف نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
             f"📊 الحالة: {status_text}\n\n"
-            f"🔧 الوظائف: حذف الروابط، الرموز، الهاشتاج، الأرقام، السطور الفارغة، كلمات محددة"
+            f"🔧 **خيارات التنظيف المتاحة:**\n"
+            f"• حذف الروابط من الوسوم\n"
+            f"• حذف الرموز التعبيرية\n"
+            f"• حذف علامات الهاشتاج\n"
+            f"• حذف أرقام الهاتف\n"
+            f"• حذف السطور الفارغة\n"
+            f"• حذف كلمات وعبارات محددة\n\n"
+            f"💡 **ملاحظة:** سيتم تطبيق التنظيف على الوسوم المحددة فقط\n"
+            f"(العنوان، الفنان، التعليق، كلمات الأغنية، إلخ)"
         )
-
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def audio_text_replacements(self, event, task_id):
-        """Show audio tag text replacements settings and controls"""
+        """Show audio text replacements settings"""
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
         if not task:
             await event.answer("❌ المهمة غير موجودة")
             return
-
+        
         task_name = task.get('task_name', 'مهمة بدون اسم')
         try:
-            settings = self.db.get_audio_text_replacements_settings(task_id)
-            status_text = "🟢 مفعل" if settings.get('enabled', False) else "🔴 معطل"
-        except Exception:
+            audio_replacements = self.db.get_audio_text_replacements_settings(task_id)
+            status_text = "🟢 مفعل" if audio_replacements.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
             status_text = "🔴 معطل"
-
+        
         buttons = [
             [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_replacements_{task_id}")],
+            [Button.inline("➕ إضافة استبدال جديد", f"add_audio_replacement_{task_id}")],
+            [Button.inline("📋 عرض الاستبدالات", f"view_audio_replacements_{task_id}")],
+            [Button.inline("🗑️ حذف جميع الاستبدالات", f"clear_audio_replacements_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للاستبدال", f"audio_replace_tag_selection_{task_id}")],
             [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
         ]
-
+        
         message_text = (
             f"🔄 استبدال نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
             f"📊 الحالة: {status_text}\n\n"
-            f"🔧 الوظائف: استبدال كلمات/عبارات وتطبيق على وسوم محددة"
+            f"🔧 **وظائف الاستبدال:**\n"
+            f"• استبدال كلمات أو عبارات محددة\n"
+            f"• دعم البحث الحساس/غير الحساس للأحرف\n"
+            f"• استبدال الكلمات الكاملة فقط\n"
+            f"• تطبيق على وسوم محددة\n\n"
+            f"💡 **مثال:** استبدال 'ft.' بـ 'featuring' في وسم الفنان"
         )
-
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_audio_text_cleaning(self, event, task_id):
         """Toggle audio tag text cleaning enabled state"""
@@ -502,7 +531,7 @@ class SimpleTelegramBot:
             f"اختر الوسم الذي تريد تعديله:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_edit_audio_tag(self, event, task_id, tag_name):
         """Start editing a specific audio tag template"""
@@ -628,7 +657,7 @@ class SimpleTelegramBot:
             f"المسار الحالي: {art_path}\n\n"
             f"اختر الإعداد الذي تريد تعديله أو ارفع صورة جديدة:"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def audio_merge_settings(self, event, task_id):
         user_id = event.sender_id
@@ -663,7 +692,7 @@ class SimpleTelegramBot:
             f"موضع المقدمة: {intro_position}\n\n"
             f"اختر الإعداد الذي تريد تعديله:"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def advanced_audio_settings(self, event, task_id):
         user_id = event.sender_id
@@ -690,7 +719,7 @@ class SimpleTelegramBot:
             f"• إعدادات الأداء والسرعة\n\n"
             f"اختر الإعداد الذي تريد تعديله:"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_album_art_options(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
@@ -701,7 +730,7 @@ class SimpleTelegramBot:
             [Button.inline(f"📦 تطبيق على جميع الملفات ({apply_all_status})", f"toggle_apply_art_to_all_{task_id}")],
             [Button.inline("🔙 رجوع", f"album_art_settings_{task_id}")]
         ]
-        await self.edit_or_send_message(event, "⚙️ خيارات صورة الغلاف:", buttons=buttons)
+        await self.force_new_message(event, "⚙️ خيارات صورة الغلاف:", buttons=buttons)
 
     async def show_intro_audio_settings(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
@@ -711,7 +740,7 @@ class SimpleTelegramBot:
             [Button.inline("🗑️ حذف المقدمة", f"remove_intro_audio_{task_id}")],
             [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
         ]
-        await self.edit_or_send_message(event, f"🎵 مقدمة حالية: {intro_path}", buttons=buttons)
+        await self.force_new_message(event, f"🎵 مقدمة حالية: {intro_path}", buttons=buttons)
 
     async def show_outro_audio_settings(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
@@ -721,7 +750,7 @@ class SimpleTelegramBot:
             [Button.inline("🗑️ حذف الخاتمة", f"remove_outro_audio_{task_id}")],
             [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
         ]
-        await self.edit_or_send_message(event, f"🎵 خاتمة حالية: {outro_path}", buttons=buttons)
+        await self.force_new_message(event, f"🎵 خاتمة حالية: {outro_path}", buttons=buttons)
 
     async def show_merge_options(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
@@ -732,7 +761,7 @@ class SimpleTelegramBot:
             [Button.inline("⬇️ المقدمة في النهاية", f"set_intro_position_end_{task_id}")],
             [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
         ]
-        await self.edit_or_send_message(event, f"⚙️ موضع المقدمة الحالي: {pos_text}", buttons=buttons)
+        await self.force_new_message(event, f"⚙️ موضع المقدمة الحالي: {pos_text}", buttons=buttons)
 
     async def handle_start(self, event):
         """Handle /start command"""
@@ -823,7 +852,7 @@ class SimpleTelegramBot:
                 "• إعادة تسجيل الدخول بجلسة جديدة؟\n"
                 "• العودة للقائمة الرئيسية؟"
             )
-            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            await self.force_new_message(event, message_text, buttons=buttons)
             return
         
         # Show login options
@@ -846,7 +875,7 @@ class SimpleTelegramBot:
             "• أو استخدم @StringSessionBot\n"
             "• أو استخدم @UseTGXBot"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_callback(self, event):
         """Handle button callbacks"""
@@ -3406,7 +3435,7 @@ class SimpleTelegramBot:
             f"⏰ محدث: {timestamp}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_day_filters(self, event, task_id):
         """Show day filters settings"""
@@ -3465,7 +3494,7 @@ class SimpleTelegramBot:
             f"⏰ آخر تحديث: {timestamp}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_day_filter(self, event, task_id, day_number):
         """Toggle specific day filter"""
@@ -3596,7 +3625,7 @@ class SimpleTelegramBot:
             f"اختر الفلتر الذي تريد إدارته:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_advanced_features(self, event, task_id):
         """Show advanced features menu"""
@@ -3640,7 +3669,7 @@ class SimpleTelegramBot:
             f"اختر الميزة التي تريد إدارتها:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_message(self, event):
         """Handle text messages"""
@@ -4373,7 +4402,7 @@ class SimpleTelegramBot:
             f"اختر الإعداد الذي تريد تعديله:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_forward_mode(self, event, task_id):
         """Toggle forward mode between copy and forward"""
@@ -4551,7 +4580,7 @@ class SimpleTelegramBot:
             "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات قراءة الرسائل"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_add_target(self, event, task_id):
         """Start adding target to task"""
@@ -4584,7 +4613,7 @@ class SimpleTelegramBot:
             "⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات إرسال الرسائل"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def remove_source(self, event, source_id, task_id):
         """Remove source from task"""
@@ -4683,7 +4712,7 @@ class SimpleTelegramBot:
             f"💡 **الوصف:** {mode_description}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_working_hours(self, event, task_id):
         """Show working hours schedule interface"""
@@ -4757,7 +4786,7 @@ class SimpleTelegramBot:
             f"⏰ آخر تحديث: {timestamp}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def select_all_hours(self, event, task_id):
         """Select all working hours"""
@@ -4911,7 +4940,7 @@ class SimpleTelegramBot:
         
         buttons = [[Button.inline("❌ إلغاء", f"duplicate_settings_{task_id}")]]
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_set_duplicate_time(self, event, task_id):
         """Start setting duplicate time window conversation"""
@@ -4943,7 +4972,7 @@ class SimpleTelegramBot:
         
         buttons = [[Button.inline("❌ إلغاء", f"duplicate_settings_{task_id}")]]
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_language_filters(self, event, task_id):
         """Show language filter settings"""
@@ -4984,7 +5013,7 @@ class SimpleTelegramBot:
             f"⏰ آخر تحديث: {timestamp}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_language_management(self, event, task_id):
         """Show language management interface"""
@@ -5184,7 +5213,7 @@ class SimpleTelegramBot:
             f"⚠️ **ملاحظة**: كود اللغة يجب أن يكون من 2-3 أحرف"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def quick_add_language(self, event, task_id, language_code, language_name):
         """Quick add language from predefined list"""
@@ -5336,7 +5365,7 @@ class SimpleTelegramBot:
             f"💡 هذا الفلتر يتحكم في الرسائل حسب صلاحيات المرسل"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_duplicate_filter(self, event, task_id):
         """Show duplicate filter settings"""
@@ -5376,7 +5405,7 @@ class SimpleTelegramBot:
             f"💡 هذا الفلتر يمنع توجيه الرسائل المتكررة"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def _get_duplicate_settings_buttons(self, task_id):
         """Get buttons for duplicate settings menu"""
@@ -5435,7 +5464,7 @@ class SimpleTelegramBot:
             f"⏰ آخر تحديث: {timestamp}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_inline_button_block_mode(self, event, task_id):
         """Toggle inline button filter mode between block message and remove buttons"""
@@ -5496,7 +5525,7 @@ class SimpleTelegramBot:
             f"اختر ما تريد فعله:"
         )
 
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_tasks_menu(self, event):
         """Show tasks management menu"""
@@ -5522,7 +5551,7 @@ class SimpleTelegramBot:
             f"اختر إجراء:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_create_task(self, event):
         """Start creating new task"""
@@ -5547,7 +5576,7 @@ class SimpleTelegramBot:
             "• اسم المهمة: (مثال: مهمة متابعة الأخبار)"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def list_tasks(self, event):
         """List user tasks"""
@@ -5572,7 +5601,7 @@ class SimpleTelegramBot:
                 "أنشئ مهمتك الأولى للبدء!"
             )
             
-            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            await self.force_new_message(event, message_text, buttons=buttons)
             return
 
         # Build tasks list with full sources and targets info
@@ -5717,7 +5746,7 @@ class SimpleTelegramBot:
             f"📅 تاريخ الإنشاء: {task['created_at'][:16]}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_task(self, event, task_id):
         """Toggle task status"""
@@ -6077,7 +6106,7 @@ class SimpleTelegramBot:
             f"• الضغط على 'اختيار من القنوات المضافة' لاختيار عدة قنوات\n"
             f"• أو إرسال المعرفات/الروابط يدوياً كما تحب"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_source_chat(self, event, chat_input):
         """Handle source chat input using database conversation state"""
@@ -6132,7 +6161,7 @@ class SimpleTelegramBot:
             f"• -1001234567890\n\n"
             f"⚠️ تأكد من أن البوت مضاف للمجموعة/القناة وله صلاحيات إرسال الرسائل"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_target_chat(self, event, chat_input):
         """Handle target chat input using database conversation state"""
@@ -6251,7 +6280,7 @@ class SimpleTelegramBot:
             f"🟢 الحالة: نشطة\n\n"
             f"✅ سيتم توجيه جميع الرسائل الجديدة تلقائياً"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_choose_sources(self, event):
         user_id = event.sender_id
@@ -6514,7 +6543,7 @@ class SimpleTelegramBot:
             f"🖼️ **صورة العلامة**: {'محددة' if watermark_settings.get('watermark_image_path') else 'غير محددة'}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_watermark(self, event, task_id):
         """Toggle watermark on/off"""
@@ -6599,7 +6628,7 @@ class SimpleTelegramBot:
             f"🔻 تقليل القيمة"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def adjust_watermark_size(self, event, task_id, increase=True):
         """Adjust watermark size"""
@@ -6741,7 +6770,7 @@ class SimpleTelegramBot:
             f"اختر الموقع المطلوب:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def set_watermark_position(self, event, task_id, position):
         """Set watermark position"""
@@ -6784,7 +6813,7 @@ class SimpleTelegramBot:
             f"النوع الحالي: {'📝 نص' if current_type == 'text' else '🖼️ صورة'}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_watermark_media_types(self, event, task_id):
         """Show watermark media type selection"""
@@ -6810,7 +6839,7 @@ class SimpleTelegramBot:
             f"✅ = مفعل  |  ❌ = معطل"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def set_watermark_type(self, event, task_id, watermark_type):
         """Set watermark type (text or image)"""
@@ -6839,7 +6868,7 @@ class SimpleTelegramBot:
         )
         
         buttons = [[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_watermark_image_input(self, event, task_id):
         """Start watermark image input process"""
@@ -6861,7 +6890,7 @@ class SimpleTelegramBot:
         )
         
         buttons = [[Button.inline("❌ إلغاء", f"watermark_type_{task_id}")]]
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_watermark_text_input(self, event, task_id):
         """Handle watermark text input"""
@@ -6888,7 +6917,7 @@ class SimpleTelegramBot:
             [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
         ]
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_watermark_image_input(self, event, task_id):
         """Handle watermark image input (supports both photos and documents)"""
@@ -6996,7 +7025,7 @@ class SimpleTelegramBot:
                 [Button.inline("🔙 عودة للعلامة المائية", f"watermark_settings_{task_id}")]
             ]
             
-            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            await self.force_new_message(event, message_text, buttons=buttons)
             
         except Exception as e:
             logger.error(f"خطأ في معالجة صورة العلامة المائية: {e}")
@@ -7064,7 +7093,7 @@ class SimpleTelegramBot:
             "⚠️ تأكد من صحة الرقم"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_session_login(self, event):
         """Start session-based login process"""
@@ -7093,7 +7122,7 @@ class SimpleTelegramBot:
             "• الجلسة تمنح الوصول الكامل لحسابك"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_login(self, event): # New function for login button
         """Start login process"""
@@ -7109,7 +7138,7 @@ class SimpleTelegramBot:
                 [Button.inline("✅ نعم، إعادة تسجيل الدخول", b"auth_phone")],
                 [Button.inline("❌ لا، العودة للإعدادات", b"settings")]
             ]
-            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            await self.force_new_message(event, message_text, buttons=buttons)
         else:
             await self.start_auth(event) # If no session, start normal authentication
 
@@ -7177,7 +7206,7 @@ class SimpleTelegramBot:
                 "مثال: +966501234567\n\n"
                 "أرسل رقم الهاتف مرة أخرى:"
             )
-            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            await self.force_new_message(event, message_text, buttons=buttons)
             return
 
         # Create temporary Telegram client for authentication
@@ -7218,7 +7247,7 @@ class SimpleTelegramBot:
                 f"• أو إرسال الأرقام مباشرة: 12345\n\n"
                 f"⏰ انتظر بضع ثواني حتى يصل الرمز"
             )
-            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            await self.force_new_message(event, message_text, buttons=buttons)
 
         except asyncio.TimeoutError:
             logger.error("مهلة زمنية في إرسال الرمز")
@@ -7362,7 +7391,7 @@ class SimpleTelegramBot:
                         "🗝️ أرسل كلمة المرور الخاصة بالتحقق الثنائي:\n\n"
                         "💡 هذه هي كلمة المرور التي أنشأتها عند تفعيل التحقق بخطوتين في تليجرام"
                     )
-                    await self.edit_or_send_message(event, message_text, buttons=buttons)
+                    await self.force_new_message(event, message_text, buttons=buttons)
                     
                     # Don't disconnect the client yet, we need it for password verification
                     return
@@ -7496,7 +7525,7 @@ class SimpleTelegramBot:
                     f"{session_saved_text}\n\n"
                     f"🚀 يمكنك الآن إنشاء مهام التوجيه التلقائي"
                 )
-                await self.edit_or_send_message(event, message_text, buttons=buttons)
+                await self.force_new_message(event, message_text, buttons=buttons)
                 
             else:
                 message_text = (
@@ -7618,7 +7647,7 @@ class SimpleTelegramBot:
                 f"{session_saved_text}\n\n"
                 f"🚀 يمكنك الآن إنشاء مهام التوجيه التلقائي"
             )
-            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            await self.force_new_message(event, message_text, buttons=buttons)
             await temp_client.disconnect()
 
         except Exception as e:
@@ -7642,7 +7671,7 @@ class SimpleTelegramBot:
             "❌ تم إلغاء عملية تسجيل الدخول\n\n"
             "يمكنك المحاولة مرة أخرى في أي وقت"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     # Add missing methods for advanced filters
     async def toggle_working_hours(self, event, task_id):
@@ -7708,7 +7737,7 @@ class SimpleTelegramBot:
             "أو 13 للساعة 1 ظهراً"
         )
         buttons = [[Button.inline("❌ إلغاء", f"working_hours_filter_{task_id}")]]
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_inline_button_filter(self, event, task_id):
         """Toggle inline button filter"""
@@ -7874,7 +7903,7 @@ class SimpleTelegramBot:
             "اختر الإعداد الذي تريد تغييره:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def check_userbot_status(self, event):
         """Check UserBot status for user"""
@@ -7892,7 +7921,7 @@ class SimpleTelegramBot:
                     "📱 اذهب إلى الإعدادات → إعادة تسجيل الدخول"
                 )
                 buttons = [[Button.inline("🔄 تسجيل الدخول", "login"), Button.inline("🏠 الرئيسية", "main_menu")]]
-                await self.edit_or_send_message(event, message_text, buttons=buttons)
+                await self.force_new_message(event, message_text, buttons=buttons)
                 return
 
             # Check if UserBot is running
@@ -8003,7 +8032,7 @@ class SimpleTelegramBot:
                 f"🔧 حاول مرة أخرى أو أعد تسجيل الدخول"
             )
             buttons = [[Button.inline("🔄 إعادة المحاولة", "check_userbot"), Button.inline("🏠 الرئيسية", "main_menu")]]
-            await self.edit_or_send_message(event, message_text, buttons=buttons)
+            await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_language_settings(self, event):
         """Show language selection menu"""
@@ -8113,7 +8142,7 @@ class SimpleTelegramBot:
             f"📝 أدخل عدد الرسائل الجديد (رقم من 1 إلى 1000):\n\n"
             f"💡 مثال: 5 (للسماح بـ 5 رسائل فقط)"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_edit_rate_period(self, event, task_id):
         """Start editing rate limit time period"""
@@ -8140,7 +8169,7 @@ class SimpleTelegramBot:
             f"📝 أدخل الفترة الجديدة بالثواني (من 1 إلى 3600):\n\n"
             f"💡 مثال: 60 (دقيقة واحدة)"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_edit_forwarding_delay(self, event, task_id):
         """Start editing forwarding delay"""
@@ -8167,7 +8196,7 @@ class SimpleTelegramBot:
             f"📝 أدخل التأخير الجديد بالثواني (من 0 إلى 300):\n\n"
             f"💡 مثال: 5 (تأخير 5 ثواني قبل التوجيه)"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_edit_sending_interval(self, event, task_id):
         """Start editing sending interval"""
@@ -8194,7 +8223,7 @@ class SimpleTelegramBot:
             f"📝 أدخل الفاصل الجديد بالثواني (من 0 إلى 60):\n\n"
             f"💡 مثال: 2 (فاصل ثانيتين بين إرسال الرسائل)"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_media_filters(self, event, task_id):
         """Show media filters management for task"""
@@ -9528,7 +9557,7 @@ class SimpleTelegramBot:
             "💻 **تطوير:** نظام بوت تليجرام متطور"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def monitor_notifications(self):
         """Monitor for notifications from UserBot to add inline buttons"""
@@ -9772,7 +9801,7 @@ class SimpleTelegramBot:
             f"⚠️ **ملاحظة**: عند تفعيل الاستبدال، سيتم تحويل وضع التوجيه تلقائياً إلى 'نسخ' للرسائل المعدلة"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_text_replacement(self, event, task_id):
         """Toggle text replacement status"""
@@ -9826,7 +9855,7 @@ class SimpleTelegramBot:
             f"⚠️ **ملاحظة**: يمكنك إدخال عدة استبدالات في رسالة واحدة"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_add_replacements(self, event, task_id, message_text):
         """Handle adding text replacements"""
@@ -9882,7 +9911,7 @@ class SimpleTelegramBot:
             f"✅ استبدال النصوص جاهز للاستخدام!"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def view_replacements(self, event, task_id):
         """View text replacements"""
@@ -9947,7 +9976,7 @@ class SimpleTelegramBot:
             f"سيتم حذف جميع استبدالات النصوص نهائياً."
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def clear_replacements_execute(self, event, task_id):
         """Execute clearing text replacements"""
@@ -9992,7 +10021,7 @@ class SimpleTelegramBot:
             f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الرأس"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_header(self, event, task_id):
         """Toggle header status"""
@@ -10041,7 +10070,7 @@ class SimpleTelegramBot:
             f"⚠️ **ملاحظة**: يمكنك استخدام الرموز والإيموجي"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_set_header_text(self, event, task_id, text):
         """Handle setting header text"""
@@ -10089,7 +10118,7 @@ class SimpleTelegramBot:
             f"⚠️ **ملاحظة**: سيتم تحويل وضع التوجيه إلى 'نسخ' عند تفعيل الذيل"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_footer(self, event, task_id):
         """Toggle footer status"""
@@ -10138,7 +10167,7 @@ class SimpleTelegramBot:
             f"⚠️ **ملاحظة**: يمكنك استخدام الرموز والروابط"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_set_footer_text(self, event, task_id, text):
         """Handle setting footer text"""
@@ -10190,7 +10219,7 @@ class SimpleTelegramBot:
             f"🕐 آخر تحديث: {timestamp}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_inline_buttons(self, event, task_id):
         """Toggle inline buttons status"""
@@ -10249,7 +10278,7 @@ class SimpleTelegramBot:
             f"⚠️ **ملاحظة**: استخدم الشرطة (-) لفصل النص عن الرابط"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_add_inline_button(self, event, task_id, text):
         """Handle adding inline buttons with new format"""
@@ -10377,7 +10406,7 @@ class SimpleTelegramBot:
             f"سيتم حذف جميع الأزرار الإنلاين نهائياً."
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def clear_inline_buttons_execute(self, event, task_id):
         """Execute clearing inline buttons"""
@@ -10480,7 +10509,7 @@ class SimpleTelegramBot:
             f"🕐 آخر تحديث: {timestamp}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_link_preview(self, event, task_id):
         """Toggle link preview setting"""
@@ -10856,7 +10885,7 @@ class SimpleTelegramBot:
             f"💡 أو أرسل رقماً بالثواني (مثال: 7200 للساعتين)\n\n"
             f"⚠️ **تنبيه**: سيتم حذف الرسائل تلقائياً بعد المدة المحددة"
         )
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def handle_set_auto_delete_time(self, event, task_id, time_str):
         """Handle setting auto delete time from text input"""
@@ -11185,7 +11214,7 @@ class SimpleTelegramBot:
             f"🟡 يدوي: الرسائل تُرسل لك للمراجعة والموافقة{additional_info}"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_publishing_mode(self, event, task_id):
         """Toggle publishing mode between auto and manual"""
@@ -11282,7 +11311,7 @@ class SimpleTelegramBot:
             f"{length_mode_descriptions.get(current_length_mode, 'وضع غير محدد')}\n"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_character_limit(self, event, task_id):
         """Toggle character limit on/off"""
@@ -11375,7 +11404,7 @@ class SimpleTelegramBot:
             f"💡 مثال: 50"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_edit_char_max(self, event, task_id):
         """Start editing character maximum limit"""
@@ -11403,7 +11432,7 @@ class SimpleTelegramBot:
             f"💡 مثال: 1000"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def start_edit_character_range(self, event, task_id):
         """Start editing character range (min-max)"""
@@ -11432,7 +11461,7 @@ class SimpleTelegramBot:
             f"💡 ملاحظة: سيتم التبديل تلقائياً إلى وضع النطاق"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_rate_limit_settings(self, event, task_id):
         """Show rate limit settings"""
@@ -11466,7 +11495,7 @@ class SimpleTelegramBot:
             f"يحدد هذا الإعداد عدد الرسائل المسموح بإرسالها خلال فترة زمنية محددة"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_forwarding_delay_settings(self, event, task_id):
         """Show forwarding delay settings"""
@@ -11506,7 +11535,7 @@ class SimpleTelegramBot:
             f"يضيف تأخير زمني قبل إرسال الرسائل المُوجهة"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_sending_interval_settings(self, event, task_id):
         """Show sending interval settings"""
@@ -11546,7 +11575,7 @@ class SimpleTelegramBot:
             f"يحدد الفترة الزمنية بين إرسال كل رسالة والتي تليها"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def toggle_forwarding_delay(self, event, task_id):
         """Toggle forwarding delay setting"""
@@ -13282,72 +13311,6 @@ async def run_simple_bot():
     return bot
 
 # Removed erroneous redefinition of class SimpleTelegramBot
-    # ===== Audio Metadata Settings =====
-    
-    async def audio_metadata_settings(self, event, task_id):
-        """Show audio metadata settings menu"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-            
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        # Load audio metadata settings from database
-        audio_settings = self.db.get_audio_metadata_settings(task_id)
-        
-        status_text = "🟢 مفعل" if audio_settings['enabled'] else "🔴 معطل"
-        template_text = audio_settings['template'].title()
-        art_status = "🟢 مفعل" if audio_settings['album_art_enabled'] else "🔴 معطل"
-        merge_status = "🟢 مفعل" if audio_settings['audio_merge_enabled'] else "🔴 معطل"
-        
-        buttons = [
-            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_metadata_{task_id}")],
-            [Button.inline(f"⚙️ إعدادات القالب ({template_text})", f"audio_template_settings_{task_id}")],
-            [Button.inline(f"🖼️ صورة الغلاف ({art_status})", f"album_art_settings_{task_id}")],
-            [Button.inline(f"🔗 دمج المقاطع ({merge_status})", f"audio_merge_settings_{task_id}")],
-            [Button.inline("⚙️ إعدادات متقدمة", f"advanced_audio_settings_{task_id}")],
-            [Button.inline("🔙 رجوع لإعدادات المهمة", f"task_settings_{task_id}")]
-        ]
-        
-        message_text = (
-            f"🎵 إعدادات الوسوم الصوتية للمهمة: {task_name}\n\n"
-            f"📊 الحالة: {status_text}\n"
-            f"📋 القالب: {template_text}\n"
-            f"🖼️ صورة الغلاف: {art_status}\n"
-            f"🔗 دمج المقاطع: {merge_status}\n\n"
-            f"📝 الوصف:\n"
-            f"تعديل الوسوم الصوتية (ID3v2) للملفات الصوتية قبل إعادة التوجيه\n"
-            f"• دعم جميع أنواع الوسوم (Title, Artist, Album, Year, Genre, etc.)\n"
-            f"• قوالب جاهزة للاستخدام\n"
-            f"• صورة غلاف مخصصة\n"
-            f"• دمج مقاطع صوتية إضافية\n"
-            f"• الحفاظ على الجودة 100%"
-        )
-        
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
-    
-    async def toggle_audio_metadata(self, event, task_id):
-        """Toggle audio metadata processing"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        # Toggle and persist
-        current = self.db.get_audio_metadata_settings(task_id)
-        new_status = not bool(current.get('enabled', False))
-        self.db.update_audio_metadata_enabled(task_id, new_status)
-        
-        status_text = "🟢 مفعل" if new_status else "🔴 معطل"
-        await event.answer(f"✅ تم {'تفعيل' if new_status else 'تعطيل'} الوسوم الصوتية")
-        
-        # Refresh the settings menu
-        await self.audio_metadata_settings(event, task_id)
     
     async def select_audio_template(self, event, task_id):
         """Select audio metadata template"""
@@ -13385,7 +13348,7 @@ async def run_simple_bot():
             f"اختر القالب المناسب لاحتياجاتك:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
     
     async def set_audio_template(self, event, task_id, template_name):
         """Set audio metadata template"""
@@ -13455,7 +13418,7 @@ async def run_simple_bot():
             f"اختر الإعداد الذي تريد تعديله أو ارفع صورة جديدة:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
     
     async def audio_merge_settings(self, event, task_id):
         """Show audio merge settings"""
@@ -13504,7 +13467,7 @@ async def run_simple_bot():
             f"اختر الإعداد الذي تريد تعديله:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
     
     async def advanced_audio_settings(self, event, task_id):
         """Show advanced audio settings"""
@@ -13545,7 +13508,7 @@ async def run_simple_bot():
             f"اختر الإعداد الذي تريد تعديله:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def show_album_art_options(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
@@ -13556,7 +13519,7 @@ async def run_simple_bot():
             [Button.inline(f"📦 تطبيق على جميع الملفات ({apply_all_status})", f"toggle_apply_art_to_all_{task_id}")],
             [Button.inline("🔙 رجوع", f"album_art_settings_{task_id}")]
         ]
-        await self.edit_or_send_message(event, "⚙️ خيارات صورة الغلاف:", buttons=buttons)
+        await self.force_new_message(event, "⚙️ خيارات صورة الغلاف:", buttons=buttons)
 
     async def show_intro_audio_settings(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
@@ -13566,7 +13529,7 @@ async def run_simple_bot():
             [Button.inline("🗑️ حذف المقدمة", f"remove_intro_audio_{task_id}")],
             [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
         ]
-        await self.edit_or_send_message(event, f"🎵 مقدمة حالية: {intro_path}", buttons=buttons)
+        await self.force_new_message(event, f"🎵 مقدمة حالية: {intro_path}", buttons=buttons)
 
     async def show_outro_audio_settings(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
@@ -13576,7 +13539,7 @@ async def run_simple_bot():
             [Button.inline("🗑️ حذف الخاتمة", f"remove_outro_audio_{task_id}")],
             [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
         ]
-        await self.edit_or_send_message(event, f"🎵 خاتمة حالية: {outro_path}", buttons=buttons)
+        await self.force_new_message(event, f"🎵 خاتمة حالية: {outro_path}", buttons=buttons)
 
     async def show_merge_options(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
@@ -13587,7 +13550,7 @@ async def run_simple_bot():
             [Button.inline("⬇️ المقدمة في النهاية", f"set_intro_position_end_{task_id}")],
             [Button.inline("🔙 رجوع", f"audio_merge_settings_{task_id}")]
         ]
-        await self.edit_or_send_message(event, f"⚙️ موضع المقدمة الحالي: {pos_text}", buttons=buttons)
+        await self.force_new_message(event, f"⚙️ موضع المقدمة الحالي: {pos_text}", buttons=buttons)
 
     # ===== Audio Text Processing Methods =====
     async def audio_text_cleaning(self, event, task_id):
@@ -13633,44 +13596,7 @@ async def run_simple_bot():
             f"(العنوان، الفنان، التعليق، كلمات الأغنية، إلخ)"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
-    
-    async def audio_text_replacements(self, event, task_id):
-        """Show audio text replacements settings"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        try:
-            audio_replacements = self.db.get_audio_text_replacements_settings(task_id)
-            status_text = "🟢 مفعل" if audio_replacements.get('enabled', False) else "🔴 معطل"
-        except (AttributeError, KeyError):
-            status_text = "🔴 معطل"
-        
-        buttons = [
-            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_replacements_{task_id}")],
-            [Button.inline("➕ إضافة استبدال جديد", f"add_audio_replacement_{task_id}")],
-            [Button.inline("📋 عرض الاستبدالات", f"view_audio_replacements_{task_id}")],
-            [Button.inline("🗑️ حذف جميع الاستبدالات", f"clear_audio_replacements_{task_id}")],
-            [Button.inline("🎯 اختيار الوسوم للاستبدال", f"audio_replace_tag_selection_{task_id}")],
-            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
-        ]
-        
-        message_text = (
-            f"🔄 استبدال نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
-            f"📊 الحالة: {status_text}\n\n"
-            f"🔧 **وظائف الاستبدال:**\n"
-            f"• استبدال كلمات أو عبارات محددة\n"
-            f"• دعم البحث الحساس/غير الحساس للأحرف\n"
-            f"• استبدال الكلمات الكاملة فقط\n"
-            f"• تطبيق على وسوم محددة\n\n"
-            f"💡 **مثال:** استبدال 'ft.' بـ 'featuring' في وسم الفنان"
-        )
-        
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
     
     async def audio_word_filters(self, event, task_id):
         """Show audio word filters settings"""
@@ -13705,7 +13631,7 @@ async def run_simple_bot():
             f"مثل السماح بأسماء فنانين معينين فقط أو منع كلمات غير مرغوبة"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
     
     async def audio_header_footer(self, event, task_id):
         """Show audio header/footer settings"""
@@ -13741,7 +13667,7 @@ async def run_simple_bot():
             f"أو إضافة حقوق الطبع في نهاية التعليق"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
     
     async def audio_tag_selection(self, event, task_id):
         """Show audio tag selection for text processing"""
@@ -13790,78 +13716,10 @@ async def run_simple_bot():
             f"(التنظيف، الاستبدال، الفلاتر، الهيدر/فوتر) على الوسوم المحددة فقط"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     # ===== Audio Text Processing Functions =====
     
-    async def audio_text_cleaning(self, event, task_id):
-        """Show audio text cleaning settings"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        try:
-            settings = self.db.get_audio_tag_text_cleaning_settings(task_id)
-            status_text = "🟢 مفعل" if settings.get('enabled', False) else "🔴 معطل"
-        except Exception:
-            status_text = "🔴 معطل"
-        
-        buttons = [
-            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_cleaning_{task_id}")],
-            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
-        ]
-        
-        message_text = (
-            f"🧹 تنظيف نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
-            f"📊 الحالة: {status_text}\n\n"
-            f"🔧 **الوظائف:**\n"
-            f"• حذف الروابط من الوسوم\n"
-            f"• حذف الرموز التعبيرية\n"
-            f"• حذف الهاشتاج (#)\n"
-            f"• حذف أرقام الهاتف\n"
-            f"• حذف السطور الفارغة\n"
-            f"• حذف كلمات محددة\n\n"
-            f"💡 **الفائدة:** تنظيف الوسوم الصوتية من العناصر غير المرغوب فيها"
-        )
-        
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
-    
-    async def audio_text_replacements(self, event, task_id):
-        """Show audio text replacements settings"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        try:
-            settings = self.db.get_audio_text_replacements_settings(task_id)
-            status_text = "🟢 مفعل" if settings.get('enabled', False) else "🔴 معطل"
-        except Exception:
-            status_text = "🔴 معطل"
-        
-        buttons = [
-            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_replacements_{task_id}")],
-            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
-        ]
-        
-        message_text = (
-            f"🔄 استبدال نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
-            f"📊 الحالة: {status_text}\n\n"
-            f"🔧 **الوظائف:**\n"
-            f"• استبدال كلمات معينة بأخرى\n"
-            f"• استبدال عبارات كاملة\n"
-            f"• تطبيق على وسوم محددة\n\n"
-            f"💡 **مثال:** استبدال 'Unknown Artist' بـ 'فنان غير معروف'"
-        )
-        
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
     
     async def audio_word_filters(self, event, task_id):
         """Show audio word filters settings"""
@@ -13893,7 +13751,7 @@ async def run_simple_bot():
             f"💡 **الاستخدام:** فلترة محتوى الوسوم حسب كلمات محددة"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def audio_header_footer(self, event, task_id):
         """Show audio header/footer settings"""
@@ -13926,7 +13784,7 @@ async def run_simple_bot():
             f"💡 **مثال:** إضافة اسم القناة في بداية عنوان الأغنية"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     async def audio_tag_selection(self, event, task_id):
         """Show audio tag selection for text processing"""
@@ -13977,7 +13835,7 @@ async def run_simple_bot():
             f"🔘 اضغط على الوسم لتبديل اختياره:"
         )
         
-        await self.edit_or_send_message(event, message_text, buttons=buttons)
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     # ===== Audio Metadata Enhanced Interface =====
     async def update_audio_metadata_interface(self):
