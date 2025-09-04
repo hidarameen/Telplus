@@ -412,6 +412,38 @@ class Database:
                 )
             ''')
 
+            # Recurring posts table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS recurring_posts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    name TEXT DEFAULT 'منشور متكرر',
+                    enabled BOOLEAN DEFAULT TRUE,
+                    source_chat_id TEXT NOT NULL,
+                    source_message_id INTEGER NOT NULL,
+                    interval_seconds INTEGER NOT NULL,
+                    delete_previous BOOLEAN DEFAULT FALSE,
+                    preserve_original_buttons BOOLEAN DEFAULT TRUE,
+                    next_run_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Deliveries for recurring posts to track last message per target
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS recurring_post_deliveries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recurring_post_id INTEGER NOT NULL,
+                    target_chat_id TEXT NOT NULL,
+                    last_message_id INTEGER,
+                    last_posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (recurring_post_id) REFERENCES recurring_posts (id) ON DELETE CASCADE,
+                    UNIQUE(recurring_post_id, target_chat_id)
+                )
+            ''')
+
             # Advanced filters master table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_advanced_filters (
@@ -4435,6 +4467,123 @@ class Database:
         except Exception as e:
             logger.error(f"خطأ في تحديث إعدادات فاصل الإرسال: {e}")
             return False
+
+    # ===== Recurring Posts CRUD =====
+    def create_recurring_post(self, task_id: int, source_chat_id: str, source_message_id: int, interval_seconds: int,
+                               name: str = 'منشور متكرر', enabled: bool = True,
+                               delete_previous: bool = False, preserve_original_buttons: bool = True,
+                               next_run_at: Optional[str] = None) -> Optional[int]:
+        """Create a recurring post and return its ID"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO recurring_posts
+                    (task_id, name, enabled, source_chat_id, source_message_id, interval_seconds,
+                     delete_previous, preserve_original_buttons, next_run_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''', (task_id, name, enabled, str(source_chat_id), int(source_message_id), int(interval_seconds),
+                      bool(delete_previous), bool(preserve_original_buttons), next_run_at))
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"خطأ في إنشاء منشور متكرر: {e}")
+            return None
+
+    def update_recurring_post(self, recurring_id: int, **kwargs) -> bool:
+        """Update fields of a recurring post"""
+        try:
+            if not kwargs:
+                return False
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                allowed = {
+                    'name', 'enabled', 'interval_seconds', 'delete_previous', 'preserve_original_buttons', 'next_run_at'
+                }
+                updates = []
+                params = []
+                for key, val in kwargs.items():
+                    if key in allowed:
+                        updates.append(f"{key} = ?")
+                        params.append(val)
+                if not updates:
+                    return False
+                params.append(recurring_id)
+                cursor.execute(f'''
+                    UPDATE recurring_posts
+                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', params)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في تحديث منشور متكرر: {e}")
+            return False
+
+    def delete_recurring_post(self, recurring_id: int) -> bool:
+        """Delete a recurring post and its deliveries"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM recurring_posts WHERE id = ?', (recurring_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"خطأ في حذف منشور متكرر: {e}")
+            return False
+
+    def list_recurring_posts(self, task_id: int) -> List[Dict]:
+        """List recurring posts for a task"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, task_id, name, enabled, source_chat_id, source_message_id, interval_seconds,
+                       delete_previous, preserve_original_buttons, next_run_at, created_at, updated_at
+                FROM recurring_posts WHERE task_id = ? ORDER BY id DESC
+            ''', (task_id,))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    def get_recurring_post(self, recurring_id: int) -> Optional[Dict]:
+        """Get a single recurring post by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, task_id, name, enabled, source_chat_id, source_message_id, interval_seconds,
+                       delete_previous, preserve_original_buttons, next_run_at, created_at, updated_at
+                FROM recurring_posts WHERE id = ?
+            ''', (recurring_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def upsert_recurring_delivery(self, recurring_post_id: int, target_chat_id: str,
+                                  last_message_id: Optional[int]) -> bool:
+        """Upsert delivery mapping for a recurring post and target"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO recurring_post_deliveries (recurring_post_id, target_chat_id, last_message_id, last_posted_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(recurring_post_id, target_chat_id)
+                    DO UPDATE SET last_message_id = excluded.last_message_id, last_posted_at = CURRENT_TIMESTAMP
+                ''', (recurring_post_id, str(target_chat_id), last_message_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث تسليم منشور متكرر: {e}")
+            return False
+
+    def get_recurring_delivery(self, recurring_post_id: int, target_chat_id: str) -> Optional[Dict]:
+        """Get last delivery info for a recurring post and target"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, recurring_post_id, target_chat_id, last_message_id, last_posted_at
+                FROM recurring_post_deliveries
+                WHERE recurring_post_id = ? AND target_chat_id = ?
+            ''', (recurring_post_id, str(target_chat_id)))
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     # ===== Translation Settings =====
     

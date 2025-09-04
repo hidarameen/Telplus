@@ -278,6 +278,38 @@ class PostgreSQLDatabase:
                 )
             ''')
 
+            # Recurring posts table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS recurring_posts (
+                    id SERIAL PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    name TEXT DEFAULT 'منشور متكرر',
+                    enabled BOOLEAN DEFAULT TRUE,
+                    source_chat_id TEXT NOT NULL,
+                    source_message_id BIGINT NOT NULL,
+                    interval_seconds INTEGER NOT NULL,
+                    delete_previous BOOLEAN DEFAULT FALSE,
+                    preserve_original_buttons BOOLEAN DEFAULT TRUE,
+                    next_run_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Deliveries table for recurring posts
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS recurring_post_deliveries (
+                    id SERIAL PRIMARY KEY,
+                    recurring_post_id INTEGER NOT NULL,
+                    target_chat_id TEXT NOT NULL,
+                    last_message_id BIGINT,
+                    last_posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (recurring_post_id) REFERENCES recurring_posts (id) ON DELETE CASCADE,
+                    UNIQUE(recurring_post_id, target_chat_id)
+                )
+            ''')
+
             # Task advanced filters table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS task_advanced_filters (
@@ -1154,6 +1186,133 @@ END$$;
                 return dict(result) if result else None
         except Exception as e:
             logger.error(f"Error getting sending interval settings: {e}")
+            return None
+
+    # ===== Recurring Posts CRUD =====
+    def create_recurring_post(self, task_id: int, source_chat_id: str, source_message_id: int, interval_seconds: int,
+                               name: str = 'منشور متكرر', enabled: bool = True,
+                               delete_previous: bool = False, preserve_original_buttons: bool = True,
+                               next_run_at: Optional[str] = None) -> Optional[int]:
+        """Create a recurring post and return its ID"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO recurring_posts
+                    (task_id, name, enabled, source_chat_id, source_message_id, interval_seconds,
+                     delete_previous, preserve_original_buttons, next_run_at, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    RETURNING id
+                ''', (task_id, name, enabled, str(source_chat_id), int(source_message_id), int(interval_seconds),
+                      bool(delete_previous), bool(preserve_original_buttons), next_run_at))
+                new_id = cursor.fetchone()[0]
+                conn.commit()
+                return new_id
+        except Exception as e:
+            logger.error(f"Error creating recurring post: {e}")
+            return None
+
+    def update_recurring_post(self, recurring_id: int, **kwargs) -> bool:
+        """Update fields of a recurring post"""
+        try:
+            if not kwargs:
+                return False
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                allowed = {
+                    'name', 'enabled', 'interval_seconds', 'delete_previous', 'preserve_original_buttons', 'next_run_at'
+                }
+                updates = []
+                params = []
+                for key, val in kwargs.items():
+                    if key in allowed:
+                        updates.append(f"{key} = %s")
+                        params.append(val)
+                if not updates:
+                    return False
+                params.append(recurring_id)
+                cursor.execute(f'''
+                    UPDATE recurring_posts
+                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                ''', params)
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating recurring post: {e}")
+            return False
+
+    def delete_recurring_post(self, recurring_id: int) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM recurring_posts WHERE id = %s', (recurring_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting recurring post: {e}")
+            return False
+
+    def list_recurring_posts(self, task_id: int) -> List[Dict]:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT id, task_id, name, enabled, source_chat_id, source_message_id, interval_seconds,
+                           delete_previous, preserve_original_buttons, next_run_at, created_at, updated_at
+                    FROM recurring_posts WHERE task_id = %s ORDER BY id DESC
+                ''', (task_id,))
+                rows = cursor.fetchall()
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Error listing recurring posts: {e}")
+            return []
+
+    def get_recurring_post(self, recurring_id: int) -> Optional[Dict]:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT id, task_id, name, enabled, source_chat_id, source_message_id, interval_seconds,
+                           delete_previous, preserve_original_buttons, next_run_at, created_at, updated_at
+                    FROM recurring_posts WHERE id = %s
+                ''', (recurring_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting recurring post: {e}")
+            return None
+
+    def upsert_recurring_delivery(self, recurring_post_id: int, target_chat_id: str,
+                                  last_message_id: Optional[int]) -> bool:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO recurring_post_deliveries (recurring_post_id, target_chat_id, last_message_id, last_posted_at)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (recurring_post_id, target_chat_id)
+                    DO UPDATE SET last_message_id = EXCLUDED.last_message_id, last_posted_at = CURRENT_TIMESTAMP
+                ''', (recurring_post_id, str(target_chat_id), last_message_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error upserting recurring delivery: {e}")
+            return False
+
+    def get_recurring_delivery(self, recurring_post_id: int, target_chat_id: str) -> Optional[Dict]:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT id, recurring_post_id, target_chat_id, last_message_id, last_posted_at
+                    FROM recurring_post_deliveries
+                    WHERE recurring_post_id = %s AND target_chat_id = %s
+                ''', (recurring_post_id, str(target_chat_id)))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting recurring delivery: {e}")
             return None
 
     # Message settings methods
