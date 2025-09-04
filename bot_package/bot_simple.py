@@ -241,6 +241,84 @@ class SimpleTelegramBot:
         )
         await self.edit_or_send_message(event, message_text, buttons=buttons)
 
+    async def audio_text_cleaning(self, event, task_id):
+        """Show audio tag text cleaning settings and controls"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        try:
+            settings = self.db.get_audio_tag_text_cleaning_settings(task_id)
+            status_text = "🟢 مفعل" if settings.get('enabled', False) else "🔴 معطل"
+        except Exception:
+            status_text = "🔴 معطل"
+
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_cleaning_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+
+        message_text = (
+            f"🧹 تنظيف نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 الوظائف: حذف الروابط، الرموز، الهاشتاج، الأرقام، السطور الفارغة، كلمات محددة"
+        )
+
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def audio_text_replacements(self, event, task_id):
+        """Show audio tag text replacements settings and controls"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        try:
+            settings = self.db.get_audio_text_replacements_settings(task_id)
+            status_text = "🟢 مفعل" if settings.get('enabled', False) else "🔴 معطل"
+        except Exception:
+            status_text = "🔴 معطل"
+
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_replacements_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+
+        message_text = (
+            f"🔄 استبدال نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 الوظائف: استبدال كلمات/عبارات وتطبيق على وسوم محددة"
+        )
+
+        await self.edit_or_send_message(event, message_text, buttons=buttons)
+
+    async def toggle_audio_text_cleaning(self, event, task_id):
+        """Toggle audio tag text cleaning enabled state"""
+        try:
+            current = self.db.get_audio_tag_text_cleaning_settings(task_id)
+            new_state = not bool(current.get('enabled', False))
+            self.db.update_audio_text_cleaning_enabled(task_id, new_state)
+            await event.answer("✅ تم التبديل")
+        except Exception:
+            await event.answer("❌ حدث خطأ أثناء التبديل")
+        await self.audio_text_cleaning(event, task_id)
+
+    async def toggle_audio_text_replacements(self, event, task_id):
+        """Toggle audio tag text replacements enabled state"""
+        try:
+            current = self.db.get_audio_text_replacements_settings(task_id)
+            new_state = not bool(current.get('enabled', False))
+            self.db.update_audio_text_replacements_enabled(task_id, new_state)
+            await event.answer("✅ تم التبديل")
+        except Exception:
+            await event.answer("❌ حدث خطأ أثناء التبديل")
+        await self.audio_text_replacements(event, task_id)
+
     async def toggle_audio_metadata(self, event, task_id):
         user_id = event.sender_id
         task = self.db.get_task(task_id, user_id)
@@ -1129,6 +1207,18 @@ class SimpleTelegramBot:
                     await self.audio_text_replacements(event, task_id)
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة لاستبدال نصوص الوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_text_cleaning_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_text_cleaning_", ""))
+                    await self.toggle_audio_text_cleaning(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_text_replacements_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_text_replacements_", ""))
+                    await self.toggle_audio_text_replacements(event, task_id)
+                except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_char_limit_"): # Toggle character limit
                 parts = data.split("_")
