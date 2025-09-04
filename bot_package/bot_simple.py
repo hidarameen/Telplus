@@ -1582,6 +1582,106 @@ class SimpleTelegramBot:
                     await self.audio_footer_settings(event, task_id)
                 except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
+            # Audio tag selection handlers
+            elif data.startswith("audio_tag_selection_"):
+                try:
+                    task_id = int(data.replace("audio_tag_selection_", ""))
+                    await self.audio_tag_selection(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_tag_"):
+                try:
+                    remaining = data.replace("toggle_audio_tag_", "", 1)
+                    task_id_str, tag_key = remaining.split("_", 1)
+                    task_id = int(task_id_str)
+                    # Toggle in DB
+                    self.db.toggle_audio_tag_selection(task_id, tag_key)
+                    await self.audio_tag_selection(event, task_id)
+                except Exception:
+                    await event.answer("❌ خطأ في تبديل اختيار الوسم")
+            elif data.startswith("select_all_audio_tags_"):
+                try:
+                    task_id = int(data.replace("select_all_audio_tags_", ""))
+                    # Use same available tag keys as in audio_tag_selection UI
+                    available_keys = [
+                        'title', 'artist', 'album_artist', 'album', 'year',
+                        'genre', 'composer', 'comment', 'track', 'lyrics'
+                    ]
+                    self.db.update_audio_selected_tags(task_id, available_keys)
+                    await event.answer("✅ تم تحديد جميع الوسوم")
+                    await self.audio_tag_selection(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("deselect_all_audio_tags_"):
+                try:
+                    task_id = int(data.replace("deselect_all_audio_tags_", ""))
+                    self.db.update_audio_selected_tags(task_id, [])
+                    await event.answer("✅ تم إلغاء تحديد جميع الوسوم")
+                    await self.audio_tag_selection(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            # Header/Footer specific handlers
+            elif data.startswith("toggle_audio_header_only_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_header_only_", ""))
+                    settings = self.db.get_audio_tag_header_footer_settings(task_id)
+                    new_state = not bool(settings.get('header_enabled', False))
+                    self.db.update_audio_tag_header_footer_setting(task_id, 'header_enabled', new_state)
+                    await event.answer("✅ تم التبديل")
+                    await self.audio_header_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_footer_only_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_footer_only_", ""))
+                    settings = self.db.get_audio_tag_header_footer_settings(task_id)
+                    new_state = not bool(settings.get('footer_enabled', False))
+                    self.db.update_audio_tag_header_footer_setting(task_id, 'footer_enabled', new_state)
+                    await event.answer("✅ تم التبديل")
+                    await self.audio_footer_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_audio_header_text_"):
+                try:
+                    task_id = int(data.replace("edit_audio_header_text_", ""))
+                    # Start conversation state for editing header text
+                    self.set_user_state(user_id, 'editing_audio_header_text', {'task_id': task_id})
+                    buttons = [[Button.inline("🔙 رجوع", f"audio_header_settings_{task_id}")]]
+                    await self.force_new_message(event, "✏️ أرسل الآن نص الهيدر الجديد:", buttons=buttons)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("clear_audio_header_text_"):
+                try:
+                    task_id = int(data.replace("clear_audio_header_text_", ""))
+                    self.db.update_audio_tag_header_footer_setting(task_id, 'header_text', '')
+                    await event.answer("✅ تم حذف نص الهيدر")
+                    await self.audio_header_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("edit_audio_footer_text_"):
+                try:
+                    task_id = int(data.replace("edit_audio_footer_text_", ""))
+                    # Start conversation state for editing footer text
+                    self.set_user_state(user_id, 'editing_audio_footer_text', {'task_id': task_id})
+                    buttons = [[Button.inline("🔙 رجوع", f"audio_footer_settings_{task_id}")]]
+                    await self.force_new_message(event, "✏️ أرسل الآن نص الفوتر الجديد:", buttons=buttons)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("clear_audio_footer_text_"):
+                try:
+                    task_id = int(data.replace("clear_audio_footer_text_", ""))
+                    self.db.update_audio_tag_header_footer_setting(task_id, 'footer_text', '')
+                    await event.answer("✅ تم حذف نص الفوتر")
+                    await self.audio_footer_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_hf_tag_selection_"):
+                try:
+                    task_id = int(data.replace("audio_hf_tag_selection_", ""))
+                    # Reuse general audio tag selection UI
+                    await self.audio_tag_selection(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("toggle_char_limit_"): # Toggle character limit
                 parts = data.split("_")
                 if len(parts) >= 4:
@@ -3983,6 +4083,38 @@ class SimpleTelegramBot:
                     await self.edit_or_send_message(event, "❌ حدث خطأ، يرجى المحاولة مرة أخرى")
                 finally:
                     self.clear_user_state(user_id)
+                return
+            elif current_user_state == 'editing_audio_header_text':
+                task_id = current_user_data.get('task_id')
+                if task_id:
+                    try:
+                        new_text = message_text.strip()
+                        if not new_text:
+                            await self.edit_or_send_message(event, "❌ لا يمكن أن يكون النص فارغاً")
+                            return
+                        self.db.update_audio_tag_header_footer_setting(task_id, 'header_text', new_text)
+                        await self.edit_or_send_message(event, "✅ تم تحديث نص الهيدر")
+                    except Exception:
+                        await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
+                    finally:
+                        self.clear_user_state(user_id)
+                        await self.audio_header_settings(event, task_id)
+                return
+            elif current_user_state == 'editing_audio_footer_text':
+                task_id = current_user_data.get('task_id')
+                if task_id:
+                    try:
+                        new_text = message_text.strip()
+                        if not new_text:
+                            await self.edit_or_send_message(event, "❌ لا يمكن أن يكون النص فارغاً")
+                            return
+                        self.db.update_audio_tag_header_footer_setting(task_id, 'footer_text', new_text)
+                        await self.edit_or_send_message(event, "✅ تم تحديث نص الفوتر")
+                    except Exception:
+                        await self.edit_or_send_message(event, "❌ حدث خطأ أثناء التحديث")
+                    finally:
+                        self.clear_user_state(user_id)
+                        await self.audio_footer_settings(event, task_id)
                 return
                     
             elif current_user_state == 'editing_char_min': # Handle editing character minimum
@@ -14172,21 +14304,24 @@ async def run_simple_bot():
     async def toggle_audio_header_footer(self, event, task_id: int):
         """Toggle audio header/footer enabled state"""
         try:
-            current = self.db.get_audio_header_footer_settings(task_id)
+            current = self.db.get_audio_tag_header_footer_settings(task_id)
             header_enabled = current.get('header_enabled', False)
             footer_enabled = current.get('footer_enabled', False)
             
             # If both are disabled, enable header
             if not header_enabled and not footer_enabled:
-                self.db.update_audio_header_footer_enabled(task_id, header_enabled=True, footer_enabled=False)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'header_enabled', True)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'footer_enabled', False)
                 await event.answer("✅ تم تفعيل الهيدر")
             # If header only is enabled, enable footer too
             elif header_enabled and not footer_enabled:
-                self.db.update_audio_header_footer_enabled(task_id, header_enabled=True, footer_enabled=True)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'header_enabled', True)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'footer_enabled', True)
                 await event.answer("✅ تم تفعيل الفوتر أيضاً")
             # If both are enabled, disable both
             else:
-                self.db.update_audio_header_footer_enabled(task_id, header_enabled=False, footer_enabled=False)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'header_enabled', False)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'footer_enabled', False)
                 await event.answer("✅ تم تعطيل الهيدر والفوتر")
                 
         except Exception:
