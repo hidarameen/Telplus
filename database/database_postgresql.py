@@ -2589,3 +2589,841 @@ END$$;
         except Exception as e:
             logger.error(f"Error creating task with multiple sources/targets: {e}")
             return None
+
+    # ===== Media Filters Management =====
+    
+    def get_task_media_filters(self, task_id: int):
+        """Get media filters for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT media_types, min_file_size, max_file_size FROM task_media_filters
+                    WHERE task_id = %s
+                ''', (task_id,))
+                
+                row = cursor.fetchone()
+                if row and row['media_types']:
+                    # Convert array to dict format
+                    filters = {}
+                    media_types = ['text', 'photo', 'video', 'audio', 'document', 'voice', 'video_note', 'sticker', 'animation', 'location', 'contact', 'poll']
+                    allowed_types = row['media_types'] or []
+                    
+                    for media_type in media_types:
+                        filters[media_type] = media_type in allowed_types
+                    
+                    return filters
+                else:
+                    # Return default (all allowed)
+                    media_types = ['text', 'photo', 'video', 'audio', 'document', 'voice', 'video_note', 'sticker', 'animation', 'location', 'contact', 'poll']
+                    return {media_type: True for media_type in media_types}
+        except Exception as e:
+            logger.error(f"Error getting task media filters: {e}")
+            media_types = ['text', 'photo', 'video', 'audio', 'document', 'voice', 'video_note', 'sticker', 'animation', 'location', 'contact', 'poll']
+            return {media_type: True for media_type in media_types}
+
+    def set_task_media_filter(self, task_id: int, media_type: str, is_allowed: bool):
+        """Set media filter for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current media types
+                cursor.execute('SELECT media_types FROM task_media_filters WHERE task_id = %s', (task_id,))
+                row = cursor.fetchone()
+                
+                if row:
+                    current_types = list(row[0]) if row[0] else []
+                else:
+                    current_types = []
+                
+                if is_allowed and media_type not in current_types:
+                    current_types.append(media_type)
+                elif not is_allowed and media_type in current_types:
+                    current_types.remove(media_type)
+                
+                # Update or insert
+                cursor.execute('''
+                    INSERT INTO task_media_filters (task_id, media_types)
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id) 
+                    DO UPDATE SET media_types = EXCLUDED.media_types
+                ''', (task_id, current_types))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting task media filter: {e}")
+            return False
+
+    def set_all_media_filters(self, task_id: int, is_allowed: bool):
+        """Set all media filters for a task (allow all or block all)"""
+        try:
+            media_types = ['text', 'photo', 'video', 'audio', 'document', 'voice', 'video_note', 'sticker', 'animation', 'location', 'contact', 'poll']
+            allowed_types = media_types if is_allowed else []
+            
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_media_filters (task_id, media_types)
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id) 
+                    DO UPDATE SET media_types = EXCLUDED.media_types
+                ''', (task_id, allowed_types))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting all media filters: {e}")
+            return False
+
+    def reset_task_media_filters(self, task_id: int):
+        """Reset task media filters to default (all allowed)"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_media_filters WHERE task_id = %s', (task_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error resetting task media filters: {e}")
+            return False
+
+    # ===== Word Filters Management =====
+    
+    def get_task_word_filter_settings(self, task_id: int):
+        """Get word filter settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT filter_type, is_active FROM task_word_filters
+                    WHERE task_id = %s
+                ''', (task_id,))
+                
+                settings = {}
+                for row in cursor.fetchall():
+                    settings[row['filter_type']] = {
+                        'enabled': bool(row['is_active'])
+                    }
+                
+                # Set defaults if not exist
+                if 'allow' not in settings:
+                    settings['allow'] = {'enabled': False}
+                if 'block' not in settings:
+                    settings['block'] = {'enabled': False}
+                
+                return settings
+        except Exception as e:
+            logger.error(f"Error getting task word filter settings: {e}")
+            return {'allow': {'enabled': False}, 'block': {'enabled': False}}
+
+    def get_filter_words(self, task_id: int, filter_type: str):
+        """Get filter words for a task and filter type"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT wfe.word, wfe.id
+                    FROM word_filter_entries wfe
+                    JOIN task_word_filters twf ON wfe.filter_id = twf.id
+                    WHERE twf.task_id = %s AND twf.filter_type = %s
+                    ORDER BY wfe.word
+                ''', (task_id, filter_type))
+                
+                return [{'id': row['id'], 'word': row['word']} for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting filter words: {e}")
+            return []
+
+    def add_word_to_filter(self, task_id: int, filter_type: str, word_or_phrase: str, is_case_sensitive: bool = False, is_whole_word: bool = False):
+        """Add word to filter"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get or create filter
+                cursor.execute('SELECT id FROM task_word_filters WHERE task_id = %s AND filter_type = %s', (task_id, filter_type))
+                filter_row = cursor.fetchone()
+                
+                if not filter_row:
+                    cursor.execute('''
+                        INSERT INTO task_word_filters (task_id, filter_type, is_active)
+                        VALUES (%s, %s, TRUE)
+                        RETURNING id
+                    ''', (task_id, filter_type))
+                    filter_id = cursor.fetchone()[0]
+                else:
+                    filter_id = filter_row[0]
+                
+                # Add word
+                cursor.execute('''
+                    INSERT INTO word_filter_entries (filter_id, word)
+                    VALUES (%s, %s)
+                    ON CONFLICT (filter_id, word) DO NOTHING
+                ''', (filter_id, word_or_phrase))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error adding word to filter: {e}")
+            return False
+
+    def remove_word_from_filter(self, task_id: int, filter_type: str, word_or_phrase: str):
+        """Remove word from filter"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM word_filter_entries 
+                    WHERE filter_id IN (
+                        SELECT id FROM task_word_filters 
+                        WHERE task_id = %s AND filter_type = %s
+                    ) AND word = %s
+                ''', (task_id, filter_type, word_or_phrase))
+                
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing word from filter: {e}")
+            return False
+
+    def clear_filter_words(self, task_id: int, filter_type: str):
+        """Clear all words from a filter"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM word_filter_entries 
+                    WHERE filter_id IN (
+                        SELECT id FROM task_word_filters 
+                        WHERE task_id = %s AND filter_type = %s
+                    )
+                ''', (task_id, filter_type))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error clearing filter words: {e}")
+            return False
+
+    def set_word_filter_enabled(self, task_id: int, filter_type: str, is_enabled: bool):
+        """Enable/disable word filter"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_word_filters (task_id, filter_type, is_active)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id, filter_type) 
+                    DO UPDATE SET is_active = EXCLUDED.is_active
+                ''', (task_id, filter_type, is_enabled))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting word filter enabled: {e}")
+            return False
+
+    # ===== Header and Footer Management =====
+    
+    def update_header_settings(self, task_id: int, enabled: bool, header_text: str = None):
+        """Update header settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_headers (task_id, is_active, header_text)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id) 
+                    DO UPDATE SET is_active = EXCLUDED.is_active, header_text = EXCLUDED.header_text
+                ''', (task_id, enabled, header_text))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating header settings: {e}")
+            return False
+
+    def update_footer_settings(self, task_id: int, enabled: bool, footer_text: str = None):
+        """Update footer settings for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_footers (task_id, is_active, footer_text)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id) 
+                    DO UPDATE SET is_active = EXCLUDED.is_active, footer_text = EXCLUDED.footer_text
+                ''', (task_id, enabled, footer_text))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating footer settings: {e}")
+            return False
+
+    # ===== Inline Buttons Management =====
+    
+    def get_inline_buttons(self, task_id: int):
+        """Get inline buttons for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT id, button_text, button_url, button_callback, button_order, is_active
+                    FROM task_inline_buttons
+                    WHERE task_id = %s AND is_active = TRUE
+                    ORDER BY button_order, id
+                ''', (task_id,))
+                
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting inline buttons: {e}")
+            return []
+
+    def add_inline_button(self, task_id: int, button_text: str, button_url: str, row_pos: int = 0, col_pos: int = 0):
+        """Add inline button to a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_inline_buttons 
+                    (task_id, button_text, button_url, button_order, is_active)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                    RETURNING id
+                ''', (task_id, button_text, button_url, row_pos))
+                
+                button_id = cursor.fetchone()[0]
+                conn.commit()
+                return button_id
+        except Exception as e:
+            logger.error(f"Error adding inline button: {e}")
+            return None
+
+    def clear_inline_buttons(self, task_id: int):
+        """Clear all inline buttons for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_inline_buttons WHERE task_id = %s', (task_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error clearing inline buttons: {e}")
+            return False
+
+    # ===== Admin Filters Management =====
+    
+    def get_admin_filters(self, task_id: int):
+        """Get admin filters for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT admin_user_id, is_active FROM task_admin_filters 
+                    WHERE task_id = %s
+                    ORDER BY admin_user_id
+                ''', (task_id,))
+                
+                return [{'admin_user_id': row['admin_user_id'], 'is_allowed': bool(row['is_active'])} for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting admin filters: {e}")
+            return []
+
+    def add_admin_filter(self, task_id: int, admin_user_id: int, admin_username: str = None, 
+                        admin_first_name: str = None, is_allowed: bool = True, source_chat_id: str = None,
+                        admin_signature: str = None):
+        """Add admin filter"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_admin_filters (task_id, admin_user_id, is_active)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id, admin_user_id) 
+                    DO UPDATE SET is_active = EXCLUDED.is_active
+                ''', (task_id, admin_user_id, is_allowed))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error adding admin filter: {e}")
+            return False
+
+    def remove_admin_filter(self, task_id: int, admin_user_id: int):
+        """Remove admin filter"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM task_admin_filters WHERE task_id = %s AND admin_user_id = %s', 
+                             (task_id, admin_user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing admin filter: {e}")
+            return False
+
+    def toggle_admin_filter(self, task_id: int, admin_user_id: int, source_chat_id: str = None):
+        """Toggle admin filter status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT is_active FROM task_admin_filters WHERE task_id = %s AND admin_user_id = %s', 
+                             (task_id, admin_user_id))
+                row = cursor.fetchone()
+                
+                if row:
+                    new_status = not row[0]
+                    cursor.execute('UPDATE task_admin_filters SET is_active = %s WHERE task_id = %s AND admin_user_id = %s',
+                                 (new_status, task_id, admin_user_id))
+                else:
+                    cursor.execute('INSERT INTO task_admin_filters (task_id, admin_user_id, is_active) VALUES (%s, %s, TRUE)',
+                                 (task_id, admin_user_id))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error toggling admin filter: {e}")
+            return False
+
+    # ===== Advanced Filters Settings =====
+    
+    def toggle_advanced_filter(self, task_id: int, filter_type: str, enabled: bool = None) -> bool:
+        """Toggle advanced filter setting"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if enabled is None:
+                    # Toggle current state
+                    cursor.execute('SELECT is_active FROM task_advanced_filters WHERE task_id = %s AND filter_type = %s',
+                                 (task_id, filter_type))
+                    row = cursor.fetchone()
+                    enabled = not (row[0] if row else False)
+                
+                cursor.execute('''
+                    INSERT INTO task_advanced_filters (task_id, filter_type, is_active)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id, filter_type) 
+                    DO UPDATE SET is_active = EXCLUDED.is_active
+                ''', (task_id, filter_type, enabled))
+                
+                conn.commit()
+                return enabled
+        except Exception as e:
+            logger.error(f"Error toggling advanced filter: {e}")
+            return False
+
+    def update_advanced_filter_setting(self, task_id: int, filter_type: str, enabled: bool):
+        """Update advanced filter setting"""
+        try:
+            return self.toggle_advanced_filter(task_id, filter_type, enabled)
+        except Exception as e:
+            logger.error(f"Error updating advanced filter setting: {e}")
+            return False
+
+    def set_all_day_filters(self, task_id: int, is_allowed: bool):
+        """Set all day filters for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Clear existing day filters
+                cursor.execute('DELETE FROM task_day_filters WHERE task_id = %s', (task_id,))
+                
+                # Add all days if allowed
+                if is_allowed:
+                    for day in range(7):  # 0-6 for Monday-Sunday
+                        cursor.execute('INSERT INTO task_day_filters (task_id, day_of_week, is_active) VALUES (%s, %s, TRUE)',
+                                     (task_id, day))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting all day filters: {e}")
+            return False
+
+    # ===== Text Processing Functions =====
+    
+    def is_message_allowed_by_word_filter(self, task_id: int, message_text: str):
+        """Check if message is allowed by word filters"""
+        try:
+            if not message_text:
+                return True
+                
+            # Get word filter settings
+            settings = self.get_task_word_filter_settings(task_id)
+            
+            # Check block filter (if enabled, block messages containing blocked words)
+            if settings.get('block', {}).get('enabled', False):
+                blocked_words = self.get_filter_words(task_id, 'block')
+                message_lower = message_text.lower()
+                
+                for word_data in blocked_words:
+                    if word_data['word'].lower() in message_lower:
+                        return False
+            
+            # Check allow filter (if enabled, only allow messages containing allowed words)
+            if settings.get('allow', {}).get('enabled', False):
+                allowed_words = self.get_filter_words(task_id, 'allow')
+                if allowed_words:  # Only check if there are allowed words
+                    message_lower = message_text.lower()
+                    
+                    for word_data in allowed_words:
+                        if word_data['word'].lower() in message_lower:
+                            return True
+                    
+                    return False  # No allowed words found
+            
+            return True  # Default allow
+        except Exception as e:
+            logger.error(f"Error checking word filter: {e}")
+            return True  # Default allow on error
+
+    def is_word_filter_enabled(self, task_id: int, filter_type: str):
+        """Check if word filter is enabled"""
+        try:
+            settings = self.get_task_word_filter_settings(task_id)
+            return settings.get(filter_type, {}).get('enabled', False)
+        except Exception as e:
+            logger.error(f"Error checking word filter enabled: {e}")
+            return False
+
+    def set_word_filter_status(self, task_id: int, filter_type: str, is_enabled: bool):
+        """Set word filter status (enabled/disabled)"""
+        try:
+            return self.set_word_filter_enabled(task_id, filter_type, is_enabled)
+        except Exception as e:
+            logger.error(f"Error setting word filter status: {e}")
+            return False
+
+    # ===== Additional Helper Methods =====
+    
+    def get_word_filter_id(self, task_id: int, filter_type: str):
+        """Get word filter ID"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id FROM task_word_filters WHERE task_id = %s AND filter_type = %s',
+                             (task_id, filter_type))
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error getting word filter ID: {e}")
+            return None
+
+    def remove_word_from_filter_by_id(self, word_id: int):
+        """Remove word from filter by word ID"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM word_filter_entries WHERE id = %s', (word_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing word by ID: {e}")
+            return False
+
+    def add_multiple_filter_words(self, task_id: int, filter_type: str, words_list: list):
+        """Add multiple words to filter"""
+        try:
+            success_count = 0
+            for word in words_list:
+                if self.add_word_to_filter(task_id, filter_type, word.strip()):
+                    success_count += 1
+            return success_count
+        except Exception as e:
+            logger.error(f"Error adding multiple filter words: {e}")
+            return 0
+
+    # ===== Text Replacements Management =====
+    
+    def get_text_replacements(self, task_id: int):
+        """Get text replacements for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute('''
+                    SELECT tre.id, tre.old_text, tre.new_text
+                    FROM text_replacement_entries tre
+                    JOIN task_text_replacements ttr ON tre.replacement_id = ttr.id
+                    WHERE ttr.task_id = %s AND ttr.is_active = TRUE
+                    ORDER BY tre.old_text
+                ''', (task_id,))
+                
+                return [{'id': row['id'], 'old_text': row['old_text'], 'new_text': row['new_text']} 
+                       for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting text replacements: {e}")
+            return []
+
+    def add_text_replacement(self, task_id: int, old_text: str, new_text: str):
+        """Add text replacement"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get or create text replacement settings
+                cursor.execute('SELECT id FROM task_text_replacements WHERE task_id = %s', (task_id,))
+                replacement_row = cursor.fetchone()
+                
+                if not replacement_row:
+                    cursor.execute('''
+                        INSERT INTO task_text_replacements (task_id, is_active)
+                        VALUES (%s, TRUE)
+                        RETURNING id
+                    ''', (task_id,))
+                    replacement_id = cursor.fetchone()[0]
+                else:
+                    replacement_id = replacement_row[0]
+                
+                # Add replacement entry
+                cursor.execute('''
+                    INSERT INTO text_replacement_entries (replacement_id, old_text, new_text)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (replacement_id, old_text) DO UPDATE SET new_text = EXCLUDED.new_text
+                    RETURNING id
+                ''', (replacement_id, old_text, new_text))
+                
+                entry_id = cursor.fetchone()[0]
+                conn.commit()
+                return entry_id
+        except Exception as e:
+            logger.error(f"Error adding text replacement: {e}")
+            return None
+
+    def remove_text_replacement(self, task_id: int, old_text: str):
+        """Remove text replacement"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM text_replacement_entries 
+                    WHERE replacement_id IN (
+                        SELECT id FROM task_text_replacements 
+                        WHERE task_id = %s
+                    ) AND old_text = %s
+                ''', (task_id, old_text))
+                
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing text replacement: {e}")
+            return False
+
+    def clear_text_replacements(self, task_id: int):
+        """Clear all text replacements for a task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM text_replacement_entries 
+                    WHERE replacement_id IN (
+                        SELECT id FROM task_text_replacements 
+                        WHERE task_id = %s
+                    )
+                ''', (task_id,))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error clearing text replacements: {e}")
+            return False
+
+    # ===== Language Filter Mode Management =====
+    
+    def get_language_filter_mode(self, task_id: int) -> str:
+        """Get language filter mode"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT filter_value FROM task_advanced_filters WHERE task_id = %s AND filter_type = %s',
+                             (task_id, 'language_filter_mode'))
+                row = cursor.fetchone()
+                return row[0] if row else 'allow'
+        except Exception as e:
+            logger.error(f"Error getting language filter mode: {e}")
+            return 'allow'
+
+    def set_language_filter_mode(self, task_id: int, mode: str):
+        """Set language filter mode"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_advanced_filters (task_id, filter_type, filter_value, is_active)
+                    VALUES (%s, 'language_filter_mode', %s, TRUE)
+                    ON CONFLICT (task_id, filter_type) 
+                    DO UPDATE SET filter_value = EXCLUDED.filter_value
+                ''', (task_id, mode))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting language filter mode: {e}")
+            return False
+
+    # ===== Working Hours Management =====
+    
+    def set_working_hours(self, task_id: int, enabled: bool, timezone: str = 'Asia/Riyadh'):
+        """Set working hours enabled status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_working_hours (task_id, is_enabled, timezone)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (task_id) 
+                    DO UPDATE SET is_enabled = EXCLUDED.is_enabled, timezone = EXCLUDED.timezone
+                ''', (task_id, enabled, timezone))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting working hours: {e}")
+            return False
+
+    def set_working_hour_schedule(self, task_id: int, day_of_week: int, start_time: str, end_time: str, is_active: bool = True):
+        """Set working hour schedule for a specific day"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get working hours ID
+                cursor.execute('SELECT id FROM task_working_hours WHERE task_id = %s', (task_id,))
+                working_hours_row = cursor.fetchone()
+                
+                if not working_hours_row:
+                    # Create working hours first
+                    cursor.execute('''
+                        INSERT INTO task_working_hours (task_id, is_enabled, timezone)
+                        VALUES (%s, TRUE, 'Asia/Riyadh')
+                        RETURNING id
+                    ''', (task_id,))
+                    working_hours_id = cursor.fetchone()[0]
+                else:
+                    working_hours_id = working_hours_row[0]
+                
+                # Set schedule
+                cursor.execute('''
+                    INSERT INTO task_working_hours_schedule 
+                    (working_hours_id, day_of_week, start_time, end_time, is_active)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (working_hours_id, day_of_week, start_time, end_time) 
+                    DO UPDATE SET is_active = EXCLUDED.is_active
+                ''', (working_hours_id, day_of_week, start_time, end_time, is_active))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting working hour schedule: {e}")
+            return False
+
+    # ===== Message Logging =====
+    
+    def log_forwarded_message(self, task_id: int, source_chat_id: str, source_message_id: int, 
+                             target_chat_id: str, target_message_id: int, message_type: str,
+                             processing_time_ms: int = None, status: str = 'success', error_message: str = None):
+        """Log forwarded message"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO forwarded_messages_log 
+                    (task_id, source_message_id, target_message_id, source_chat_id, target_chat_id, 
+                     message_type, processing_time_ms, status, error_message)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                ''', (task_id, source_message_id, target_message_id, str(source_chat_id), str(target_chat_id),
+                      message_type, processing_time_ms, status, error_message))
+                
+                log_id = cursor.fetchone()[0]
+                conn.commit()
+                return log_id
+        except Exception as e:
+            logger.error(f"Error logging forwarded message: {e}")
+            return None
+
+    # ===== Advanced Filter Helpers =====
+    
+    def is_advanced_filter_enabled(self, task_id: int, filter_type: str) -> bool:
+        """Check if advanced filter is enabled"""
+        try:
+            settings = self.get_advanced_filters_settings(task_id)
+            return settings.get(f'{filter_type}_enabled', False)
+        except Exception as e:
+            logger.error(f"Error checking advanced filter enabled: {e}")
+            return False
+
+    # ===== Button Filter Settings =====
+    
+    def get_button_filter_settings(self, task_id: int):
+        """Get button filter settings"""
+        try:
+            return self.get_inline_button_filter_setting(task_id)
+        except Exception as e:
+            logger.error(f"Error getting button filter settings: {e}")
+            return None
+
+    def set_button_filter_mode(self, task_id: int, filter_type: str):
+        """Set button filter mode"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_inline_button_filters (task_id, filter_type, is_active)
+                    VALUES (%s, %s, TRUE)
+                    ON CONFLICT (task_id) 
+                    DO UPDATE SET filter_type = EXCLUDED.filter_type
+                ''', (task_id, filter_type))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting button filter mode: {e}")
+            return False
+
+    def set_inline_button_filter(self, task_id: int, filter_type: str):
+        """Set inline button filter"""
+        try:
+            return self.set_button_filter_mode(task_id, filter_type)
+        except Exception as e:
+            logger.error(f"Error setting inline button filter: {e}")
+            return False
+
+    # ===== Forwarded Message Filter Settings =====
+    
+    def get_forwarded_filter_settings(self, task_id: int):
+        """Get forwarded message filter settings"""
+        try:
+            return self.get_forwarded_message_filter_setting(task_id)
+        except Exception as e:
+            logger.error(f"Error getting forwarded filter settings: {e}")
+            return None
+
+    def set_forwarded_filter_mode(self, task_id: int, filter_type: str):
+        """Set forwarded message filter mode"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO task_forwarded_message_filters (task_id, filter_type, is_active)
+                    VALUES (%s, %s, TRUE)
+                    ON CONFLICT (task_id) 
+                    DO UPDATE SET filter_type = EXCLUDED.filter_type
+                ''', (task_id, filter_type))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting forwarded filter mode: {e}")
+            return False
+
+    def set_forwarded_message_filter(self, task_id: int, filter_type: str):
+        """Set forwarded message filter"""
+        try:
+            return self.set_forwarded_filter_mode(task_id, filter_type)
+        except Exception as e:
+            logger.error(f"Error setting forwarded message filter: {e}")
+            return False
