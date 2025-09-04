@@ -10615,6 +10615,8 @@ class SimpleTelegramBot:
                         requires_copy_mode = (
                             applies_header or applies_footer or
                             (original_text != modified_text) or
+                            # If formatting changed the text (e.g., spoiler), prefer copy mode
+                            (translated_text != formatted_text) or
                             message_settings.get('inline_buttons_enabled', False)
                         )
                         final_mode = ub._determine_final_send_mode(forward_mode, requires_copy_mode)
@@ -10633,13 +10635,15 @@ class SimpleTelegramBot:
                                     file=message.media,
                                     caption=final_text or None,
                                     silent=forwarding_settings.get('silent_notifications', False),
-                                    force_document=False
+                                    force_document=False,
+                                    parse_mode='HTML' if final_text else None
                                 )
                             else:
                                 forwarded_msg = await client.send_message(
                                     target_entity,
                                     final_text or (message.text or ""),
-                                    silent=forwarding_settings.get('silent_notifications', False)
+                                    silent=forwarding_settings.get('silent_notifications', False),
+                                    parse_mode='HTML' if final_text else None
                                 )
                             msg_id = forwarded_msg[0].id if isinstance(forwarded_msg, list) else forwarded_msg.id
 

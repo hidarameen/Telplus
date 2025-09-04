@@ -1741,12 +1741,27 @@ class UserbotService:
                                     target_entity_resolved = await client.get_entity(str(target_chat_id))
                                 except Exception:
                                     target_entity_resolved = target_entity
+                            # If the target message is a forwarded message, do NOT apply formatting/spoilers
+                            try:
+                                current_msg = await client.get_messages(target_entity_resolved, ids=target_message_id)
+                                is_forwarded_target = bool(getattr(current_msg, 'forward', None))
+                            except Exception:
+                                is_forwarded_target = False
+
+                            if is_forwarded_target:
+                                # Use original edited text without formatting and skip parse_mode
+                                processed_text_to_send = edited_text
+                                parse_mode_edit = None
+                            else:
+                                processed_text_to_send = processed_text
+                                # Use HTML parse mode only if there is HTML markup
+                                parse_mode_edit = 'HTML' if ('<' in processed_text_to_send and '>' in processed_text_to_send) else None
                             await client.edit_message(
                                 target_entity_resolved,
                                 target_message_id,
-                                processed_text,
+                                processed_text_to_send,
                                 file=None if not event.message.media else event.message.media,
-                                parse_mode='HTML'
+                                parse_mode=parse_mode_edit
                             )
                             
                             # Add inline buttons if needed (can't edit buttons with userbot, use bot client)
@@ -2731,8 +2746,14 @@ class UserbotService:
                 # CRITICAL FIX: Force video files to be sent as video, not document
                 if filename and filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v')):
                     kwargs["force_document"] = False  # إجبار الإرسال كفيديو
-                    # إزالة parse_mode للفيديوهات لتجنب مشاكل التنسيق
-                    if 'parse_mode' in kwargs:
+                    # الإبقاء على HTML فقط إذا كان هناك تنسيق ضروري (مثل <tg-spoiler>)
+                    try:
+                        caption_text = kwargs.get('caption') or ''
+                    except Exception:
+                        caption_text = ''
+                    has_html_markup = ('<' in caption_text and '>' in caption_text)
+                    if 'parse_mode' in kwargs and not has_html_markup:
+                        # لا حاجة لـ parse_mode عند عدم وجود HTML
                         del kwargs['parse_mode']
                 
                 result = await TelethonFileSender.send_file_with_name(
