@@ -12,7 +12,31 @@ logger = logging.getLogger(__name__)
 class Database:
     def __init__(self):
         """Initialize SQLite database connection"""
-        self.db_path = 'telegram_bot.db'
+        # Resolve database path with environment overrides and safe defaults
+        try:
+            # Prefer explicit SQLite path if provided
+            explicit_db_path = os.getenv('SQLITE_DB_PATH')
+            if explicit_db_path and explicit_db_path.strip():
+                self.db_path = explicit_db_path.strip()
+            else:
+                # Use DATA_DIR if available, defaulting to /app/data inside containers
+                data_dir = os.getenv('DATA_DIR', '/app/data')
+                if data_dir and data_dir.strip():
+                    self.db_path = os.path.join(data_dir.strip(), 'telegram_bot.db')
+                else:
+                    self.db_path = 'telegram_bot.db'
+
+            # Ensure parent directory exists when path is not cwd
+            db_dirname = os.path.dirname(self.db_path)
+            if db_dirname:
+                try:
+                    os.makedirs(db_dirname, exist_ok=True)
+                except Exception:
+                    # Directory creation might fail on read-only roots; fallback to cwd
+                    pass
+        except Exception:
+            # Fallback in case env handling fails
+            self.db_path = 'telegram_bot.db'
         self.init_database()
 
     def get_connection(self):

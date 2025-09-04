@@ -12,6 +12,8 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - TZ=UTC
+      - DATA_DIR=/app/data
+      - SQLITE_DB_PATH=/app/data/telegram_bot.db
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
