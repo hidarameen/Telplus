@@ -934,6 +934,11 @@ END$$;
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Ensure task_name is not None or empty
+                if not task_name or task_name.strip() == '':
+                    task_name = 'مهمة توجيه'
+                    
                 cursor.execute('''
                     INSERT INTO tasks (user_id, task_name, source_chat_id, target_chat_id, forward_mode)
                     VALUES (%s, %s, %s, %s, %s)
@@ -1255,6 +1260,11 @@ END$$;
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Ensure name is not None or empty
+                if not name or name.strip() == '':
+                    name = 'منشور متكرر'
+                    
                 cursor.execute('''
                     INSERT INTO recurring_posts
                     (task_id, name, enabled, source_chat_id, source_message_id, interval_seconds,
@@ -2688,6 +2698,10 @@ END$$;
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+
+                # Ensure task_name is not None or empty
+                if not task_name or task_name.strip() == '':
+                    task_name = 'مهمة توجيه'
 
                 # Create main task with the first source and target
                 first_source_id = source_chat_ids[0] if source_chat_ids else ''

@@ -1137,6 +1137,10 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
+            # Ensure task_name is not None or empty
+            if not task_name or task_name.strip() == '':
+                task_name = 'مهمة توجيه'
+
             # Create main task with the first source and target
             first_source_id = source_chat_ids[0] if source_chat_ids else ''
             first_source_name = source_chat_names[0] if source_chat_names else first_source_id
