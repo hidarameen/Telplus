@@ -2286,3 +2286,201 @@ END$$;
         except Exception as e:
             logger.error(f"Error updating task forward mode: {e}")
             return False
+    # ===== الدوال الأساسية المفقودة =====
+    
+    def update_task_status(self, task_id: int, user_id: int, is_active: bool) -> bool:
+        """Update task status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE tasks SET is_active = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND user_id = %s
+                """, (is_active, task_id, user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating task status: {e}")
+            return False
+
+    def delete_task(self, task_id: int, user_id: int) -> bool:
+        """Delete task"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM tasks WHERE id = %s AND user_id = %s', 
+                             (task_id, user_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting task: {e}")
+            return False
+
+    def get_all_active_tasks(self) -> List[Dict]:
+        """Get all active tasks for userbot"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
+                    SELECT id, task_name, source_chat_id, source_chat_name, 
+                           target_chat_id, target_chat_name, forward_mode
+                    FROM tasks 
+                    WHERE is_active = TRUE
+                """)
+                results = cursor.fetchall()
+                tasks = []
+                for row in results:
+                    tasks.append({
+                        'id': row['id'],
+                        'task_name': row['task_name'],
+                        'source_chat_id': row['source_chat_id'],
+                        'source_chat_name': row['source_chat_name'],
+                        'target_chat_id': row['target_chat_id'],
+                        'target_chat_name': row['target_chat_name'],
+                        'forward_mode': row['forward_mode'] or 'forward'
+                    })
+                return tasks
+        except Exception as e:
+            logger.error(f"Error getting all active tasks: {e}")
+            return []
+
+    def get_active_user_tasks(self, user_id: int) -> List[Dict]:
+        """Get active tasks for specific user"""
+        return self.get_active_tasks(user_id)
+
+    def get_active_tasks(self, user_id: int) -> List[Dict]:
+        """Get active tasks for user with all sources and targets"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
+                    SELECT id, task_name, source_chat_id, source_chat_name, 
+                           target_chat_id, target_chat_name, forward_mode
+                    FROM tasks 
+                    WHERE user_id = %s AND is_active = TRUE
+                """, (user_id,))
+                
+                results = cursor.fetchall()
+                tasks = []
+                
+                for row in results:
+                    task_id = row['id']
+                    
+                    # Get all sources for this task
+                    sources = self.get_task_sources(task_id)
+                    if not sources:
+                        # Fallback to legacy data
+                        sources = [{
+                            'id': 0,
+                            'chat_id': row['source_chat_id'],
+                            'chat_name': row['source_chat_name']
+                        }] if row['source_chat_id'] else []
+
+                    # Get all targets for this task  
+                    targets = self.get_task_targets(task_id)
+                    if not targets:
+                        # Fallback to legacy data
+                        targets = [{
+                            'id': 0,
+                            'chat_id': row['target_chat_id'],
+                            'chat_name': row['target_chat_name']
+                        }] if row['target_chat_id'] else []
+
+                    # Create individual task entries for each source-target combination
+                    for source in sources:
+                        for target in targets:
+                            tasks.append({
+                                'id': row['id'],
+                                'task_name': row['task_name'],
+                                'source_chat_id': source['chat_id'],
+                                'source_chat_name': source['chat_name'],
+                                'target_chat_id': target['chat_id'],
+                                'target_chat_name': target['chat_name'],
+                                'forward_mode': row['forward_mode'] or 'forward'
+                            })
+                return tasks
+        except Exception as e:
+            logger.error(f"Error getting active tasks: {e}")
+            return []
+
+    # ===== دوال إعدادات الصوت المفقودة =====
+    
+    def get_audio_text_cleaning_settings(self, task_id: int) -> Optional[Dict]:
+        """Get audio text cleaning settings"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
+                    SELECT * FROM task_audio_text_cleaning_settings WHERE task_id = %s
+                """, (task_id,))
+                result = cursor.fetchone()
+                return dict(result) if result else {'enabled': False, 'task_id': task_id}
+        except Exception as e:
+            logger.error(f"Error getting audio text cleaning settings: {e}")
+            return {'enabled': False, 'task_id': task_id}
+
+    def get_audio_text_replacements_settings(self, task_id: int) -> Optional[Dict]:
+        """Get audio text replacements settings"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
+                    SELECT * FROM task_audio_text_replacements_settings WHERE task_id = %s
+                """, (task_id,))
+                result = cursor.fetchone()
+                return dict(result) if result else {'enabled': False, 'task_id': task_id}
+        except Exception as e:
+            logger.error(f"Error getting audio text replacements settings: {e}")
+            return {'enabled': False, 'task_id': task_id}
+
+    def get_audio_tag_text_cleaning_settings(self, task_id: int) -> Optional[Dict]:
+        """Get audio tag text cleaning settings"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
+                    SELECT * FROM task_audio_tag_cleaning_settings WHERE task_id = %s
+                """, (task_id,))
+                result = cursor.fetchone()
+                return dict(result) if result else {'enabled': False, 'task_id': task_id}
+        except Exception as e:
+            logger.error(f"Error getting audio tag text cleaning settings: {e}")
+            return {'enabled': False, 'task_id': task_id}
+
+    def update_audio_text_cleaning_enabled(self, task_id: int, enabled: bool) -> bool:
+        """Update audio text cleaning enabled status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO task_audio_text_cleaning_settings (task_id, enabled)
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id)
+                    DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = CURRENT_TIMESTAMP
+                """, (task_id, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating audio text cleaning enabled: {e}")
+            return False
+
+    def update_audio_text_replacements_enabled(self, task_id: int, enabled: bool) -> bool:
+        """Update audio text replacements enabled status"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO task_audio_text_replacements_settings (task_id, enabled)
+                    VALUES (%s, %s)
+                    ON CONFLICT (task_id)
+                    DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = CURRENT_TIMESTAMP
+                """, (task_id, enabled))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating audio text replacements enabled: {e}")
+            return False
+
+    def get_audio_tag_cleaning_settings(self, task_id: int) -> Optional[Dict]:
+        """Alias for get_audio_tag_text_cleaning_settings"""
+        return self.get_audio_tag_text_cleaning_settings(task_id)
