@@ -1339,8 +1339,8 @@ class SimpleTelegramBot:
                 try:
                     task_id = int(data.replace("toggle_preserve_quality_", ""))
                     settings = self.db.get_audio_metadata_settings(task_id)
-                    current_state = settings.get('preserve_quality', True)
-                    self.db.update_audio_metadata_setting(task_id, 'preserve_quality', not current_state)
+                    current_state = settings.get('preserve_original', True)
+                    self.db.update_audio_metadata_setting(task_id, 'preserve_original', not current_state)
                     await event.answer("✅ تم التبديل")
                     await self.advanced_audio_settings(event, task_id)
                 except ValueError:
@@ -14189,38 +14189,7 @@ async def run_simple_bot():
         
         await self.force_new_message(event, message_text, buttons=buttons)
 
-    async def audio_header_footer(self, event, task_id):
-        """Show audio header/footer settings"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        try:
-            settings = self.db.get_audio_tag_header_footer_settings(task_id)
-            status_text = "🟢 مفعل" if (settings.get('header_enabled', False) or settings.get('footer_enabled', False)) else "🔴 معطل"
-        except Exception:
-            status_text = "🔴 معطل"
-        
-        buttons = [
-            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_header_footer_{task_id}")],
-            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
-        ]
-        
-        message_text = (
-            f"📄 هيدر وفوتر الوسوم الصوتية - المهمة: {task_name}\n\n"
-            f"📊 الحالة: {status_text}\n\n"
-            f"🔧 **الوظائف:**\n"
-            f"• إضافة نص في بداية الوسوم (هيدر)\n"
-            f"• إضافة نص في نهاية الوسوم (فوتر)\n"
-            f"• تطبيق على وسوم محددة\n\n"
-            f"💡 **مثال:** إضافة اسم القناة في بداية عنوان الأغنية"
-        )
-        
-        await self.force_new_message(event, message_text, buttons=buttons)
+    # [Removed duplicate audio_header_footer definition - consolidated earlier]
 
     async def audio_tag_selection(self, event, task_id):
         """Show audio tag selection for text processing"""
