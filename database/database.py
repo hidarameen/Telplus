@@ -6425,21 +6425,22 @@ class Database:
             logger.error(f"Invalid audio tag text cleaning setting: {setting_name}")
             return False
 
-        cursor = self.conn.cursor()
-        # Create default record if doesn't exist
-        cursor.execute('''
-            INSERT OR IGNORE INTO task_audio_tag_text_cleaning_settings (task_id)
-            VALUES (?)
-        ''', (task_id,))
-        
-        # Update the specific setting
-        cursor.execute(f'''
-            UPDATE task_audio_tag_text_cleaning_settings
-            SET {setting_name} = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE task_id = ?
-        ''', (enabled, task_id))
-        self.conn.commit()
-        return cursor.rowcount > 0
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Create default record if doesn't exist
+            cursor.execute('''
+                INSERT OR IGNORE INTO task_audio_tag_text_cleaning_settings (task_id)
+                VALUES (?)
+            ''', (task_id,))
+            
+            # Update the specific setting
+            cursor.execute(f'''
+                UPDATE task_audio_tag_text_cleaning_settings
+                SET {setting_name} = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = ?
+            ''', (enabled, task_id))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def add_audio_tag_text_cleaning_keyword(self, task_id: int, keyword: str) -> bool:
         """Add keyword to audio tag text cleaning keywords list"""
@@ -6973,16 +6974,13 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT enabled
+                SELECT MAX(CASE WHEN is_enabled THEN 1 ELSE 0 END) AS any_enabled
                 FROM task_audio_tag_word_filters
-                WHERE task_id = ? 
-                LIMIT 1
+                WHERE task_id = ?
             ''', (task_id,))
-            
             row = cursor.fetchone()
-            return {
-                'enabled': bool(row['enabled']) if row else False
-            }
+            any_enabled = bool(row['any_enabled']) if row and row['any_enabled'] is not None else False
+            return {'enabled': any_enabled}
     
     def get_audio_selected_tags(self, task_id: int) -> List[str]:
         """Get selected tags for audio text processing"""
@@ -7016,7 +7014,7 @@ class Database:
                 cursor.execute('''
                     INSERT OR REPLACE INTO task_audio_tag_text_cleaning_settings 
                     (task_id, enabled, remove_links, remove_emojis, remove_hashtags, 
-                     remove_phone_numbers, remove_empty_lines, remove_keywords, updated_at)
+                     remove_phone_numbers, remove_empty_lines, remove_lines_with_keywords, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ''', (task_id, enabled, 
                       current.get('remove_links', False),
@@ -7024,7 +7022,7 @@ class Database:
                       current.get('remove_hashtags', False),
                       current.get('remove_phone_numbers', False),
                       current.get('remove_empty_lines', False),
-                      current.get('remove_keywords', False)))
+                      current.get('remove_lines_with_keywords', False)))
                 
                 conn.commit()
                 return True
@@ -7054,10 +7052,18 @@ class Database:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT OR REPLACE INTO task_audio_tag_word_filters 
-                    (task_id, filter_type, enabled, updated_at)
-                    VALUES (?, 'whitelist', ?, CURRENT_TIMESTAMP)
-                ''', (task_id, enabled))
+                    INSERT OR IGNORE INTO task_audio_tag_word_filters (task_id, filter_type)
+                    VALUES (?, 'whitelist')
+                ''', (task_id,))
+                cursor.execute('''
+                    INSERT OR IGNORE INTO task_audio_tag_word_filters (task_id, filter_type)
+                    VALUES (?, 'blacklist')
+                ''', (task_id,))
+                cursor.execute('''
+                    UPDATE task_audio_tag_word_filters
+                    SET is_enabled = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE task_id = ? AND filter_type IN ('whitelist', 'blacklist')
+                ''', (enabled, task_id))
                 conn.commit()
                 return True
         except Exception as e:
