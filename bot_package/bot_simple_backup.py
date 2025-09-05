@@ -228,6 +228,10 @@ class SimpleTelegramBot:
             [Button.inline(f"🖼️ صورة الغلاف ({art_status})", f"album_art_settings_{task_id}")],
             [Button.inline(f"🔗 دمج المقاطع ({merge_status})", f"audio_merge_settings_{task_id}")],
             [Button.inline("⚙️ إعدادات متقدمة", f"advanced_audio_settings_{task_id}")],
+            [Button.inline("🧹 تنظيف نصوص الوسوم", f"audio_text_cleaning_{task_id}")],
+            [Button.inline("🔄 استبدال نصوص الوسوم", f"audio_text_replacements_{task_id}")],
+            [Button.inline("📝 فلاتر كلمات الوسوم", f"audio_word_filters_{task_id}")],
+            [Button.inline("📄 هيدر وفوتر الوسوم", f"audio_header_footer_{task_id}")],
             [Button.inline("🔙 رجوع لإعدادات المهمة", f"task_settings_{task_id}")]
         ]
         message_text = (
@@ -358,6 +362,109 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         self.db.set_conversation_state(user_id, 'editing_recurring_interval', str(recurring_id))
         await self.edit_or_send_message(event, "⏱️ أرسل الآن الفترة بالثواني (مثال: 3600)")
+    async def audio_text_cleaning(self, event, task_id):
+        """Show audio text cleaning settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get text cleaning settings for audio tags
+        try:
+            audio_cleaning = self.db.get_audio_tag_text_cleaning_settings(task_id)
+            status_text = "🟢 مفعل" if audio_cleaning.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_cleaning_{task_id}")],
+            [Button.inline("🧹 حذف الروابط", f"audio_clean_links_{task_id}"),
+             Button.inline("😀 حذف الرموز التعبيرية", f"audio_clean_emojis_{task_id}")],
+            [Button.inline("# حذف الهاشتاج", f"audio_clean_hashtags_{task_id}"),
+             Button.inline("📞 حذف أرقام الهاتف", f"audio_clean_phones_{task_id}")],
+            [Button.inline("📝 حذف السطور الفارغة", f"audio_clean_empty_{task_id}"),
+             Button.inline("🔤 حذف كلمات محددة", f"audio_clean_keywords_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للتنظيف", f"audio_clean_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🧹 تنظيف نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **خيارات التنظيف المتاحة:**\n"
+            f"• حذف الروابط من الوسوم\n"
+            f"• حذف الرموز التعبيرية\n"
+            f"• حذف علامات الهاشتاج\n"
+            f"• حذف أرقام الهاتف\n"
+            f"• حذف السطور الفارغة\n"
+            f"• حذف كلمات وعبارات محددة\n\n"
+            f"💡 **ملاحظة:** سيتم تطبيق التنظيف على الوسوم المحددة فقط\n"
+            f"(العنوان، الفنان، التعليق، كلمات الأغنية، إلخ)"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
+    async def audio_text_replacements(self, event, task_id):
+        """Show audio text replacements settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        try:
+            audio_replacements = self.db.get_audio_text_replacements_settings(task_id)
+            status_text = "🟢 مفعل" if audio_replacements.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_replacements_{task_id}")],
+            [Button.inline("➕ إضافة استبدال جديد", f"add_audio_replacement_{task_id}")],
+            [Button.inline("📋 عرض الاستبدالات", f"view_audio_replacements_{task_id}")],
+            [Button.inline("🗑️ حذف جميع الاستبدالات", f"clear_audio_replacements_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للاستبدال", f"audio_replace_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🔄 استبدال نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **وظائف الاستبدال:**\n"
+            f"• استبدال كلمات أو عبارات محددة\n"
+            f"• دعم البحث الحساس/غير الحساس للأحرف\n"
+            f"• استبدال الكلمات الكاملة فقط\n"
+            f"• تطبيق على وسوم محددة\n\n"
+            f"💡 **مثال:** استبدال 'ft.' بـ 'featuring' في وسم الفنان"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
+    async def toggle_audio_text_cleaning(self, event, task_id):
+        """Toggle audio tag text cleaning enabled state"""
+        try:
+            current = self.db.get_audio_tag_text_cleaning_settings(task_id)
+            new_state = not bool(current.get('enabled', False))
+            self.db.update_audio_text_cleaning_enabled(task_id, new_state)
+            await event.answer("✅ تم التبديل")
+        except Exception:
+            await event.answer("❌ حدث خطأ أثناء التبديل")
+        await self.audio_text_cleaning(event, task_id)
+
+    async def toggle_audio_text_replacements(self, event, task_id):
+        """Toggle audio tag text replacements enabled state"""
+        try:
+            current = self.db.get_audio_text_replacements_settings(task_id)
+            new_state = not bool(current.get('enabled', False))
+            self.db.update_audio_text_replacements_enabled(task_id, new_state)
+            await event.answer("✅ تم التبديل")
+        except Exception:
+            await event.answer("❌ حدث خطأ أثناء التبديل")
+        await self.audio_text_replacements(event, task_id)
 
     async def toggle_audio_metadata(self, event, task_id):
         user_id = event.sender_id
@@ -1350,7 +1457,109 @@ class SimpleTelegramBot:
                 except ValueError as e:
                     logger.error(f"❌ خطأ في تحليل معرف المهمة للإعدادات المتقدمة للوسوم: {e}")
                     await event.answer("❌ خطأ في تحليل البيانات")
-
+            elif data.startswith("audio_text_cleaning_"):
+                try:
+                    task_id = int(data.replace("audio_text_cleaning_", ""))
+                    await self.audio_text_cleaning(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لتنظيف نصوص الوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_text_replacements_"):
+                try:
+                    task_id = int(data.replace("audio_text_replacements_", ""))
+                    await self.audio_text_replacements(event, task_id)
+                except ValueError as e:
+                    logger.error(f"❌ خطأ في تحليل معرف المهمة لاستبدال نصوص الوسوم: {e}")
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_text_cleaning_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_text_cleaning_", ""))
+                    await self.toggle_audio_text_cleaning(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_text_replacements_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_text_replacements_", ""))
+                    await self.toggle_audio_text_replacements(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            # Audio cleaning buttons handlers
+            elif data.startswith("audio_clean_links_"):
+                try:
+                    task_id = int(data.replace("audio_clean_links_", ""))
+                    await self.toggle_audio_clean_option(event, task_id, 'links')
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_clean_emojis_"):
+                try:
+                    task_id = int(data.replace("audio_clean_emojis_", ""))
+                    await self.toggle_audio_clean_option(event, task_id, 'emojis')
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_clean_hashtags_"):
+                try:
+                    task_id = int(data.replace("audio_clean_hashtags_", ""))
+                    await self.toggle_audio_clean_option(event, task_id, 'hashtags')
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_clean_phones_"):
+                try:
+                    task_id = int(data.replace("audio_clean_phones_", ""))
+                    await self.toggle_audio_clean_option(event, task_id, 'phones')
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_clean_empty_"):
+                try:
+                    task_id = int(data.replace("audio_clean_empty_", ""))
+                    await self.toggle_audio_clean_option(event, task_id, 'empty_lines')
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_clean_keywords_"):
+                try:
+                    task_id = int(data.replace("audio_clean_keywords_", ""))
+                    await self.audio_clean_keywords_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("audio_clean_tag_selection_"):
+                try:
+                    task_id = int(data.replace("audio_clean_tag_selection_", ""))
+                    await self.audio_tag_selection(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("add_audio_clean_keyword_"):
+                try:
+                    task_id = int(data.replace("add_audio_clean_keyword_", ""))
+                    # Start state to add a keyword
+                    self.set_user_state(user_id, 'adding_audio_clean_keyword', {'task_id': task_id})
+                    buttons = [[Button.inline("🔙 رجوع", f"audio_text_cleaning_{task_id}")]]
+                    await self.force_new_message(event, "🔤 أرسل الآن الكلمة/العبارة المطلوب حذفها من الوسوم:", buttons=buttons)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("view_audio_clean_keywords_"):
+                try:
+                    task_id = int(data.replace("view_audio_clean_keywords_", ""))
+                    keywords = []
+                    try:
+                        keywords = self.db.get_audio_tag_text_cleaning_keywords(task_id)
+                    except Exception:
+                        keywords = []
+                    if not keywords:
+                        text = "📋 لا توجد كلمات/عبارات محفوظة"
+                    else:
+                        text = "\n".join([f"• {k}" for k in keywords])
+                        text = f"📋 قائمة الكلمات/العبارات:\n\n{text}"
+                    buttons = [[Button.inline("🔙 رجوع", f"audio_text_cleaning_{task_id}")]]
+                    await self.force_new_message(event, text, buttons=buttons)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("clear_audio_clean_keywords_"):
+                try:
+                    task_id = int(data.replace("clear_audio_clean_keywords_", ""))
+                    self.db.clear_audio_tag_text_cleaning_keywords(task_id)
+                    await event.answer("✅ تم حذف جميع الكلمات")
+                    await self.audio_clean_keywords_settings(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
             # Audio replacements buttons handlers
             elif data.startswith("add_audio_replacement_"):
                 try:
@@ -1377,7 +1586,18 @@ class SimpleTelegramBot:
                 except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
             # Audio word filters handlers
-
+            elif data.startswith("audio_word_filters_"):
+                try:
+                    task_id = int(data.replace("audio_word_filters_", ""))
+                    await self.audio_word_filters(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_word_filters_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_word_filters_", ""))
+                    await self.toggle_audio_word_filters(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("audio_filter_tag_selection_"):
                 try:
                     task_id = int(data.replace("audio_filter_tag_selection_", ""))
@@ -1449,7 +1669,18 @@ class SimpleTelegramBot:
                 except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
             # Audio header/footer handlers
-
+            elif data.startswith("audio_header_footer_"):
+                try:
+                    task_id = int(data.replace("audio_header_footer_", ""))
+                    await self.audio_header_footer(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
+            elif data.startswith("toggle_audio_header_footer_"):
+                try:
+                    task_id = int(data.replace("toggle_audio_header_footer_", ""))
+                    await self.toggle_audio_header_footer(event, task_id)
+                except ValueError:
+                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("audio_header_settings_"):
                 try:
                     task_id = int(data.replace("audio_header_settings_", ""))
@@ -3898,6 +4129,51 @@ class SimpleTelegramBot:
                 finally:
                     self.clear_user_state(user_id)
                 return
+            elif current_user_state == 'adding_audio_clean_keyword':
+                try:
+                    task_id = current_user_data.get('task_id')
+                    keyword = message_text.strip()
+                    if not keyword:
+                        await self.edit_or_send_message(event, "❌ لا يمكن أن تكون الكلمة فارغة")
+                    else:
+                        self.db.add_audio_tag_text_cleaning_keyword(task_id, keyword)
+                        await self.edit_or_send_message(event, "✅ تم إضافة الكلمة إلى قائمة التنظيف")
+                    await self.audio_clean_keywords_settings(event, task_id)
+                except Exception:
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء الإضافة")
+                finally:
+                    self.clear_user_state(user_id)
+                return
+            elif current_user_state == 'adding_audio_whitelist_word':
+                try:
+                    task_id = current_user_data.get('task_id')
+                    word = message_text.strip()
+                    if not word:
+                        await self.edit_or_send_message(event, "❌ لا يمكن أن تكون الكلمة فارغة")
+                    else:
+                        self.db.add_audio_tag_word_filter_entry(task_id, 'whitelist', word, False)
+                        await self.edit_or_send_message(event, "✅ تمت إضافة الكلمة إلى القائمة البيضاء")
+                    await self.audio_whitelist_settings(event, task_id)
+                except Exception:
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء الإضافة")
+                finally:
+                    self.clear_user_state(user_id)
+                return
+            elif current_user_state == 'adding_audio_blacklist_word':
+                try:
+                    task_id = current_user_data.get('task_id')
+                    word = message_text.strip()
+                    if not word:
+                        await self.edit_or_send_message(event, "❌ لا يمكن أن تكون الكلمة فارغة")
+                    else:
+                        self.db.add_audio_tag_word_filter_entry(task_id, 'blacklist', word, False)
+                        await self.edit_or_send_message(event, "✅ تمت إضافة الكلمة إلى القائمة السوداء")
+                    await self.audio_blacklist_settings(event, task_id)
+                except Exception:
+                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء الإضافة")
+                finally:
+                    self.clear_user_state(user_id)
+                return
 
             elif current_user_state == 'awaiting_intro_audio_upload':
                 task_id = current_user_data.get('task_id')
@@ -3996,7 +4272,15 @@ class SimpleTelegramBot:
                         self.clear_user_state(user_id)
                         await self.audio_footer_settings(event, task_id)
                 return
-
+            elif current_user_state == 'adding_audio_replacement':
+                try:
+                    task_id = current_user_data.get('task_id')
+                    step = current_user_data.get('step', 'search_text')
+                    if step == 'search_text':
+                        search_text = message_text.strip()
+                        if not search_text:
+                            await self.edit_or_send_message(event, "❌ لا يمكن أن يكون نص البحث فارغاً")
+                            return
                         # Move to next step: ask for replacement text
                         self.set_user_state(user_id, 'adding_audio_replacement', {'task_id': task_id, 'step': 'replace_text', 'search_text': search_text})
                         buttons = [[Button.inline("❌ إلغاء", f"audio_text_replacements_{task_id}")]]
@@ -13572,6 +13856,96 @@ async def run_simple_bot():
         
         await self.force_new_message(event, message_text, buttons=buttons)
     
+    async def audio_merge_settings(self, event, task_id):
+        """Show audio merge settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get current audio merge settings
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        merge_enabled = audio_settings.get('audio_merge_enabled', False)
+        intro_path = audio_settings.get('intro_path', '')
+        outro_path = audio_settings.get('outro_path', '')
+        intro_position = audio_settings.get('intro_position', 'start')
+        
+        merge_status = "🟢 مفعل" if merge_enabled else "🔴 معطل"
+        intro_path_display = intro_path if intro_path else "غير محدد"
+        outro_path_display = outro_path if outro_path else "غير محدد"
+        intro_position_display = "البداية" if intro_position == 'start' else "النهاية"
+        
+        buttons = [
+            [Button.inline(f"🎚️ تبديل حالة الدمج ({merge_status.split()[0]})", f"toggle_audio_merge_{task_id}")],
+            [Button.inline("🎵 مقطع مقدمة", f"intro_audio_settings_{task_id}")],
+            [Button.inline("🎵 مقطع خاتمة", f"outro_audio_settings_{task_id}")],
+            [Button.inline("⚙️ خيارات الدمج", f"merge_options_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🔗 إعدادات دمج المقاطع الصوتية للمهمة: {task_name}\n\n"
+            f"📝 الوصف:\n"
+            f"• إضافة مقطع مقدمة في البداية\n"
+            f"• إضافة مقطع خاتمة في النهاية\n"
+            f"• اختيار موضع المقدمة (بداية أو نهاية)\n"
+            f"• دعم جميع الصيغ الصوتية\n"
+            f"• جودة عالية 320k MP3\n\n"
+            f"📊 الحالة الحالية:\n"
+            f"• حالة الدمج: {merge_status}\n"
+            f"• مقدمة: {intro_path_display}\n"
+            f"• خاتمة: {outro_path_display}\n"
+            f"• موضع المقدمة: {intro_position_display}\n\n"
+            f"اختر الإعداد الذي تريد تعديله:"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+    
+    async def advanced_audio_settings(self, event, task_id):
+        """Show advanced audio settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get current advanced settings
+        audio_settings = self.db.get_audio_metadata_settings(task_id)
+        preserve_quality = audio_settings.get('preserve_quality', True)
+        convert_to_mp3 = audio_settings.get('convert_to_mp3', False)
+        
+        preserve_status = "🟢" if preserve_quality else "🔴"
+        convert_status = "🟢" if convert_to_mp3 else "🔴"
+        
+        buttons = [
+            [Button.inline(f"{preserve_status} الحفاظ على الجودة", f"toggle_preserve_quality_{task_id}")],
+            [Button.inline(f"{convert_status} التحويل إلى MP3", f"toggle_convert_to_mp3_{task_id}")],
+            [Button.inline("🔙 رجوع لإعدادات الوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"⚙️ الإعدادات المتقدمة للوسوم الصوتية للمهمة: {task_name}\n\n"
+            f"📝 الوصف:\n"
+            f"• الحفاظ على الجودة الأصلية 100%\n"
+            f"• تحويل إلى MP3 مع الحفاظ على الدقة\n"
+            f"• معالجة مرة واحدة وإعادة الاستخدام\n"
+            f"• Cache ذكي للملفات المعالجة\n"
+            f"• إعدادات الأداء والسرعة\n\n"
+            f"📊 الحالة الحالية:\n"
+            f"• الحفاظ على الجودة: {preserve_status} {'مفعل' if preserve_quality else 'معطل'}\n"
+            f"• التحويل إلى MP3: {convert_status} {'مفعل' if convert_to_mp3 else 'معطل'}\n\n"
+            f"اختر الإعداد الذي تريد تعديله:"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
     async def show_album_art_options(self, event, task_id: int):
         settings = self.db.get_audio_metadata_settings(task_id)
         art_status = "🟢 مفعل" if settings.get('album_art_enabled') else "🔴 معطل"
@@ -13615,9 +13989,191 @@ async def run_simple_bot():
         await self.force_new_message(event, f"⚙️ موضع المقدمة الحالي: {pos_text}", buttons=buttons)
 
     # ===== Audio Text Processing Methods =====
+    async def audio_text_cleaning(self, event, task_id):
+        """Show audio text cleaning settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get text cleaning settings for audio tags
+        try:
+            audio_cleaning = self.db.get_audio_tag_text_cleaning_settings(task_id)
+            status_text = "🟢 مفعل" if audio_cleaning.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_text_cleaning_{task_id}")],
+            [Button.inline("🧹 حذف الروابط", f"audio_clean_links_{task_id}"),
+             Button.inline("😀 حذف الرموز التعبيرية", f"audio_clean_emojis_{task_id}")],
+            [Button.inline("# حذف الهاشتاج", f"audio_clean_hashtags_{task_id}"),
+             Button.inline("📞 حذف أرقام الهاتف", f"audio_clean_phones_{task_id}")],
+            [Button.inline("📝 حذف السطور الفارغة", f"audio_clean_empty_{task_id}"),
+             Button.inline("🔤 حذف كلمات محددة", f"audio_clean_keywords_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للتنظيف", f"audio_clean_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🧹 تنظيف نصوص الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **خيارات التنظيف المتاحة:**\n"
+            f"• حذف الروابط من الوسوم\n"
+            f"• حذف الرموز التعبيرية\n"
+            f"• حذف علامات الهاشتاج\n"
+            f"• حذف أرقام الهاتف\n"
+            f"• حذف السطور الفارغة\n"
+            f"• حذف كلمات وعبارات محددة\n\n"
+            f"💡 **ملاحظة:** سيتم تطبيق التنظيف على الوسوم المحددة فقط\n"
+            f"(العنوان، الفنان، التعليق، كلمات الأغنية، إلخ)"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+    
+    async def audio_word_filters(self, event, task_id):
+        """Show audio word filters settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        try:
+            audio_filters = self.db.get_audio_word_filters_settings(task_id)
+            status_text = "🟢 مفعل" if audio_filters.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_word_filters_{task_id}")],
+            [Button.inline("✅ الكلمات المقبولة", f"audio_whitelist_{task_id}"),
+             Button.inline("❌ الكلمات المرفوضة", f"audio_blacklist_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للفلترة", f"audio_filter_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"📝 فلاتر كلمات الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **أنواع الفلاتر:**\n"
+            f"• **القائمة البيضاء:** الكلمات المسموحة فقط\n"
+            f"• **القائمة السوداء:** الكلمات الممنوعة\n\n"
+            f"💡 **الاستخدام:** فلترة محتوى الوسوم حسب كلمات محددة\n"
+            f"مثل السماح بأسماء فنانين معينين فقط أو منع كلمات غير مرغوبة"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+    
+    async def audio_header_footer(self, event, task_id):
+        """Show audio header/footer settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        try:
+            audio_header_footer = self.db.get_audio_tag_header_footer_settings(task_id)
+            status_text = "🟢 مفعل" if audio_header_footer.get('enabled', False) else "🔴 معطل"
+        except (AttributeError, KeyError):
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_header_footer_{task_id}")],
+            [Button.inline("📄 إعداد الهيدر", f"audio_header_settings_{task_id}"),
+             Button.inline("📝 إعداد الفوتر", f"audio_footer_settings_{task_id}")],
+            [Button.inline("🎯 اختيار الوسوم للهيدر/فوتر", f"audio_hf_tag_selection_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"📄 هيدر وفوتر الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **الوظائف:**\n"
+            f"• إضافة نص في بداية الوسوم (هيدر)\n"
+            f"• إضافة نص في نهاية الوسوم (فوتر)\n"
+            f"• تطبيق على وسوم محددة\n\n"
+            f"💡 **مثال:** إضافة اسم القناة في بداية عنوان الأغنية\n"
+            f"أو إضافة حقوق الطبع في نهاية التعليق"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+    
 
     # ===== Audio Text Processing Functions =====
     
+    
+    async def audio_word_filters(self, event, task_id):
+        """Show audio word filters settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        try:
+            settings = self.db.get_audio_word_filters_settings(task_id)
+            status_text = "🟢 مفعل" if settings.get('enabled', False) else "🔴 معطل"
+        except Exception:
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_word_filters_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"📝 فلاتر كلمات الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **أنواع الفلاتر:**\n"
+            f"• **القائمة البيضاء:** الكلمات المسموحة فقط\n"
+            f"• **القائمة السوداء:** الكلمات الممنوعة\n\n"
+            f"💡 **الاستخدام:** فلترة محتوى الوسوم حسب كلمات محددة"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
+    async def audio_header_footer(self, event, task_id):
+        """Show audio header/footer settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        try:
+            settings = self.db.get_audio_tag_header_footer_settings(task_id)
+            status_text = "🟢 مفعل" if (settings.get('header_enabled', False) or settings.get('footer_enabled', False)) else "🔴 معطل"
+        except Exception:
+            status_text = "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status_text})", f"toggle_audio_header_footer_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ]
+        
+        message_text = (
+            f"📄 هيدر وفوتر الوسوم الصوتية - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status_text}\n\n"
+            f"🔧 **الوظائف:**\n"
+            f"• إضافة نص في بداية الوسوم (هيدر)\n"
+            f"• إضافة نص في نهاية الوسوم (فوتر)\n"
+            f"• تطبيق على وسوم محددة\n\n"
+            f"💡 **مثال:** إضافة اسم القناة في بداية عنوان الأغنية"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
     # ===== Audio Metadata Enhanced Interface =====
     async def update_audio_metadata_interface(self):
         """Update audio metadata interface to show new buttons"""
@@ -13625,16 +14181,383 @@ async def run_simple_bot():
         pass
 
     # ===== Audio Cleaning Functions =====
+    async def toggle_audio_clean_option(self, event, task_id: int, option: str):
+        """Toggle specific audio cleaning option"""
+        try:
+            current_settings = self.db.get_audio_tag_text_cleaning_settings(task_id)
+            if not current_settings:
+                current_settings = {'enabled': False}
+            
+            option_map = {
+                'links': 'remove_links',
+                'emojis': 'remove_emojis',
+                'hashtags': 'remove_hashtags',
+                'phones': 'remove_phone_numbers',
+                'empty_lines': 'remove_empty_lines'
+            }
+            setting_name = option_map.get(option, option)
+            current_state = bool(current_settings.get(setting_name, False))
+            new_state = not current_state
+            
+            # Update the specific cleaning option via DB
+            self.db.update_audio_tag_text_cleaning_setting(task_id, setting_name, new_state)
+            
+            status = "مفعل" if new_state else "معطل"
+            await event.answer(f"✅ تم تحديث خيار {self.get_clean_option_name(option)}: {status}")
+            
+            # Return to cleaning settings
+            await self.audio_text_cleaning(event, task_id)
+            
+        except Exception as e:
+            logger.error(f"Error toggling audio clean option {option}: {e}")
+            await event.answer("❌ حدث خطأ أثناء التحديث")
+
+    def get_clean_option_name(self, option: str) -> str:
+        """Get Arabic name for cleaning option"""
+        names = {
+            'links': 'حذف الروابط',
+            'emojis': 'حذف الرموز التعبيرية', 
+            'hashtags': 'حذف الهاشتاج',
+            'phones': 'حذف أرقام الهاتف',
+            'empty_lines': 'حذف السطور الفارغة'
+        }
+        return names.get(option, option)
+
+    async def audio_clean_keywords_settings(self, event, task_id: int):
+        """Show audio cleaning keywords settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        try:
+            # Use DB method for audio tag text cleaning keywords
+            keywords = self.db.get_audio_tag_text_cleaning_keywords(task_id)
+            keywords_list = keywords if isinstance(keywords, list) else []
+        except Exception:
+            keywords_list = []
+        
+        buttons = [
+            [Button.inline("➕ إضافة كلمة/عبارة", f"add_audio_clean_keyword_{task_id}")],
+            [Button.inline("📋 عرض القائمة", f"view_audio_clean_keywords_{task_id}")],
+            [Button.inline("🗑️ حذف جميع الكلمات", f"clear_audio_clean_keywords_{task_id}")],
+            [Button.inline("🔙 رجوع للتنظيف", f"audio_text_cleaning_{task_id}")]
+        ]
+        
+        message_text = (
+            f"🔤 كلمات التنظيف - المهمة: {task_name}\n\n"
+            f"📊 عدد الكلمات/العبارات: {len(keywords_list)}\n\n"
+            f"💡 **الوظيفة:** حذف كلمات وعبارات محددة من الوسوم الصوتية\n\n"
+            f"🔧 **كيفية الاستخدام:**\n"
+            f"• أضف الكلمات/العبارات المراد حذفها\n"
+            f"• سيتم البحث عنها وحذفها من جميع الوسوم المحددة"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     # ===== Audio Replacements Functions =====
+    async def add_audio_replacement(self, event, task_id: int):
+        """Add new audio text replacement"""
+        user_id = event.sender_id
+        self.set_user_state(user_id, 'adding_audio_replacement', {'task_id': task_id, 'step': 'search_text'})
+        
+        message_text = (
+            "➕ إضافة استبدال جديد\n\n"
+            "🔍 أرسل النص المراد البحث عنه واستبداله:"
+        )
+        
+        buttons = [[Button.inline("❌ إلغاء", f"audio_text_replacements_{task_id}")]]
+        await self.force_new_message(event, message_text, buttons=buttons)
 
+    async def view_audio_replacements(self, event, task_id: int):
+        """View current audio text replacements"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        try:
+            # Fetch replacement entries
+            replacements = self.db.get_audio_tag_text_replacement_entries(task_id)
+            if not replacements:
+                replacements = []
+        except Exception:
+            replacements = []
+        
+        if not replacements:
+            message_text = f"📋 قائمة الاستبدالات - المهمة: {task_name}\n\n❌ لا توجد استبدالات محفوظة"
+        else:
+            message_text = f"📋 قائمة الاستبدالات - المهمة: {task_name}\n\n"
+            for i, replacement in enumerate(replacements, 1):
+                search_text = replacement.get('search_text', '')
+                replace_text = replacement.get('replace_text', '')
+                case_sensitive = replacement.get('case_sensitive', False)
+                whole_words = replacement.get('whole_words', False)
+                
+                options = []
+                if case_sensitive:
+                    options.append("حساس للأحرف")
+                if whole_words:
+                    options.append("كلمات كاملة")
+                
+                options_str = f" ({', '.join(options)})" if options else ""
+                
+                message_text += f"{i}. '{search_text}' → '{replace_text}'{options_str}\n"
+        
+        buttons = [
+            [Button.inline("🔙 رجوع", f"audio_text_replacements_{task_id}")]
+        ]
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
+    async def clear_audio_replacements(self, event, task_id: int):
+        """Clear all audio text replacements"""
+        try:
+            # Clear via DB helper
+            self.db.clear_audio_tag_text_replacements(task_id)
+            await event.answer("✅ تم حذف جميع الاستبدالات")
             await self.audio_text_replacements(event, task_id)
         except Exception as e:
             logger.error(f"Error clearing audio replacements: {e}")
             await event.answer("❌ حدث خطأ أثناء الحذف")
 
     # ===== Audio Word Filters Functions =====
+    async def toggle_audio_word_filters(self, event, task_id: int):
+        """Toggle audio word filters enabled state"""
+        try:
+            current = self.db.get_audio_word_filters_settings(task_id)
+            new_state = not bool(current.get('enabled', False))
+            self.db.update_audio_word_filters_enabled(task_id, new_state)
+            await event.answer("✅ تم التبديل")
+        except Exception:
+            await event.answer("❌ حدث خطأ أثناء التبديل")
+        await self.audio_word_filters(event, task_id)
+
+    async def audio_whitelist_settings(self, event, task_id: int):
+        """Show audio whitelist settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        try:
+            # Retrieve whitelist entries
+            whitelist = [entry['word_or_phrase'] for entry in self.db.get_audio_tag_word_filter_entries(task_id, 'whitelist')]
+            whitelist_words = whitelist if isinstance(whitelist, list) else []
+        except Exception:
+            whitelist_words = []
+        
+        buttons = [
+            [Button.inline("➕ إضافة كلمة", f"add_audio_whitelist_word_{task_id}")],
+            [Button.inline("📋 عرض القائمة", f"view_audio_whitelist_{task_id}")],
+            [Button.inline("🗑️ حذف جميع الكلمات", f"clear_audio_whitelist_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر", f"audio_word_filters_{task_id}")]
+        ]
+        
+        message_text = (
+            f"✅ القائمة البيضاء - المهمة: {task_name}\n\n"
+            f"📊 عدد الكلمات المسموحة: {len(whitelist_words)}\n\n"
+            f"💡 **الوظيفة:** السماح فقط بالكلمات الموجودة في هذه القائمة\n"
+            f"أي كلمة غير موجودة في القائمة سيتم حذفها من الوسوم"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
+    async def audio_blacklist_settings(self, event, task_id: int):
+        """Show audio blacklist settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        try:
+            # Retrieve blacklist entries
+            blacklist = [entry['word_or_phrase'] for entry in self.db.get_audio_tag_word_filter_entries(task_id, 'blacklist')]
+            blacklist_words = blacklist if isinstance(blacklist, list) else []
+        except Exception:
+            blacklist_words = []
+        
+        buttons = [
+            [Button.inline("➕ إضافة كلمة", f"add_audio_blacklist_word_{task_id}")],
+            [Button.inline("📋 عرض القائمة", f"view_audio_blacklist_{task_id}")],
+            [Button.inline("🗑️ حذف جميع الكلمات", f"clear_audio_blacklist_{task_id}")],
+            [Button.inline("🔙 رجوع للفلاتر", f"audio_word_filters_{task_id}")]
+        ]
+        
+        message_text = (
+            f"❌ القائمة السوداء - المهمة: {task_name}\n\n"
+            f"📊 عدد الكلمات الممنوعة: {len(blacklist_words)}\n\n"
+            f"💡 **الوظيفة:** منع الكلمات الموجودة في هذه القائمة\n"
+            f"أي كلمة موجودة في القائمة سيتم حذفها من الوسوم"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     # ===== Audio Header/Footer Functions =====
+    async def toggle_audio_header_footer(self, event, task_id: int):
+        """Toggle audio header/footer enabled state"""
+        try:
+            current = self.db.get_audio_tag_header_footer_settings(task_id)
+            header_enabled = current.get('header_enabled', False)
+            footer_enabled = current.get('footer_enabled', False)
+            
+            # If both are disabled, enable header
+            if not header_enabled and not footer_enabled:
+                self.db.update_audio_tag_header_footer_setting(task_id, 'header_enabled', True)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'footer_enabled', False)
+                await event.answer("✅ تم تفعيل الهيدر")
+            # If header only is enabled, enable footer too
+            elif header_enabled and not footer_enabled:
+                self.db.update_audio_tag_header_footer_setting(task_id, 'header_enabled', True)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'footer_enabled', True)
+                await event.answer("✅ تم تفعيل الفوتر أيضاً")
+            # If both are enabled, disable both
+            else:
+                self.db.update_audio_tag_header_footer_setting(task_id, 'header_enabled', False)
+                self.db.update_audio_tag_header_footer_setting(task_id, 'footer_enabled', False)
+                await event.answer("✅ تم تعطيل الهيدر والفوتر")
+                
+        except Exception:
+            await event.answer("❌ حدث خطأ أثناء التبديل")
+        await self.audio_header_footer(event, task_id)
+
+    async def audio_header_settings(self, event, task_id: int):
+        """Show audio header settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        try:
+            settings = self.db.get_audio_tag_header_footer_settings(task_id)
+            header_text = settings.get('header_text', '')
+            header_enabled = settings.get('header_enabled', False)
+        except Exception:
+            header_text = ''
+            header_enabled = False
+        
+        status = "🟢 مفعل" if header_enabled else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status})", f"toggle_audio_header_only_{task_id}")],
+            [Button.inline("✏️ تحرير نص الهيدر", f"edit_audio_header_text_{task_id}")],
+            [Button.inline("🗑️ حذف نص الهيدر", f"clear_audio_header_text_{task_id}")],
+            [Button.inline("🔙 رجوع للهيدر/فوتر", f"audio_header_footer_{task_id}")]
+        ]
+        
+        header_preview = header_text if header_text else "لا يوجد نص"
+        
+        message_text = (
+            f"📄 إعدادات الهيدر - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status}\n"
+            f"📝 النص الحالي: {header_preview}\n\n"
+            f"💡 **الوظيفة:** إضافة نص في بداية الوسوم المحددة"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
+    async def audio_footer_settings(self, event, task_id: int):
+        """Show audio footer settings"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        try:
+            settings = self.db.get_audio_tag_header_footer_settings(task_id)
+            footer_text = settings.get('footer_text', '')
+            footer_enabled = settings.get('footer_enabled', False)
+        except Exception:
+            footer_text = ''
+            footer_enabled = False
+        
+        status = "🟢 مفعل" if footer_enabled else "🔴 معطل"
+        
+        buttons = [
+            [Button.inline(f"🔄 تبديل الحالة ({status})", f"toggle_audio_footer_only_{task_id}")],
+            [Button.inline("✏️ تحرير نص الفوتر", f"edit_audio_footer_text_{task_id}")],
+            [Button.inline("🗑️ حذف نص الفوتر", f"clear_audio_footer_text_{task_id}")],
+            [Button.inline("🔙 رجوع للهيدر/فوتر", f"audio_header_footer_{task_id}")]
+        ]
+        
+        footer_preview = footer_text if footer_text else "لا يوجد نص"
+        
+        message_text = (
+            f"📝 إعدادات الفوتر - المهمة: {task_name}\n\n"
+            f"📊 الحالة: {status}\n"
+            f"📝 النص الحالي: {footer_preview}\n\n"
+            f"💡 **الوظيفة:** إضافة نص في نهاية الوسوم المحددة"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
+
+    async def audio_tag_selection(self, event, task_id):
+        """Show audio tag selection for text processing"""
+        user_id = event.sender_id
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await event.answer("❌ المهمة غير موجودة")
+            return
+        
+        task_name = task.get('task_name', 'مهمة بدون اسم')
+        
+        # Get selected tags
+        try:
+            selected_tags = self.db.get_audio_selected_tags(task_id)
+        except Exception:
+            selected_tags = []
+        
+        # Available audio tags for processing
+        available_tags = [
+            ('title', 'العنوان (Title)'),
+            ('artist', 'الفنان (Artist)'),
+            ('album_artist', 'فنان الألبوم (Album Artist)'),
+            ('album', 'الألبوم (Album)'),
+            ('year', 'السنة (Year)'),
+            ('genre', 'النوع (Genre)'),
+            ('composer', 'الملحن (Composer)'),
+            ('comment', 'تعليق (Comment)'),
+            ('track', 'رقم المسار (Track)'),
+            ('lyrics', 'كلمات الأغنية (Lyrics)')
+        ]
+        
+        buttons = []
+        for tag_key, tag_name in available_tags:
+            status = "✅" if tag_key in selected_tags else "⬜"
+            buttons.append([Button.inline(f"{status} {tag_name}", f"toggle_audio_tag_{task_id}_{tag_key}")])
+        
+        buttons.extend([
+            [Button.inline("✅ تحديد الكل", f"select_all_audio_tags_{task_id}"),
+             Button.inline("❌ إلغاء الكل", f"deselect_all_audio_tags_{task_id}")],
+            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
+        ])
+        
+        message_text = (
+            f"🎯 اختيار الوسوم للمعالجة - المهمة: {task_name}\n\n"
+            f"📊 الوسوم المحددة: {len(selected_tags)}/{len(available_tags)}\n\n"
+            f"💡 **الوظيفة:** تحديد الوسوم التي ستخضع لمعالجة النصوص\n"
+            f"(تنظيف، استبدال، فلاتر، هيدر/فوتر)\n\n"
+            f"🔘 اضغط على الوسم لتبديل اختياره:"
+        )
+        
+        await self.force_new_message(event, message_text, buttons=buttons)
 
     # ===== Advanced Features Menu =====

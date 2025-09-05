@@ -2814,46 +2814,7 @@ class UserbotService:
             outro_path = audio_settings.get('outro_audio_path') if audio_settings.get('audio_merge_enabled') else None
             intro_position = audio_settings.get('intro_position', 'start')
 
-            # تطبيق تنظيف النصوص على الوسوم إذا كان مفعّلًا لهذه المهمة
-            try:
-                tag_cleaning = self.db.get_audio_tag_cleaning_settings(task_id)
-            except Exception:
-                tag_cleaning = {'enabled': False}
-
             effective_template = dict(metadata_template)
-            if tag_cleaning and tag_cleaning.get('enabled'):
-                def _clean_tag(text: Optional[str]) -> Optional[str]:
-                    if text is None:
-                        return None
-                    return self.apply_text_cleaning(text, task_id)
-
-                # تنظيف الوسوم المختارة فقط
-                if tag_cleaning.get('clean_title') and effective_template.get('title'):
-                    effective_template['title'] = _clean_tag(effective_template['title'])
-                if tag_cleaning.get('clean_artist') and effective_template.get('artist'):
-                    effective_template['artist'] = _clean_tag(effective_template['artist'])
-                if tag_cleaning.get('clean_album_artist') and effective_template.get('album_artist'):
-                    effective_template['album_artist'] = _clean_tag(effective_template['album_artist'])
-                if tag_cleaning.get('clean_album') and effective_template.get('album'):
-                    effective_template['album'] = _clean_tag(effective_template['album'])
-                if tag_cleaning.get('clean_year') and effective_template.get('year'):
-                    effective_template['year'] = _clean_tag(effective_template['year'])
-                if tag_cleaning.get('clean_genre') and effective_template.get('genre'):
-                    effective_template['genre'] = _clean_tag(effective_template['genre'])
-                if tag_cleaning.get('clean_composer') and effective_template.get('composer'):
-                    effective_template['composer'] = _clean_tag(effective_template['composer'])
-                if tag_cleaning.get('clean_comment') and effective_template.get('comment'):
-                    effective_template['comment'] = _clean_tag(effective_template['comment'])
-                if tag_cleaning.get('clean_track') and effective_template.get('track'):
-                    effective_template['track'] = _clean_tag(effective_template['track'])
-                if tag_cleaning.get('clean_length') and effective_template.get('length'):
-                    effective_template['length'] = _clean_tag(effective_template['length'])
-                if tag_cleaning.get('clean_lyrics') and effective_template.get('lyrics'):
-                    # الحفاظ على فواصل الأسطر أثناء التنظيف: ننظف على مستوى السطور ونحافظ على \n
-                    original = effective_template['lyrics']
-                    lines = original.replace('\r\n', '\n').replace('\r', '\n').split('\n')
-                    cleaned_lines = [self.apply_text_cleaning(line, task_id) for line in lines]
-                    effective_template['lyrics'] = '\n'.join(cleaned_lines)
 
             # CRITICAL FIX: Process audio ONCE for all targets to prevent multiple uploads
             processed_audio = self.audio_processor.process_audio_once_for_all_targets(
