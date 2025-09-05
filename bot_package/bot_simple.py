@@ -14105,54 +14105,6 @@ async def run_simple_bot():
         
         await self.force_new_message(event, message_text, buttons=buttons)
     
-    async def audio_tag_selection(self, event, task_id):
-        """Show audio tag selection for text processing"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        # Get current tag selection settings
-        try:
-            selected_tags = self.db.get_audio_selected_tags(task_id)
-        except (AttributeError, KeyError):
-            selected_tags = []
-        
-        available_tags = [
-            ('title', 'العنوان'),
-            ('artist', 'الفنان'),
-            ('album_artist', 'فنان الألبوم'),
-            ('album', 'الألبوم'),
-            ('composer', 'الملحن'),
-            ('comment', 'التعليق'),
-            ('lyrics', 'كلمات الأغنية'),
-            ('genre', 'النوع')
-        ]
-        
-        buttons = []
-        for tag_key, tag_name in available_tags:
-            status = "✅" if tag_key in selected_tags else "⬜"
-            buttons.append([Button.inline(f"{status} {tag_name}", f"toggle_audio_tag_{task_id}_{tag_key}")])
-        
-        buttons.extend([
-            [Button.inline("✅ تحديد الكل", f"select_all_audio_tags_{task_id}"),
-             Button.inline("❌ إلغاء الكل", f"deselect_all_audio_tags_{task_id}")],
-            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
-        ])
-        
-        message_text = (
-            f"🎯 اختيار الوسوم للمعالجة - المهمة: {task_name}\n\n"
-            f"📝 **اختر الوسوم التي تريد تطبيق معالجة النصوص عليها:**\n\n"
-            f"✅ = مُحدد للمعالجة\n"
-            f"⬜ = غير مُحدد\n\n"
-            f"💡 **ملاحظة:** ستطبق جميع عمليات معالجة النصوص\n"
-            f"(التنظيف، الاستبدال، الفلاتر، الهيدر/فوتر) على الوسوم المحددة فقط"
-        )
-        
-        await self.force_new_message(event, message_text, buttons=buttons)
 
     # ===== Audio Text Processing Functions =====
     
@@ -14218,57 +14170,6 @@ async def run_simple_bot():
             f"• إضافة نص في نهاية الوسوم (فوتر)\n"
             f"• تطبيق على وسوم محددة\n\n"
             f"💡 **مثال:** إضافة اسم القناة في بداية عنوان الأغنية"
-        )
-        
-        await self.force_new_message(event, message_text, buttons=buttons)
-
-    async def audio_tag_selection(self, event, task_id):
-        """Show audio tag selection for text processing"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        # Get selected tags
-        try:
-            selected_tags = self.db.get_audio_selected_tags(task_id)
-        except Exception:
-            selected_tags = []
-        
-        # Available audio tags for processing
-        available_tags = [
-            ('title', 'العنوان (Title)'),
-            ('artist', 'الفنان (Artist)'),
-            ('album_artist', 'فنان الألبوم (Album Artist)'),
-            ('album', 'الألبوم (Album)'),
-            ('year', 'السنة (Year)'),
-            ('genre', 'النوع (Genre)'),
-            ('composer', 'الملحن (Composer)'),
-            ('comment', 'تعليق (Comment)'),
-            ('track', 'رقم المسار (Track)'),
-            ('lyrics', 'كلمات الأغنية (Lyrics)')
-        ]
-        
-        buttons = []
-        for tag_key, tag_name in available_tags:
-            status = "✅" if tag_key in selected_tags else "⬜"
-            buttons.append([Button.inline(f"{status} {tag_name}", f"toggle_audio_tag_{task_id}_{tag_key}")])
-        
-        buttons.extend([
-            [Button.inline("✅ تحديد الكل", f"select_all_audio_tags_{task_id}"),
-             Button.inline("❌ إلغاء الكل", f"deselect_all_audio_tags_{task_id}")],
-            [Button.inline("🔙 رجوع للوسوم الصوتية", f"audio_metadata_settings_{task_id}")]
-        ])
-        
-        message_text = (
-            f"🎯 اختيار الوسوم للمعالجة - المهمة: {task_name}\n\n"
-            f"📊 الوسوم المحددة: {len(selected_tags)}/{len(available_tags)}\n\n"
-            f"💡 **الوظيفة:** تحديد الوسوم التي ستخضع لمعالجة النصوص\n"
-            f"(تنظيف، استبدال، فلاتر، هيدر/فوتر)\n\n"
-            f"🔘 اضغط على الوسم لتبديل اختياره:"
         )
         
         await self.force_new_message(event, message_text, buttons=buttons)
@@ -14608,86 +14509,6 @@ async def run_simple_bot():
         
         await self.force_new_message(event, message_text, buttons=buttons)
 
-    # ===== Advanced Features Menu =====
-    
-    # ===== Audio Cleaning Functions =====
-    async def toggle_audio_clean_option(self, event, task_id: int, option: str):
-        """Toggle specific audio cleaning option"""
-        try:
-            current_settings = self.db.get_audio_tag_text_cleaning_settings(task_id)
-            if not current_settings:
-                current_settings = {'enabled': False}
-            
-            option_map = {
-                'links': 'remove_links',
-                'emojis': 'remove_emojis',
-                'hashtags': 'remove_hashtags',
-                'phones': 'remove_phone_numbers',
-                'empty_lines': 'remove_empty_lines'
-            }
-            setting_name = option_map.get(option, option)
-            current_state = bool(current_settings.get(setting_name, False))
-            new_state = not current_state
-            
-            # Update the specific cleaning option via DB
-            self.db.update_audio_tag_text_cleaning_setting(task_id, setting_name, new_state)
-            
-            status = "مفعل" if new_state else "معطل"
-            await event.answer(f"✅ تم تحديث خيار {self.get_clean_option_name(option)}: {status}")
-            
-            # Return to cleaning settings
-            await self.audio_text_cleaning(event, task_id)
-            
-        except Exception as e:
-            logger.error(f"Error toggling audio clean option {option}: {e}")
-            await event.answer("❌ حدث خطأ أثناء التحديث")
-
-    def get_clean_option_name(self, option: str) -> str:
-        """Get Arabic name for cleaning option"""
-        names = {
-            'links': 'حذف الروابط',
-            'emojis': 'حذف الرموز التعبيرية', 
-            'hashtags': 'حذف الهاشتاج',
-            'phones': 'حذف أرقام الهاتف',
-            'empty_lines': 'حذف السطور الفارغة'
-        }
-        return names.get(option, option)
-
-    async def audio_clean_keywords_settings(self, event, task_id: int):
-        """Show audio cleaning keywords settings"""
-        user_id = event.sender_id
-        task = self.db.get_task(task_id, user_id)
-        if not task:
-            await event.answer("❌ المهمة غير موجودة")
-            return
-        
-        task_name = task.get('task_name', 'مهمة بدون اسم')
-        
-        try:
-            # Use DB method for audio tag text cleaning keywords
-            keywords = self.db.get_audio_tag_text_cleaning_keywords(task_id)
-            keywords_list = keywords if isinstance(keywords, list) else []
-        except Exception:
-            keywords_list = []
-        
-        buttons = [
-            [Button.inline("➕ إضافة كلمة/عبارة", f"add_audio_clean_keyword_{task_id}")],
-            [Button.inline("📋 عرض القائمة", f"view_audio_clean_keywords_{task_id}")],
-            [Button.inline("🗑️ حذف جميع الكلمات", f"clear_audio_clean_keywords_{task_id}")],
-            [Button.inline("🔙 رجوع للتنظيف", f"audio_text_cleaning_{task_id}")]
-        ]
-        
-        message_text = (
-            f"🔤 كلمات التنظيف - المهمة: {task_name}\n\n"
-            f"📊 عدد الكلمات/العبارات: {len(keywords_list)}\n\n"
-            f"💡 **الوظيفة:** حذف كلمات وعبارات محددة من الوسوم الصوتية\n\n"
-            f"🔧 **كيفية الاستخدام:**\n"
-            f"• أضف الكلمات/العبارات المراد حذفها\n"
-            f"• سيتم البحث عنها وحذفها من جميع الوسوم المحددة"
-        )
-        
-        await self.force_new_message(event, message_text, buttons=buttons)
-
     async def audio_tag_selection(self, event, task_id):
         """Show audio tag selection for text processing"""
         user_id = event.sender_id
@@ -14738,3 +14559,5 @@ async def run_simple_bot():
         )
         
         await self.force_new_message(event, message_text, buttons=buttons)
+
+    # ===== Advanced Features Menu =====
