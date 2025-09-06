@@ -6411,14 +6411,6 @@ class Database:
             'apply_to_lyrics': True
         }
 
-    # --- Compatibility wrapper for legacy UI call name ---
-    def get_audio_text_cleaning_settings(self, task_id: int) -> dict:
-        """Compatibility wrapper mapping to get_audio_tag_text_cleaning_settings."""
-        try:
-            return self.get_audio_tag_text_cleaning_settings(task_id)
-        except Exception:
-            return {'enabled': False}
-
     def update_audio_tag_text_cleaning_setting(self, task_id: int, setting_name: str, enabled: bool) -> bool:
         """Update specific audio tag text cleaning setting"""
         valid_settings = {
