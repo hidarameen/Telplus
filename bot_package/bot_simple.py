@@ -2930,7 +2930,7 @@ class SimpleTelegramBot:
                 parts = data.split("_")
                 if len(parts) >= 4:
                     try:
-                        task_id = int(parts[-1])
+                        task_id = int(parts[3])
                         settings = self.db.get_message_settings(task_id)
                         new_val = not bool(settings.get('apply_header_to_texts', True))
                         self.db.update_message_settings_scope(task_id, apply_header_to_texts=new_val)
@@ -2943,7 +2943,7 @@ class SimpleTelegramBot:
                 parts = data.split("_")
                 if len(parts) >= 4:
                     try:
-                        task_id = int(parts[-1])
+                        task_id = int(parts[3])
                         settings = self.db.get_message_settings(task_id)
                         new_val = not bool(settings.get('apply_header_to_media', True))
                         self.db.update_message_settings_scope(task_id, apply_header_to_media=new_val)
@@ -2956,7 +2956,7 @@ class SimpleTelegramBot:
                 parts = data.split("_")
                 if len(parts) >= 4:
                     try:
-                        task_id = int(parts[-1])
+                        task_id = int(parts[3])
                         settings = self.db.get_message_settings(task_id)
                         new_val = not bool(settings.get('apply_footer_to_texts', True))
                         self.db.update_message_settings_scope(task_id, apply_footer_to_texts=new_val)
@@ -2969,7 +2969,7 @@ class SimpleTelegramBot:
                 parts = data.split("_")
                 if len(parts) >= 4:
                     try:
-                        task_id = int(parts[-1])
+                        task_id = int(parts[3])
                         settings = self.db.get_message_settings(task_id)
                         new_val = not bool(settings.get('apply_footer_to_media', True))
                         self.db.update_message_settings_scope(task_id, apply_footer_to_media=new_val)
