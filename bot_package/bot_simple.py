@@ -64,6 +64,15 @@ class SimpleTelegramBot:
     def clear_user_state(self, user_id):
         """Clear user conversation state"""
         self.user_states.pop(user_id, None)
+    
+    def extract_task_id_from_data(self, data):
+        """Extract task_id from conversation state data (handles both dict and string)"""
+        if isinstance(data, dict):
+            # PostgreSQL wraps string data in {"data": "value"}
+            return int(data.get('data', 0))
+        else:
+            # SQLite returns raw string
+            return int(data) if data else 0
 
     def track_user_message(self, user_id, message_id, chat_id):
         """Track a message sent to user for potential editing"""
@@ -4281,7 +4290,12 @@ class SimpleTelegramBot:
                 return
             elif state.startswith('watermark_text_input_'): # Handle watermark text input
                 try:
-                    task_id = data.get('task_id')
+                    # Handle both dict and non-dict data
+                    if isinstance(data, dict):
+                        task_id = data.get('task_id')
+                    else:
+                        task_id = None
+                    
                     if task_id:
                         await self.handle_watermark_text_input(event, task_id)
                     else:
@@ -4295,7 +4309,12 @@ class SimpleTelegramBot:
                 return
             elif state.startswith('watermark_image_input_'): # Handle watermark image input
                 try:
-                    task_id = data.get('task_id')
+                    # Handle both dict and non-dict data
+                    if isinstance(data, dict):
+                        task_id = data.get('task_id')
+                    else:
+                        task_id = None
+                    
                     if task_id:
                         await self.handle_watermark_image_input(event, task_id)
                     else:
@@ -4308,53 +4327,53 @@ class SimpleTelegramBot:
                     self.clear_user_state(user_id)
                 return
             elif state == 'waiting_watermark_size': # Handle setting watermark size
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_watermark_setting_input(event, task_id, 'size', event.text)
                 return
             elif state == 'waiting_watermark_opacity': # Handle setting watermark opacity
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_watermark_setting_input(event, task_id, 'opacity', event.text)
                 return
             elif state == 'waiting_watermark_font_size': # Handle setting watermark font size
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_watermark_setting_input(event, task_id, 'font_size', event.text)
                 return
             elif state == 'waiting_watermark_color': # Handle setting watermark color
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_watermark_setting_input(event, task_id, 'color', event.text)
                 return
 
             elif state == 'waiting_text_replacements': # Handle adding text replacements
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_add_replacements(event, task_id, event.text)
                 return
             elif state == 'waiting_header_text': # Handle editing header text
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_set_header_text(event, task_id, event.text)
                 return
             elif state == 'waiting_footer_text': # Handle editing footer text
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_set_footer_text(event, task_id, event.text)
                 return
             elif state == 'waiting_button_data': # Handle adding inline button
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_add_inline_button(event, task_id, event.text)
                 return
             elif state == 'editing_char_range': # Handle character range editing
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_edit_character_range(event, task_id)
                 return
 
             elif state == 'editing_forwarding_delay': # Handle forwarding delay editing
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_edit_forwarding_delay(event, task_id, event.text)
                 return
             elif state == 'editing_sending_interval': # Handle sending interval editing
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_edit_sending_interval(event, task_id, event.text)
                 return
             elif state == 'waiting_auto_delete_time': # Handle setting auto delete time
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_set_auto_delete_time(event, task_id, event.text)
                 return
             elif state == 'set_working_hours': # Handle setting working hours
@@ -4366,7 +4385,7 @@ class SimpleTelegramBot:
                 await self.handle_add_language_filter(event, task_id, message_text)
                 return
             elif state == 'waiting_language_filter': # Handle adding language filter
-                task_id = int(data)
+                task_id = self.extract_task_id_from_data(data)
                 await self.handle_add_language_filter(event, task_id, message_text)
                 return
             elif state == 'waiting_hyperlink_settings': # Handle editing hyperlink settings
