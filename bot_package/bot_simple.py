@@ -1520,57 +1520,11 @@ class SimpleTelegramBot:
                     await self.audio_clean_keywords_settings(event, task_id)
                 except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("audio_clean_tag_selection_"):
-                try:
-                    task_id = int(data.replace("audio_clean_tag_selection_", ""))
-                    await self.audio_tag_selection(event, task_id)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("add_audio_clean_keyword_"):
-                try:
-                    task_id = int(data.replace("add_audio_clean_keyword_", ""))
-                    # Start state to add a keyword
-                    self.set_user_state(user_id, 'adding_audio_clean_keyword', {'task_id': task_id})
-                    buttons = [[Button.inline("🔙 رجوع", f"audio_text_cleaning_{task_id}")]]
-                    await self.force_new_message(event, "🔤 أرسل الآن الكلمة/العبارة المطلوب حذفها من الوسوم:", buttons=buttons)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("view_audio_clean_keywords_"):
-                try:
-                    task_id = int(data.replace("view_audio_clean_keywords_", ""))
-                    keywords = []
-                    try:
-                        keywords = self.db.get_audio_tag_text_cleaning_keywords(task_id)
-                    except Exception:
-                        keywords = []
-                    if not keywords:
-                        text = "📋 لا توجد كلمات/عبارات محفوظة"
-                    else:
-                        text = "\n".join([f"• {k}" for k in keywords])
-                        text = f"📋 قائمة الكلمات/العبارات:\n\n{text}"
-                    buttons = [[Button.inline("🔙 رجوع", f"audio_text_cleaning_{task_id}")]]
-                    await self.force_new_message(event, text, buttons=buttons)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("clear_audio_clean_keywords_"):
-                try:
-                    task_id = int(data.replace("clear_audio_clean_keywords_", ""))
-                    self.db.clear_audio_tag_text_cleaning_keywords(task_id)
-                    await event.answer("✅ تم حذف جميع الكلمات")
-                    await self.audio_clean_keywords_settings(event, task_id)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
             # Audio replacements buttons handlers
             elif data.startswith("add_audio_replacement_"):
                 try:
                     task_id = int(data.replace("add_audio_replacement_", ""))
                     await self.add_audio_replacement(event, task_id)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("audio_replace_tag_selection_"):
-                try:
-                    task_id = int(data.replace("audio_replace_tag_selection_", ""))
-                    await self.audio_tag_selection(event, task_id)
                 except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("view_audio_replacements_"):
@@ -1598,73 +1552,15 @@ class SimpleTelegramBot:
                     await self.toggle_audio_word_filters(event, task_id)
                 except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("audio_filter_tag_selection_"):
-                try:
-                    task_id = int(data.replace("audio_filter_tag_selection_", ""))
-                    await self.audio_tag_selection(event, task_id)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("audio_whitelist_"):
                 try:
                     task_id = int(data.replace("audio_whitelist_", ""))
                     await self.audio_whitelist_settings(event, task_id)
                 except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("add_audio_whitelist_word_"):
-                try:
-                    task_id = int(data.replace("add_audio_whitelist_word_", ""))
-                    self.set_user_state(user_id, 'adding_audio_whitelist_word', {'task_id': task_id})
-                    buttons = [[Button.inline("🔙 رجوع", f"audio_whitelist_{task_id}")]]
-                    await self.force_new_message(event, "➕ أرسل الكلمة لإضافتها إلى القائمة البيضاء:", buttons=buttons)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("view_audio_whitelist_"):
-                try:
-                    task_id = int(data.replace("view_audio_whitelist_", ""))
-                    entries = self.db.get_audio_tag_word_filter_entries(task_id, 'whitelist')
-                    words = [e['word_or_phrase'] for e in entries]
-                    text = "📋 لا توجد كلمات في القائمة البيضاء" if not words else "📋 القائمة البيضاء:\n\n" + "\n".join([f"• {w}" for w in words])
-                    buttons = [[Button.inline("🔙 رجوع", f"audio_whitelist_{task_id}")]]
-                    await self.force_new_message(event, text, buttons=buttons)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("clear_audio_whitelist_"):
-                try:
-                    task_id = int(data.replace("clear_audio_whitelist_", ""))
-                    self.db.clear_audio_tag_word_filter_entries(task_id, 'whitelist')
-                    await event.answer("✅ تم حذف كلمات القائمة البيضاء")
-                    await self.audio_whitelist_settings(event, task_id)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
             elif data.startswith("audio_blacklist_"):
                 try:
                     task_id = int(data.replace("audio_blacklist_", ""))
-                    await self.audio_blacklist_settings(event, task_id)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("add_audio_blacklist_word_"):
-                try:
-                    task_id = int(data.replace("add_audio_blacklist_word_", ""))
-                    self.set_user_state(user_id, 'adding_audio_blacklist_word', {'task_id': task_id})
-                    buttons = [[Button.inline("🔙 رجوع", f"audio_blacklist_{task_id}")]]
-                    await self.force_new_message(event, "➕ أرسل الكلمة لإضافتها إلى القائمة السوداء:", buttons=buttons)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("view_audio_blacklist_"):
-                try:
-                    task_id = int(data.replace("view_audio_blacklist_", ""))
-                    entries = self.db.get_audio_tag_word_filter_entries(task_id, 'blacklist')
-                    words = [e['word_or_phrase'] for e in entries]
-                    text = "📋 لا توجد كلمات في القائمة السوداء" if not words else "📋 القائمة السوداء:\n\n" + "\n".join([f"• {w}" for w in words])
-                    buttons = [[Button.inline("🔙 رجوع", f"audio_blacklist_{task_id}")]]
-                    await self.force_new_message(event, text, buttons=buttons)
-                except ValueError:
-                    await event.answer("❌ خطأ في تحليل البيانات")
-            elif data.startswith("clear_audio_blacklist_"):
-                try:
-                    task_id = int(data.replace("clear_audio_blacklist_", ""))
-                    self.db.clear_audio_tag_word_filter_entries(task_id, 'blacklist')
-                    await event.answer("✅ تم حذف كلمات القائمة السوداء")
                     await self.audio_blacklist_settings(event, task_id)
                 except ValueError:
                     await event.answer("❌ خطأ في تحليل البيانات")
@@ -4129,51 +4025,6 @@ class SimpleTelegramBot:
                 finally:
                     self.clear_user_state(user_id)
                 return
-            elif current_user_state == 'adding_audio_clean_keyword':
-                try:
-                    task_id = current_user_data.get('task_id')
-                    keyword = message_text.strip()
-                    if not keyword:
-                        await self.edit_or_send_message(event, "❌ لا يمكن أن تكون الكلمة فارغة")
-                    else:
-                        self.db.add_audio_tag_text_cleaning_keyword(task_id, keyword)
-                        await self.edit_or_send_message(event, "✅ تم إضافة الكلمة إلى قائمة التنظيف")
-                    await self.audio_clean_keywords_settings(event, task_id)
-                except Exception:
-                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء الإضافة")
-                finally:
-                    self.clear_user_state(user_id)
-                return
-            elif current_user_state == 'adding_audio_whitelist_word':
-                try:
-                    task_id = current_user_data.get('task_id')
-                    word = message_text.strip()
-                    if not word:
-                        await self.edit_or_send_message(event, "❌ لا يمكن أن تكون الكلمة فارغة")
-                    else:
-                        self.db.add_audio_tag_word_filter_entry(task_id, 'whitelist', word, False)
-                        await self.edit_or_send_message(event, "✅ تمت إضافة الكلمة إلى القائمة البيضاء")
-                    await self.audio_whitelist_settings(event, task_id)
-                except Exception:
-                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء الإضافة")
-                finally:
-                    self.clear_user_state(user_id)
-                return
-            elif current_user_state == 'adding_audio_blacklist_word':
-                try:
-                    task_id = current_user_data.get('task_id')
-                    word = message_text.strip()
-                    if not word:
-                        await self.edit_or_send_message(event, "❌ لا يمكن أن تكون الكلمة فارغة")
-                    else:
-                        self.db.add_audio_tag_word_filter_entry(task_id, 'blacklist', word, False)
-                        await self.edit_or_send_message(event, "✅ تمت إضافة الكلمة إلى القائمة السوداء")
-                    await self.audio_blacklist_settings(event, task_id)
-                except Exception:
-                    await self.edit_or_send_message(event, "❌ حدث خطأ أثناء الإضافة")
-                finally:
-                    self.clear_user_state(user_id)
-                return
 
             elif current_user_state == 'awaiting_intro_audio_upload':
                 task_id = current_user_data.get('task_id')
@@ -4271,33 +4122,6 @@ class SimpleTelegramBot:
                     finally:
                         self.clear_user_state(user_id)
                         await self.audio_footer_settings(event, task_id)
-                return
-            elif current_user_state == 'adding_audio_replacement':
-                try:
-                    task_id = current_user_data.get('task_id')
-                    step = current_user_data.get('step', 'search_text')
-                    if step == 'search_text':
-                        search_text = message_text.strip()
-                        if not search_text:
-                            await self.edit_or_send_message(event, "❌ لا يمكن أن يكون نص البحث فارغاً")
-                            return
-                        # Move to next step: ask for replacement text
-                        self.set_user_state(user_id, 'adding_audio_replacement', {'task_id': task_id, 'step': 'replace_text', 'search_text': search_text})
-                        buttons = [[Button.inline("❌ إلغاء", f"audio_text_replacements_{task_id}")]]
-                        await self.force_new_message(event, "✏️ أرسل الآن النص البديل:", buttons=buttons)
-                        return
-                    elif step == 'replace_text':
-                        replace_text = message_text.strip()
-                        if replace_text is None:
-                            replace_text = ''
-                        try:
-                            self.db.add_audio_tag_text_replacement_entry(task_id, current_user_data.get('search_text', ''), replace_text, False, False)
-                            await self.edit_or_send_message(event, "✅ تم إضافة الاستبدال")
-                        except Exception:
-                            await self.edit_or_send_message(event, "❌ حدث خطأ أثناء الحفظ")
-                        await self.audio_text_replacements(event, task_id)
-                finally:
-                    self.clear_user_state(user_id)
                 return
                     
             elif current_user_state == 'editing_char_min': # Handle editing character minimum
@@ -14333,8 +14157,7 @@ async def run_simple_bot():
         task_name = task.get('task_name', 'مهمة بدون اسم')
         
         try:
-            # Use DB method for audio tag text cleaning keywords
-            keywords = self.db.get_audio_tag_text_cleaning_keywords(task_id)
+            keywords = self.db.get_audio_clean_keywords(task_id)
             keywords_list = keywords if isinstance(keywords, list) else []
         except Exception:
             keywords_list = []
@@ -14382,8 +14205,7 @@ async def run_simple_bot():
         task_name = task.get('task_name', 'مهمة بدون اسم')
         
         try:
-            # Fetch replacement entries
-            replacements = self.db.get_audio_tag_text_replacement_entries(task_id)
+            replacements = self.db.get_audio_replacements_list(task_id)
             if not replacements:
                 replacements = []
         except Exception:
@@ -14418,8 +14240,7 @@ async def run_simple_bot():
     async def clear_audio_replacements(self, event, task_id: int):
         """Clear all audio text replacements"""
         try:
-            # Clear via DB helper
-            self.db.clear_audio_tag_text_replacements(task_id)
+            self.db.clear_audio_replacements(task_id)
             await event.answer("✅ تم حذف جميع الاستبدالات")
             await self.audio_text_replacements(event, task_id)
         except Exception as e:
@@ -14449,8 +14270,7 @@ async def run_simple_bot():
         task_name = task.get('task_name', 'مهمة بدون اسم')
         
         try:
-            # Retrieve whitelist entries
-            whitelist = [entry['word_or_phrase'] for entry in self.db.get_audio_tag_word_filter_entries(task_id, 'whitelist')]
+            whitelist = self.db.get_audio_whitelist(task_id)
             whitelist_words = whitelist if isinstance(whitelist, list) else []
         except Exception:
             whitelist_words = []
@@ -14482,8 +14302,7 @@ async def run_simple_bot():
         task_name = task.get('task_name', 'مهمة بدون اسم')
         
         try:
-            # Retrieve blacklist entries
-            blacklist = [entry['word_or_phrase'] for entry in self.db.get_audio_tag_word_filter_entries(task_id, 'blacklist')]
+            blacklist = self.db.get_audio_blacklist(task_id)
             blacklist_words = blacklist if isinstance(blacklist, list) else []
         except Exception:
             blacklist_words = []
