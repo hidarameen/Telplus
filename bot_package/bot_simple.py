@@ -10069,8 +10069,13 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
 
-        # Set conversation state
-        self.db.set_conversation_state(user_id, 'waiting_text_replacements', str(task_id))
+        # Set conversation state (store JSON to be safe across DBs)
+        import json
+        try:
+            state_payload = json.dumps({'task_id': int(task_id)})
+        except Exception:
+            state_payload = json.dumps({'task_id': task_id})
+        self.db.set_conversation_state(user_id, 'waiting_text_replacements', state_payload)
 
         buttons = [
             [Button.inline("❌ إلغاء", f"text_replacements_{task_id}")]
@@ -10097,6 +10102,19 @@ class SimpleTelegramBot:
     async def handle_add_replacements(self, event, task_id, message_text):
         """Handle adding text replacements"""
         user_id = event.sender_id
+        
+        # Validate task_id and permissions
+        try:
+            task_id = int(task_id)
+        except Exception:
+            task_id = 0
+        if not task_id or task_id == 0:
+            await self.edit_or_send_message(event, "❌ خطأ: معرف المهمة غير صالح")
+            return
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة أو لا تملك صلاحية الوصول إليها")
+            return
         
         # Parse replacements from message
         replacements_to_add = []
@@ -10516,7 +10534,13 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
         
-        self.db.set_conversation_state(user_id, 'waiting_button_data', str(task_id))
+        # Store as JSON for cross-DB compatibility
+        import json
+        try:
+            state_payload = json.dumps({'task_id': int(task_id)})
+        except Exception:
+            state_payload = json.dumps({'task_id': task_id})
+        self.db.set_conversation_state(user_id, 'waiting_button_data', state_payload)
 
         buttons = [
             [Button.inline("❌ إلغاء", f"inline_buttons_{task_id}")]
@@ -10546,7 +10570,11 @@ class SimpleTelegramBot:
         # Clear conversation state
         self.db.clear_conversation_state(user_id)
         
-        # Validate task_id
+        # Validate task_id and permissions
+        try:
+            task_id = int(task_id)
+        except Exception:
+            task_id = 0
         if not task_id or task_id == 0:
             await self.edit_or_send_message(event, "❌ خطأ: معرف المهمة غير صالح")
             return
