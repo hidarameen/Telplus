@@ -97,11 +97,27 @@ class SimpleTelegramBot:
     async def force_new_message(self, event, text, buttons=None):
         """Force send a new message and delete the previous one"""
         user_id = event.sender_id
-        
-        # Delete previous message if exists
+        # Detect if this is a callback (button press)
+        is_callback = False
+        try:
+            from telethon import events as _events
+            is_callback = isinstance(event, _events.CallbackQuery.Event)
+        except Exception:
+            # Fallback heuristic
+            is_callback = hasattr(event, 'query') and hasattr(event, 'edit')
+
+        if is_callback:
+            # For button presses: do NOT delete/resend, just edit in place
+            try:
+                # Answer the callback to remove the loading state (best-effort)
+                if hasattr(event, 'answer'):
+                    await event.answer()
+            except Exception:
+                pass
+            return await self.edit_or_send_message(event, text, buttons, force_new=False)
+
+        # For text messages and others: delete previous and send new
         await self.delete_previous_message(user_id)
-        
-        # Send new message
         return await self.edit_or_send_message(event, text, buttons, force_new=True)
 
     # ===== Channels Management Delegates =====
@@ -133,7 +149,41 @@ class SimpleTelegramBot:
         """Edit existing message or send new one with improved logic"""
         user_id = event.sender_id
         
-        # Always try to edit first unless force_new is True
+        # Detect if this is a callback (button press)
+        is_callback = False
+        try:
+            from telethon import events as _events
+            is_callback = isinstance(event, _events.CallbackQuery.Event)
+        except Exception:
+            # Fallback heuristic
+            is_callback = hasattr(event, 'query') and hasattr(event, 'edit')
+
+        # If this is a callback and not forcing a new message, prefer editing the callback message directly
+        if not force_new and is_callback:
+            try:
+                # Best-effort: answer callback to clear the loader
+                if hasattr(event, 'answer'):
+                    await event.answer()
+            except Exception:
+                pass
+            try:
+                # Prefer editing the message that triggered the callback
+                if hasattr(event, 'edit'):
+                    await event.edit(text, buttons=buttons)
+                    # Ensure tracking points to the same message (keeps the panel consistent)
+                    try:
+                        msg_id = getattr(event.message, 'id', None)
+                        chat_id = getattr(event, 'chat_id', None) or getattr(event.message, 'chat_id', None)
+                        if msg_id and chat_id:
+                            self.track_user_message(user_id, msg_id, chat_id)
+                    except Exception:
+                        pass
+                    logger.debug(f"✅ تم تعديل رسالة اللوحة من خلال الرد على الزر للمستخدم {user_id}")
+                    return None
+            except Exception as e:
+                logger.warning(f"تعذر تعديل رسالة رد الفعل مباشرة، المحاولة عبر tracked message: {e}")
+
+        # Always try to edit tracked message first unless force_new is True
         if not force_new and user_id in self.user_messages:
             try:
                 tracked_msg = self.user_messages[user_id]
