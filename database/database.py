@@ -2175,6 +2175,13 @@ class Database:
         """Update header settings for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            
+            # First verify the task exists
+            cursor.execute('SELECT id FROM tasks WHERE id = ?', (task_id,))
+            task_exists = cursor.fetchone()
+            
+            if not task_exists:
+                raise ValueError(f"Task with id {task_id} does not exist")
 
             # Check if header exists
             cursor.execute('SELECT id FROM task_headers WHERE task_id = ?', (task_id,))
@@ -2200,6 +2207,13 @@ class Database:
         """Update footer settings for a task"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            
+            # First verify the task exists
+            cursor.execute('SELECT id FROM tasks WHERE id = ?', (task_id,))
+            task_exists = cursor.fetchone()
+            
+            if not task_exists:
+                raise ValueError(f"Task with id {task_id} does not exist")
 
             # Check if footer exists
             cursor.execute('SELECT id FROM task_footers WHERE task_id = ?', (task_id,))

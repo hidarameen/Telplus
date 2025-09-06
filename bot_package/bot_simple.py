@@ -10276,6 +10276,17 @@ class SimpleTelegramBot:
         # Clear conversation state
         self.db.clear_conversation_state(user_id)
         
+        # Validate task_id
+        if not task_id or task_id == 0:
+            await self.edit_or_send_message(event, "❌ خطأ: معرف المهمة غير صالح")
+            return
+            
+        # Check if task exists and belongs to user
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة أو لا تملك صلاحية الوصول إليها")
+            return
+        
         # Update header text and enable it
         self.db.update_header_settings(task_id, True, text.strip())
         
@@ -10372,6 +10383,17 @@ class SimpleTelegramBot:
         
         # Clear conversation state
         self.db.clear_conversation_state(user_id)
+        
+        # Validate task_id
+        if not task_id or task_id == 0:
+            await self.edit_or_send_message(event, "❌ خطأ: معرف المهمة غير صالح")
+            return
+            
+        # Check if task exists and belongs to user
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة أو لا تملك صلاحية الوصول إليها")
+            return
         
         # Update footer text and enable it
         self.db.update_footer_settings(task_id, True, text.strip())
@@ -10483,6 +10505,17 @@ class SimpleTelegramBot:
         
         # Clear conversation state
         self.db.clear_conversation_state(user_id)
+        
+        # Validate task_id
+        if not task_id or task_id == 0:
+            await self.edit_or_send_message(event, "❌ خطأ: معرف المهمة غير صالح")
+            return
+            
+        # Check if task exists and belongs to user
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة أو لا تملك صلاحية الوصول إليها")
+            return
         
         lines = text.strip().split('\n')
         added_count = 0
