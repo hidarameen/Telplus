@@ -6477,26 +6477,6 @@ class Database:
             ''', (task_id,))
             return [row['keyword'] for row in cursor.fetchall()]
 
-    def clear_audio_tag_text_cleaning_keywords(self, task_id: int) -> bool:
-        """Clear all keywords for audio tag text cleaning for a task"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    DELETE FROM task_audio_tag_text_cleaning_keywords
-                    WHERE task_id = ?
-                ''', (task_id,))
-                conn.commit()
-                return True
-        except Exception as e:
-            logger.error(f"خطأ في حذف جميع كلمات تنظيف الوسوم الصوتية: {e}")
-            return False
-
-    # --- Compatibility wrappers for existing bot code ---
-    def get_audio_clean_keywords(self, task_id: int) -> list:
-        """Wrapper for get_audio_tag_text_cleaning_keywords"""
-        return self.get_audio_tag_text_cleaning_keywords(task_id)
-
     # === Audio Tags Word Filter Functions ===
 
     def get_audio_tag_word_filter_settings(self, task_id: int, filter_type: str) -> dict:
@@ -6635,35 +6615,6 @@ class Database:
             ''', (task_id, filter_type))
             return [{'word_or_phrase': row['word_or_phrase'], 'is_case_sensitive': bool(row['is_case_sensitive'])} for row in cursor.fetchall()]
 
-    # --- Compatibility wrappers for word filters ---
-    def get_audio_whitelist(self, task_id: int) -> list:
-        """Wrapper returning only words for whitelist filter"""
-        entries = self.get_audio_tag_word_filter_entries(task_id, 'whitelist')
-        return [e['word_or_phrase'] for e in entries]
-
-    def get_audio_blacklist(self, task_id: int) -> list:
-        """Wrapper returning only words for blacklist filter"""
-        entries = self.get_audio_tag_word_filter_entries(task_id, 'blacklist')
-        return [e['word_or_phrase'] for e in entries]
-
-    def clear_audio_tag_word_filter_entries(self, task_id: int, filter_type: str) -> bool:
-        """Clear all words/phrases for a specific audio tag word filter type for a task"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    DELETE FROM audio_tag_word_filter_entries
-                    WHERE filter_id IN (
-                        SELECT id FROM task_audio_tag_word_filters 
-                        WHERE task_id = ? AND filter_type = ?
-                    )
-                ''', (task_id, filter_type))
-                conn.commit()
-                return True
-        except Exception as e:
-            logger.error(f"خطأ في حذف كلمات فلتر الوسوم الصوتية ({filter_type}): {e}")
-            return False
-
     # === Audio Tags Text Replacement Functions ===
 
     def get_audio_tag_text_replacement_settings(self, task_id: int) -> dict:
@@ -6749,34 +6700,6 @@ class Database:
             ''', (enabled, task_id))
             conn.commit()
         return cursor.rowcount > 0
-
-    def clear_audio_tag_text_replacements(self, task_id: int) -> bool:
-        """Clear all text replacement entries for audio tags for a task"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    DELETE FROM audio_tag_text_replacement_entries
-                    WHERE replacement_id IN (
-                        SELECT id FROM task_audio_tag_text_replacements 
-                        WHERE task_id = ?
-                    )
-                ''', (task_id,))
-                conn.commit()
-                return True
-        except Exception as e:
-            logger.error(f"خطأ في حذف جميع استبدالات نصوص الوسوم الصوتية: {e}")
-            return False
-
-    # --- Compatibility wrapper for replacements list ---
-    def get_audio_replacements_list(self, task_id: int) -> list:
-        """Wrapper to return replacement entries in simple list of dicts"""
-        return self.get_audio_tag_text_replacement_entries(task_id)
-
-    # --- Compatibility wrapper for clearing replacements ---
-    def clear_audio_replacements(self, task_id: int) -> bool:
-        """Wrapper to clear all replacement entries"""
-        return self.clear_audio_tag_text_replacements(task_id)
 
     def add_audio_tag_text_replacement_entry(self, task_id: int, find_text: str, replace_text: str, is_case_sensitive: bool = False, is_whole_word: bool = False) -> bool:
         """Add text replacement entry for audio tags"""
