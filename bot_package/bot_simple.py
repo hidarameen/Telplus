@@ -13903,7 +13903,7 @@ async def run_simple_bot():
         
         task_name = task.get('task_name', 'مهمة بدون اسم')
         try:
-            audio_header_footer = self.db.get_audio_tag_header_footer_settings(task_id)
+            audio_header_footer = self.db.get_audio_header_footer_settings(task_id)
             status_text = "🟢 مفعل" if audio_header_footer.get('enabled', False) else "🔴 معطل"
         except (AttributeError, KeyError):
             status_text = "🔴 معطل"
@@ -14107,23 +14107,16 @@ async def run_simple_bot():
     async def toggle_audio_clean_option(self, event, task_id: int, option: str):
         """Toggle specific audio cleaning option"""
         try:
-            current_settings = self.db.get_audio_tag_text_cleaning_settings(task_id)
+            current_settings = self.db.get_audio_text_cleaning_settings(task_id)
             if not current_settings:
                 current_settings = {'enabled': False}
             
-            option_map = {
-                'links': 'remove_links',
-                'emojis': 'remove_emojis',
-                'hashtags': 'remove_hashtags',
-                'phones': 'remove_phone_numbers',
-                'empty_lines': 'remove_empty_lines'
-            }
-            setting_name = option_map.get(option, option)
-            current_state = bool(current_settings.get(setting_name, False))
+            option_key = f'clean_{option}'
+            current_state = current_settings.get(option_key, False)
             new_state = not current_state
             
-            # Update the specific cleaning option via DB
-            self.db.update_audio_tag_text_cleaning_setting(task_id, setting_name, new_state)
+            # Update the specific cleaning option
+            self.db.update_audio_cleaning_option(task_id, option_key, new_state)
             
             status = "مفعل" if new_state else "معطل"
             await event.answer(f"✅ تم تحديث خيار {self.get_clean_option_name(option)}: {status}")
@@ -14362,7 +14355,7 @@ async def run_simple_bot():
         task_name = task.get('task_name', 'مهمة بدون اسم')
         
         try:
-            settings = self.db.get_audio_tag_header_footer_settings(task_id)
+            settings = self.db.get_audio_header_footer_settings(task_id)
             header_text = settings.get('header_text', '')
             header_enabled = settings.get('header_enabled', False)
         except Exception:
@@ -14400,7 +14393,7 @@ async def run_simple_bot():
         task_name = task.get('task_name', 'مهمة بدون اسم')
         
         try:
-            settings = self.db.get_audio_tag_header_footer_settings(task_id)
+            settings = self.db.get_audio_header_footer_settings(task_id)
             footer_text = settings.get('footer_text', '')
             footer_enabled = settings.get('footer_enabled', False)
         except Exception:
