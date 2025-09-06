@@ -6028,12 +6028,17 @@ class SimpleTelegramBot:
             return
 
         state, data_str = state_data
+        logger.debug(f"Processing state: {state}, data_str type: {type(data_str)}, data_str: {data_str}")
         try:
             if isinstance(data_str, dict):
                 data = data_str
+            elif isinstance(data_str, str) and data_str:
+                data = json.loads(data_str)
             else:
-                data = json.loads(data_str) if data_str else {}
-        except:
+                data = {}
+            logger.debug(f"Parsed data: {data}")
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"خطأ في تحليل البيانات: {e}, البيانات: {data_str}")
             data = {}
         message_text = event.raw_text.strip()
 
@@ -7530,6 +7535,20 @@ class SimpleTelegramBot:
         try:
             # data is already a dict from handle_auth_message
             auth_data = data
+            
+            # Validate that required keys exist
+            if not isinstance(auth_data, dict):
+                logger.error(f"auth_data is not a dict: {type(auth_data)}, value: {auth_data}")
+                raise KeyError("auth_data is not a dictionary")
+            
+            if 'phone' not in auth_data:
+                logger.error(f"Missing 'phone' key in auth_data: {auth_data}")
+                raise KeyError("Missing 'phone' key in auth_data")
+            
+            if 'phone_code_hash' not in auth_data:
+                logger.error(f"Missing 'phone_code_hash' key in auth_data: {auth_data}")
+                raise KeyError("Missing 'phone_code_hash' key in auth_data")
+            
             phone = auth_data['phone']
             phone_code_hash = auth_data['phone_code_hash']
 
@@ -7602,6 +7621,15 @@ class SimpleTelegramBot:
                     await self.edit_or_send_message(event, message_text)
                     return
 
+        except KeyError as e:
+            logger.error(f"خطأ في البيانات المطلوبة للتحقق: {e}")
+            message_text = (
+                "❌ خطأ في البيانات المطلوبة للتحقق\n\n"
+                "🔄 يرجى البدء من جديد بإرسال رقم الهاتف"
+            )
+            await self.edit_or_send_message(event, message_text)
+            # Clear the conversation state to allow restart
+            self.db.clear_conversation_state(user_id)
         except Exception as e:
             logger.error(f"خطأ في التحقق من الرمز: {e}")
             message_text = (
@@ -7790,6 +7818,20 @@ class SimpleTelegramBot:
         try:
             # data is already a dict from handle_auth_message
             auth_data = data
+            
+            # Validate that required keys exist
+            if not isinstance(auth_data, dict):
+                logger.error(f"auth_data is not a dict: {type(auth_data)}, value: {auth_data}")
+                raise KeyError("auth_data is not a dictionary")
+            
+            if 'phone' not in auth_data:
+                logger.error(f"Missing 'phone' key in auth_data: {auth_data}")
+                raise KeyError("Missing 'phone' key in auth_data")
+            
+            if 'session_client' not in auth_data:
+                logger.error(f"Missing 'session_client' key in auth_data: {auth_data}")
+                raise KeyError("Missing 'session_client' key in auth_data")
+            
             phone = auth_data['phone']
             session_string = auth_data['session_client'] # This is the session string from previous step
 
@@ -7847,6 +7889,15 @@ class SimpleTelegramBot:
             await self.force_new_message(event, message_text, buttons=buttons)
             await temp_client.disconnect()
 
+        except KeyError as e:
+            logger.error(f"خطأ في البيانات المطلوبة للتحقق الثنائي: {e}")
+            message_text = (
+                "❌ خطأ في البيانات المطلوبة للتحقق الثنائي\n\n"
+                "🔄 يرجى البدء من جديد بإرسال رقم الهاتف"
+            )
+            await self.edit_or_send_message(event, message_text)
+            # Clear the conversation state to allow restart
+            self.db.clear_conversation_state(user_id)
         except Exception as e:
             logger.error(f"خطأ في التحقق من كلمة المرور: {e}")
             message_text = (
