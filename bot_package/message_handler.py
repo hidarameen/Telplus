@@ -39,11 +39,12 @@ class MessageHandler:
     async def handle_message(self, event):
         """معالجة الرسائل مع إدارة محسنة للحالة"""
         # تخطي الأوامر
-        if event.text.startswith('/'):
+        text = getattr(event, 'text', None)
+        if text and isinstance(text, str) and text.startswith('/'):
             return
             
         user_id = event.sender_id
-        message_text = event.text
+        message_text = text or ''
         
         # تنظيف الحالات المنتهية الصلاحية
         self.state_manager.cleanup_expired_states()
