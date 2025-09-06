@@ -117,8 +117,6 @@ class StateTimeoutHandler:
         self.state_manager = state_manager
         self.timeout_messages = {
             'editing_audio_tag_': "⏰ انتهت مهلة تعديل الوسم الصوتي",
-            'editing_audio_header_text': "⏰ انتهت مهلة تعديل نص الهيدر",
-            'editing_audio_footer_text': "⏰ انتهت مهلة تعديل نص الفوتر",
             'editing_char_': "⏰ انتهت مهلة تعديل حدود الأحرف",
             'editing_rate_': "⏰ انتهت مهلة تعديل حدود المعدل",
             'editing_forwarding_': "⏰ انتهت مهلة تعديل تأخير التوجيه",
@@ -160,8 +158,6 @@ class StateValidationHandler:
             'editing_audio_tag_track',
             'editing_audio_tag_length',
             'editing_audio_tag_lyrics',
-            'editing_audio_header_text',
-            'editing_audio_footer_text',
             
             # حالات تعديل حدود الأحرف
             'editing_char_min',
