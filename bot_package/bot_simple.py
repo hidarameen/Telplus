@@ -4164,12 +4164,17 @@ class SimpleTelegramBot:
 
         if state_data:
             state, data_str = state_data
+            logger.debug(f"قراءة حالة المستخدم {user_id}: state={state}, data_type={type(data_str)}")
             try:
                 if isinstance(data_str, dict):
                     data = data_str
                 else:
                     data = json.loads(data_str) if data_str else {}
-            except:
+                    if data and state in ['waiting_code', 'waiting_password']:
+                        logger.info(f"بيانات المصادقة المُحللة للمستخدم {user_id}: {list(data.keys())}")
+            except Exception as e:
+                logger.error(f"خطأ في تحليل بيانات الحالة للمستخدم {user_id}: {e}")
+                logger.error(f"البيانات الأصلية: {data_str}")
                 data = {}
 
             state_data = (state, data)
@@ -7358,25 +7363,13 @@ class SimpleTelegramBot:
         state, data = state_data
         message_text = event.text.strip()
 
-        # Ensure legacy data is parsed into a dictionary
-        try:
-            if isinstance(data, dict):
-                parsed_data = data
-            elif isinstance(data, str) and data:
-                parsed_data = json.loads(data)
-            else:
-                parsed_data = {}
-        except Exception as e:
-            logger.error(f"خطأ في تحليل بيانات حالة المصادقة للمستخدم {user_id}: {e}")
-            parsed_data = {}
-
         try:
             if state == 'waiting_phone':
                 await self.handle_phone_input(event, message_text)
             elif state == 'waiting_code':
-                await self.handle_code_input(event, message_text, parsed_data)
+                await self.handle_code_input(event, message_text, data)
             elif state == 'waiting_password':
-                await self.handle_password_input(event, message_text, parsed_data)
+                await self.handle_password_input(event, message_text, data)
             elif state == 'waiting_session':
                 await self.handle_session_input(event, message_text)
         except Exception as e:
@@ -7410,16 +7403,9 @@ class SimpleTelegramBot:
         # Create temporary Telegram client for authentication
         temp_client = None
         try:
-            # Create unique session for this authentication attempt in persistent sessions directory
-            data_dir = os.getenv('DATA_DIR', '/app/data')
-            sessions_dir = os.getenv('SESSIONS_DIR', os.path.join(data_dir, 'sessions'))
-            try:
-                os.makedirs(sessions_dir, exist_ok=True)
-            except Exception:
-                pass
+            # Create unique session for this authentication attempt
             session_name = f'auth_{user_id}_{int(datetime.now().timestamp())}'
-            session_path = os.path.join(sessions_dir, session_name)
-            temp_client = TelegramClient(session_path, int(API_ID), API_HASH)
+            temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
 
             # Connect with timeout
             await asyncio.wait_for(temp_client.connect(), timeout=10)
@@ -7428,16 +7414,29 @@ class SimpleTelegramBot:
                 raise Exception("فشل في الاتصال بخوادم تليجرام")
 
             # Send code request with timeout
-            sent_code = await asyncio.wait_for(
-                temp_client.send_code_request(phone),
-                timeout=15
-            )
+            try:
+                sent_code = await asyncio.wait_for(
+                    temp_client.send_code_request(phone),
+                    timeout=15
+                )
+            except Exception as code_error:
+                # Check if it's a phone migration error
+                if "PhoneMigrateError" in str(type(code_error).__name__) or "migrated" in str(code_error).lower():
+                    logger.info(f"Phone migrated for user {user_id}, reconnecting...")
+                    # Telethon should handle reconnection automatically, try again
+                    await asyncio.sleep(2)  # Give time for reconnection
+                    sent_code = await asyncio.wait_for(
+                        temp_client.send_code_request(phone),
+                        timeout=15
+                    )
+                else:
+                    raise code_error
 
             # Store data for next step
             auth_data = {
                 'phone': phone,
                 'phone_code_hash': sent_code.phone_code_hash,
-                'session_name': session_path
+                'session_name': session_name  # حفظ اسم الجلسة فقط وليس المسار الكامل
             }
             self.db.set_conversation_state(user_id, 'waiting_code', json.dumps(auth_data))
 
@@ -7548,33 +7547,16 @@ class SimpleTelegramBot:
             # data is already a dict from handle_auth_message
             auth_data = data
             
-            # Validate that required keys exist
-            if not isinstance(auth_data, dict):
-                logger.error(f"auth_data is not a dict: {type(auth_data)}, value: {auth_data}")
-                raise KeyError("auth_data is not a dictionary")
-            
-            if 'phone' not in auth_data:
-                logger.error(f"Missing 'phone' key in auth_data: {auth_data}")
-                raise KeyError("Missing 'phone' key in auth_data")
-            
-            if 'phone_code_hash' not in auth_data:
-                logger.error(f"Missing 'phone_code_hash' key in auth_data: {auth_data}")
-                raise KeyError("Missing 'phone_code_hash' key in auth_data")
+            # إضافة سجل للتحقق من البيانات
+            logger.debug(f"Auth data type for user {user_id}: {type(auth_data)}")
+            if isinstance(auth_data, dict):
+                logger.debug(f"Auth data keys for user {user_id}: {list(auth_data.keys())}")
             
             phone = auth_data['phone']
             phone_code_hash = auth_data['phone_code_hash']
 
             # Create client and sign in
-            data_dir = os.getenv('DATA_DIR', '/app/data')
-            sessions_dir = os.getenv('SESSIONS_DIR', os.path.join(data_dir, 'sessions'))
-            try:
-                os.makedirs(sessions_dir, exist_ok=True)
-            except Exception:
-                pass
             session_name = auth_data.get('session_name', f'auth_{user_id}_{int(datetime.now().timestamp())}')
-            # If old auth_data stored a bare name, place it under sessions_dir
-            if not os.path.isabs(session_name):
-                session_name = os.path.join(sessions_dir, session_name)
             temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
             await temp_client.connect()
 
@@ -7834,20 +7816,6 @@ class SimpleTelegramBot:
         try:
             # data is already a dict from handle_auth_message
             auth_data = data
-            
-            # Validate that required keys exist
-            if not isinstance(auth_data, dict):
-                logger.error(f"auth_data is not a dict: {type(auth_data)}, value: {auth_data}")
-                raise KeyError("auth_data is not a dictionary")
-            
-            if 'phone' not in auth_data:
-                logger.error(f"Missing 'phone' key in auth_data: {auth_data}")
-                raise KeyError("Missing 'phone' key in auth_data")
-            
-            if 'session_client' not in auth_data:
-                logger.error(f"Missing 'session_client' key in auth_data: {auth_data}")
-                raise KeyError("Missing 'session_client' key in auth_data")
-            
             phone = auth_data['phone']
             session_string = auth_data['session_client'] # This is the session string from previous step
 
