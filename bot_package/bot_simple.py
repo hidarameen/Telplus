@@ -4164,12 +4164,17 @@ class SimpleTelegramBot:
 
         if state_data:
             state, data_str = state_data
+            logger.debug(f"قراءة حالة المستخدم {user_id}: state={state}, data_type={type(data_str)}")
             try:
                 if isinstance(data_str, dict):
                     data = data_str
                 else:
                     data = json.loads(data_str) if data_str else {}
-            except:
+                    if data and state in ['waiting_code', 'waiting_password']:
+                        logger.info(f"بيانات المصادقة المُحللة للمستخدم {user_id}: {list(data.keys())}")
+            except Exception as e:
+                logger.error(f"خطأ في تحليل بيانات الحالة للمستخدم {user_id}: {e}")
+                logger.error(f"البيانات الأصلية: {data_str}")
                 data = {}
 
             state_data = (state, data)
@@ -7366,8 +7371,10 @@ class SimpleTelegramBot:
                 parsed_data = json.loads(data)
             else:
                 parsed_data = {}
+                logger.warning(f"بيانات فارغة لحالة المصادقة للمستخدم {user_id} في الحالة {state}")
         except Exception as e:
             logger.error(f"خطأ في تحليل بيانات حالة المصادقة للمستخدم {user_id}: {e}")
+            logger.error(f"البيانات الأصلية: {data}")
             parsed_data = {}
 
         try:
@@ -7439,7 +7446,9 @@ class SimpleTelegramBot:
                 'phone_code_hash': sent_code.phone_code_hash,
                 'session_name': session_path
             }
-            self.db.set_conversation_state(user_id, 'waiting_code', json.dumps(auth_data))
+            auth_data_json = json.dumps(auth_data)
+            logger.info(f"حفظ بيانات المصادقة للمستخدم {user_id}: {list(auth_data.keys())}")
+            self.db.set_conversation_state(user_id, 'waiting_code', auth_data_json)
 
             buttons = [
                 [Button.inline("❌ إلغاء", b"cancel_auth")]
@@ -7551,15 +7560,24 @@ class SimpleTelegramBot:
             # Validate that required keys exist
             if not isinstance(auth_data, dict):
                 logger.error(f"auth_data is not a dict: {type(auth_data)}, value: {auth_data}")
-                raise KeyError("auth_data is not a dictionary")
+                message_text = (
+                    "❌ حدث خطأ في بيانات المصادقة\n\n"
+                    "يرجى البدء من جديد بالضغط على /start"
+                )
+                await self.edit_or_send_message(event, message_text)
+                self.db.clear_conversation_state(user_id)
+                return
             
-            if 'phone' not in auth_data:
-                logger.error(f"Missing 'phone' key in auth_data: {auth_data}")
-                raise KeyError("Missing 'phone' key in auth_data")
-            
-            if 'phone_code_hash' not in auth_data:
-                logger.error(f"Missing 'phone_code_hash' key in auth_data: {auth_data}")
-                raise KeyError("Missing 'phone_code_hash' key in auth_data")
+            if 'phone' not in auth_data or 'phone_code_hash' not in auth_data:
+                logger.error(f"Missing required keys in auth_data: {auth_data}")
+                logger.error(f"Keys present: {list(auth_data.keys())}")
+                message_text = (
+                    "❌ بيانات المصادقة غير مكتملة\n\n"
+                    "يرجى البدء من جديد بالضغط على /start"
+                )
+                await self.edit_or_send_message(event, message_text)
+                self.db.clear_conversation_state(user_id)
+                return
             
             phone = auth_data['phone']
             phone_code_hash = auth_data['phone_code_hash']
@@ -7838,15 +7856,24 @@ class SimpleTelegramBot:
             # Validate that required keys exist
             if not isinstance(auth_data, dict):
                 logger.error(f"auth_data is not a dict: {type(auth_data)}, value: {auth_data}")
-                raise KeyError("auth_data is not a dictionary")
+                message_text = (
+                    "❌ حدث خطأ في بيانات المصادقة\n\n"
+                    "يرجى البدء من جديد بالضغط على /start"
+                )
+                await self.edit_or_send_message(event, message_text)
+                self.db.clear_conversation_state(user_id)
+                return
             
-            if 'phone' not in auth_data:
-                logger.error(f"Missing 'phone' key in auth_data: {auth_data}")
-                raise KeyError("Missing 'phone' key in auth_data")
-            
-            if 'session_client' not in auth_data:
-                logger.error(f"Missing 'session_client' key in auth_data: {auth_data}")
-                raise KeyError("Missing 'session_client' key in auth_data")
+            if 'phone' not in auth_data or 'session_client' not in auth_data:
+                logger.error(f"Missing required keys in auth_data: {auth_data}")
+                logger.error(f"Keys present: {list(auth_data.keys())}")
+                message_text = (
+                    "❌ بيانات المصادقة غير مكتملة\n\n"
+                    "يرجى البدء من جديد بالضغط على /start"
+                )
+                await self.edit_or_send_message(event, message_text)
+                self.db.clear_conversation_state(user_id)
+                return
             
             phone = auth_data['phone']
             session_string = auth_data['session_client'] # This is the session string from previous step
