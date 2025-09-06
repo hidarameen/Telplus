@@ -4377,11 +4377,11 @@ class SimpleTelegramBot:
                 await self.handle_set_auto_delete_time(event, task_id, event.text)
                 return
             elif state == 'set_working_hours': # Handle setting working hours
-                task_id = data.get('task_id')
+                task_id = data.get('task_id') if isinstance(data, dict) else None
                 await self.handle_set_working_hours(event, task_id, event.text)
                 return
             elif state == 'add_language': # Handle adding language filter
-                task_id = data.get('task_id')
+                task_id = data.get('task_id') if isinstance(data, dict) else None
                 await self.handle_add_language_filter(event, task_id, message_text)
                 return
             elif state == 'waiting_language_filter': # Handle adding language filter
@@ -4389,7 +4389,7 @@ class SimpleTelegramBot:
                 await self.handle_add_language_filter(event, task_id, message_text)
                 return
             elif state == 'waiting_hyperlink_settings': # Handle editing hyperlink settings
-                task_id = data.get('task_id')
+                task_id = data.get('task_id') if isinstance(data, dict) else None
                 await self.handle_hyperlink_settings(event, task_id, event.text)
                 return
 
