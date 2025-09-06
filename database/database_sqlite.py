@@ -429,26 +429,39 @@ class Database:
     # Conversation State Management
     def set_conversation_state(self, user_id: int, state: str, data: str = ''):
         """Set conversation state for user"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT OR REPLACE INTO conversation_states 
-                (user_id, state, data, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (user_id, state, data))
-            conn.commit()
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO conversation_states 
+                    (user_id, state, data, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (user_id, state, data))
+                conn.commit()
+                logger.debug(f"تم حفظ الحالة للمستخدم {user_id}: state={state}, data_length={len(data)}")
+        except Exception as e:
+            logger.error(f"خطأ في حفظ حالة المحادثة للمستخدم {user_id}: {e}")
+            raise
 
     def get_conversation_state(self, user_id: int) -> Optional[Tuple[str, str]]:
         """Get conversation state for user"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT state, data FROM conversation_states 
-                WHERE user_id = ?
-            ''', (user_id,))
-            result = cursor.fetchone()
-            if result:
-                return (result['state'], result['data'])
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT state, data FROM conversation_states 
+                    WHERE user_id = ?
+                ''', (user_id,))
+                result = cursor.fetchone()
+                if result:
+                    state = result['state']
+                    data = result['data'] if result['data'] is not None else ''
+                    logger.debug(f"قراءة الحالة للمستخدم {user_id}: state={state}, data_length={len(data)}")
+                    return (state, data)
+                logger.debug(f"لا توجد حالة محفوظة للمستخدم {user_id}")
+                return None
+        except Exception as e:
+            logger.error(f"خطأ في قراءة حالة المحادثة للمستخدم {user_id}: {e}")
             return None
 
     def clear_conversation_state(self, user_id: int):

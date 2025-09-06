@@ -7435,10 +7435,23 @@ class SimpleTelegramBot:
                 raise Exception("فشل في الاتصال بخوادم تليجرام")
 
             # Send code request with timeout
-            sent_code = await asyncio.wait_for(
-                temp_client.send_code_request(phone),
-                timeout=15
-            )
+            try:
+                sent_code = await asyncio.wait_for(
+                    temp_client.send_code_request(phone),
+                    timeout=15
+                )
+            except Exception as code_error:
+                # Check if it's a phone migration error
+                if "PhoneMigrateError" in str(type(code_error).__name__) or "migrated" in str(code_error).lower():
+                    logger.info(f"Phone migrated for user {user_id}, reconnecting...")
+                    # Telethon should handle reconnection automatically, try again
+                    await asyncio.sleep(2)  # Give time for reconnection
+                    sent_code = await asyncio.wait_for(
+                        temp_client.send_code_request(phone),
+                        timeout=15
+                    )
+                else:
+                    raise code_error
 
             # Store data for next step
             auth_data = {
@@ -7449,6 +7462,14 @@ class SimpleTelegramBot:
             auth_data_json = json.dumps(auth_data)
             logger.info(f"حفظ بيانات المصادقة للمستخدم {user_id}: {list(auth_data.keys())}")
             self.db.set_conversation_state(user_id, 'waiting_code', auth_data_json)
+            
+            # Verify data was saved correctly
+            verify_state = self.db.get_conversation_state(user_id)
+            if verify_state:
+                v_state, v_data = verify_state
+                logger.info(f"تحقق من حفظ البيانات: state={v_state}, has_data={bool(v_data)}")
+            else:
+                logger.error(f"فشل في حفظ حالة المصادقة للمستخدم {user_id}")
 
             buttons = [
                 [Button.inline("❌ إلغاء", b"cancel_auth")]
