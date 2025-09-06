@@ -4040,11 +4040,12 @@ class SimpleTelegramBot:
     async def handle_message(self, event):
         """Handle text messages"""
         # Skip if it's a command
-        if event.text.startswith('/'):
+        text = getattr(event, 'text', None)
+        if text and isinstance(text, str) and text.startswith('/'):
             return
 
         user_id = event.sender_id
-        message_text = event.text
+        message_text = text or ''
 
         # If user forwarded a message and is in add-channel state, try to extract channel
         try:
@@ -4617,36 +4618,36 @@ class SimpleTelegramBot:
                 return
             elif state == 'waiting_watermark_size': # Handle setting watermark size
                 task_id = int(data)
-                await self.handle_watermark_setting_input(event, task_id, 'size', event.text)
+                await self.handle_watermark_setting_input(event, task_id, 'size', (event.text or ''))
                 return
             elif state == 'waiting_watermark_opacity': # Handle setting watermark opacity
                 task_id = int(data)
-                await self.handle_watermark_setting_input(event, task_id, 'opacity', event.text)
+                await self.handle_watermark_setting_input(event, task_id, 'opacity', (event.text or ''))
                 return
             elif state == 'waiting_watermark_font_size': # Handle setting watermark font size
                 task_id = int(data)
-                await self.handle_watermark_setting_input(event, task_id, 'font_size', event.text)
+                await self.handle_watermark_setting_input(event, task_id, 'font_size', (event.text or ''))
                 return
             elif state == 'waiting_watermark_color': # Handle setting watermark color
                 task_id = int(data)
-                await self.handle_watermark_setting_input(event, task_id, 'color', event.text)
+                await self.handle_watermark_setting_input(event, task_id, 'color', (event.text or ''))
                 return
 
             elif state == 'waiting_text_replacements': # Handle adding text replacements
                 task_id = int(data)
-                await self.handle_add_replacements(event, task_id, event.text)
+                await self.handle_add_replacements(event, task_id, (event.text or ''))
                 return
             elif state == 'waiting_header_text': # Handle editing header text
                 task_id = int(data)
-                await self.handle_set_header_text(event, task_id, event.text)
+                await self.handle_set_header_text(event, task_id, (event.text or ''))
                 return
             elif state == 'waiting_footer_text': # Handle editing footer text
                 task_id = int(data)
-                await self.handle_set_footer_text(event, task_id, event.text)
+                await self.handle_set_footer_text(event, task_id, (event.text or ''))
                 return
             elif state == 'waiting_button_data': # Handle adding inline button
                 task_id = int(data)
-                await self.handle_add_inline_button(event, task_id, event.text)
+                await self.handle_add_inline_button(event, task_id, (event.text or ''))
                 return
             elif state == 'editing_char_range': # Handle character range editing
                 task_id = int(data)
@@ -4655,19 +4656,19 @@ class SimpleTelegramBot:
 
             elif state == 'editing_forwarding_delay': # Handle forwarding delay editing
                 task_id = int(data)
-                await self.handle_edit_forwarding_delay(event, task_id, event.text)
+                await self.handle_edit_forwarding_delay(event, task_id, (event.text or ''))
                 return
             elif state == 'editing_sending_interval': # Handle sending interval editing
                 task_id = int(data)
-                await self.handle_edit_sending_interval(event, task_id, event.text)
+                await self.handle_edit_sending_interval(event, task_id, (event.text or ''))
                 return
             elif state == 'waiting_auto_delete_time': # Handle setting auto delete time
                 task_id = int(data)
-                await self.handle_set_auto_delete_time(event, task_id, event.text)
+                await self.handle_set_auto_delete_time(event, task_id, (event.text or ''))
                 return
             elif state == 'set_working_hours': # Handle setting working hours
                 task_id = data.get('task_id')
-                await self.handle_set_working_hours(event, task_id, event.text)
+                await self.handle_set_working_hours(event, task_id, (event.text or ''))
                 return
             elif state == 'add_language': # Handle adding language filter
                 task_id = data.get('task_id')
@@ -4679,7 +4680,7 @@ class SimpleTelegramBot:
                 return
             elif state == 'waiting_hyperlink_settings': # Handle editing hyperlink settings
                 task_id = data.get('task_id')
-                await self.handle_hyperlink_settings(event, task_id, event.text)
+                await self.handle_hyperlink_settings(event, task_id, (event.text or ''))
                 return
 
         # Handle conversation_states for duplicate filter settings
