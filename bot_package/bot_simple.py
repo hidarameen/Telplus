@@ -14,6 +14,7 @@ from database import get_database
 from userbot_service.userbot import userbot_instance
 from bot_package.config import BOT_TOKEN, API_ID, API_HASH
 import json
+import re
 import time
 import os
 from datetime import datetime
@@ -3953,7 +3954,6 @@ class SimpleTelegramBot:
                     if not source_message_id:
                         source_message_id = event.message.id
                     # Ask for interval seconds
-                    import json
                     payload = {
                         'task_id': task_id,
                         'source_chat_id': source_chat_id,
@@ -4780,7 +4780,6 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         # Set conversation state with proper error handling
-        import json
         try:
             data = {'task_id': int(task_id), 'action': 'add_source'}
             data_str = json.dumps(data)
@@ -4813,7 +4812,6 @@ class SimpleTelegramBot:
         user_id = event.sender_id
 
         # Set conversation state with proper error handling
-        import json
         try:
             data = {'task_id': int(task_id), 'action': 'add_target'}
             data_str = json.dumps(data)
@@ -6160,7 +6158,6 @@ class SimpleTelegramBot:
         state, data_str = state_data
 
         try:
-            import json
             if isinstance(data_str, dict):
                 data = data_str
             else:
@@ -7424,6 +7421,17 @@ class SimpleTelegramBot:
     async def handle_phone_input(self, event, phone: str):
         """Handle phone number input"""
         user_id = event.sender_id
+
+        # Normalize phone: keep '+' and digits only, remove spaces and separators
+        normalized_phone = re.sub(r"(?!^)[^0-9]", "", phone.strip())
+        if phone.strip().startswith('+'):
+            normalized_phone = '+' + normalized_phone
+        else:
+            # If input lacks '+', attempt to infer country code is included; else require '+'
+            # Keep original behavior but allow spaces like "+20 15 0149 8999"
+            pass
+
+        phone = normalized_phone
 
         # Validate phone number format
         if not phone.startswith('+') or len(phone) < 10:
@@ -9661,7 +9669,6 @@ class SimpleTelegramBot:
         user_id = event.sender_id
         
         # Set conversation state with proper error handling
-        import json
         try:
             data = {'task_id': int(task_id), 'filter_type': filter_type, 'action': 'add_words'}
             data_str = json.dumps(data)
@@ -9698,7 +9705,6 @@ class SimpleTelegramBot:
         state, data_str = state_data
 
         try:
-            import json
             if isinstance(data_str, dict):
                 data = data_str
             else:
@@ -9835,7 +9841,6 @@ class SimpleTelegramBot:
         """Monitor for notifications from UserBot to add inline buttons"""
         import os
         import time
-        import json
         import glob
         
         logger.info("🔔 بدء مراقبة إشعارات الأزرار الإنلاين...")
@@ -10105,7 +10110,6 @@ class SimpleTelegramBot:
             return
 
         # Set conversation state (store JSON to be safe across DBs)
-        import json
         try:
             state_payload = json.dumps({'task_id': int(task_id)})
         except Exception:
@@ -10570,7 +10574,6 @@ class SimpleTelegramBot:
             return
         
         # Store as JSON for cross-DB compatibility
-        import json
         try:
             state_payload = json.dumps({'task_id': int(task_id)})
         except Exception:
@@ -11331,7 +11334,6 @@ class SimpleTelegramBot:
         """Process approved message by sending it through userbot"""
         try:
             from userbot_service.userbot import userbot_instance
-            import json
             
             user_id = pending_message['user_id']
             message_data = json.loads(pending_message['message_data'])
@@ -11466,7 +11468,6 @@ class SimpleTelegramBot:
                 await event.answer("❌ الرسالة غير موجودة أو غير مصرح لك بالوصول إليها")
                 return
             
-            import json
             message_data = json.loads(pending_message['message_data'])
             task = self.db.get_task(pending_message['task_id'], user_id)
             
