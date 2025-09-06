@@ -7358,13 +7358,25 @@ class SimpleTelegramBot:
         state, data = state_data
         message_text = event.text.strip()
 
+        # Ensure legacy data is parsed into a dictionary
+        try:
+            if isinstance(data, dict):
+                parsed_data = data
+            elif isinstance(data, str) and data:
+                parsed_data = json.loads(data)
+            else:
+                parsed_data = {}
+        except Exception as e:
+            logger.error(f"خطأ في تحليل بيانات حالة المصادقة للمستخدم {user_id}: {e}")
+            parsed_data = {}
+
         try:
             if state == 'waiting_phone':
                 await self.handle_phone_input(event, message_text)
             elif state == 'waiting_code':
-                await self.handle_code_input(event, message_text, data)
+                await self.handle_code_input(event, message_text, parsed_data)
             elif state == 'waiting_password':
-                await self.handle_password_input(event, message_text, data)
+                await self.handle_password_input(event, message_text, parsed_data)
             elif state == 'waiting_session':
                 await self.handle_session_input(event, message_text)
         except Exception as e:
@@ -7609,7 +7621,11 @@ class SimpleTelegramBot:
                     )
                     await self.force_new_message(event, message_text, buttons=buttons)
                     
-                    # Don't disconnect the client yet, we need it for password verification
+                    # We saved the session string; disconnect temp client to avoid leaks
+                    try:
+                        await temp_client.disconnect()
+                    except Exception:
+                        pass
                     return
                 else:
                     # Other error, disconnect and report
