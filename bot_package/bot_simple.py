@@ -67,12 +67,52 @@ class SimpleTelegramBot:
     
     def extract_task_id_from_data(self, data):
         """Extract task_id from conversation state data (handles both dict and string)"""
+        # Handle dictionary payloads
         if isinstance(data, dict):
-            # PostgreSQL wraps string data in {"data": "value"}
-            return int(data.get('data', 0))
-        else:
-            # SQLite returns raw string
-            return int(data) if data else 0
+            # Preferred explicit key
+            if 'task_id' in data and data.get('task_id') is not None:
+                try:
+                    return int(data.get('task_id'))
+                except Exception:
+                    return 0
+            # Some implementations may wrap the raw value under 'data'
+            if 'data' in data and data.get('data') is not None:
+                inner = data.get('data')
+                try:
+                    # inner might be a dict again
+                    if isinstance(inner, dict):
+                        if 'task_id' in inner and inner.get('task_id') is not None:
+                            return int(inner.get('task_id'))
+                        # Fallback: try common keys
+                        for key in ('id', 'task', 'value'):
+                            if key in inner and inner.get(key) is not None:
+                                return int(inner.get(key))
+                        return 0
+                    # Or a direct numeric/string value
+                    return int(inner)
+                except Exception:
+                    return 0
+            # Fallback: try common keys directly
+            for key in ('id', 'task', 'value'):
+                if key in data and data.get(key) is not None:
+                    try:
+                        return int(data.get(key))
+                    except Exception:
+                        return 0
+            return 0
+
+        # Handle primitive numeric
+        if isinstance(data, (int, float)):
+            try:
+                return int(data)
+            except Exception:
+                return 0
+
+        # Handle string representations (including numeric JSON dumped as string)
+        try:
+            return int(str(data).strip()) if data is not None and str(data).strip() != '' else 0
+        except Exception:
+            return 0
 
     def track_user_message(self, user_id, message_id, chat_id):
         """Track a message sent to user for potential editing"""
@@ -10064,8 +10104,13 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
 
-        # Set conversation state
-        self.db.set_conversation_state(user_id, 'waiting_text_replacements', str(task_id))
+        # Set conversation state (store JSON to be safe across DBs)
+        import json
+        try:
+            state_payload = json.dumps({'task_id': int(task_id)})
+        except Exception:
+            state_payload = json.dumps({'task_id': task_id})
+        self.db.set_conversation_state(user_id, 'waiting_text_replacements', state_payload)
 
         buttons = [
             [Button.inline("❌ إلغاء", f"text_replacements_{task_id}")]
@@ -10092,6 +10137,19 @@ class SimpleTelegramBot:
     async def handle_add_replacements(self, event, task_id, message_text):
         """Handle adding text replacements"""
         user_id = event.sender_id
+        
+        # Validate task_id and permissions
+        try:
+            task_id = int(task_id)
+        except Exception:
+            task_id = 0
+        if not task_id or task_id == 0:
+            await self.edit_or_send_message(event, "❌ خطأ: معرف المهمة غير صالح")
+            return
+        task = self.db.get_task(task_id, user_id)
+        if not task:
+            await self.edit_or_send_message(event, "❌ المهمة غير موجودة أو لا تملك صلاحية الوصول إليها")
+            return
         
         # Parse replacements from message
         replacements_to_add = []
@@ -10511,7 +10569,13 @@ class SimpleTelegramBot:
             await event.answer("❌ المهمة غير موجودة")
             return
         
-        self.db.set_conversation_state(user_id, 'waiting_button_data', str(task_id))
+        # Store as JSON for cross-DB compatibility
+        import json
+        try:
+            state_payload = json.dumps({'task_id': int(task_id)})
+        except Exception:
+            state_payload = json.dumps({'task_id': task_id})
+        self.db.set_conversation_state(user_id, 'waiting_button_data', state_payload)
 
         buttons = [
             [Button.inline("❌ إلغاء", f"inline_buttons_{task_id}")]
@@ -10541,7 +10605,11 @@ class SimpleTelegramBot:
         # Clear conversation state
         self.db.clear_conversation_state(user_id)
         
-        # Validate task_id
+        # Validate task_id and permissions
+        try:
+            task_id = int(task_id)
+        except Exception:
+            task_id = 0
         if not task_id or task_id == 0:
             await self.edit_or_send_message(event, "❌ خطأ: معرف المهمة غير صالح")
             return
