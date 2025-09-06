@@ -7363,27 +7363,13 @@ class SimpleTelegramBot:
         state, data = state_data
         message_text = event.text.strip()
 
-        # Ensure legacy data is parsed into a dictionary
-        try:
-            if isinstance(data, dict):
-                parsed_data = data
-            elif isinstance(data, str) and data:
-                parsed_data = json.loads(data)
-            else:
-                parsed_data = {}
-                logger.warning(f"بيانات فارغة لحالة المصادقة للمستخدم {user_id} في الحالة {state}")
-        except Exception as e:
-            logger.error(f"خطأ في تحليل بيانات حالة المصادقة للمستخدم {user_id}: {e}")
-            logger.error(f"البيانات الأصلية: {data}")
-            parsed_data = {}
-
         try:
             if state == 'waiting_phone':
                 await self.handle_phone_input(event, message_text)
             elif state == 'waiting_code':
-                await self.handle_code_input(event, message_text, parsed_data)
+                await self.handle_code_input(event, message_text, data)
             elif state == 'waiting_password':
-                await self.handle_password_input(event, message_text, parsed_data)
+                await self.handle_password_input(event, message_text, data)
             elif state == 'waiting_session':
                 await self.handle_session_input(event, message_text)
         except Exception as e:
@@ -7417,16 +7403,9 @@ class SimpleTelegramBot:
         # Create temporary Telegram client for authentication
         temp_client = None
         try:
-            # Create unique session for this authentication attempt in persistent sessions directory
-            data_dir = os.getenv('DATA_DIR', '/app/data')
-            sessions_dir = os.getenv('SESSIONS_DIR', os.path.join(data_dir, 'sessions'))
-            try:
-                os.makedirs(sessions_dir, exist_ok=True)
-            except Exception:
-                pass
+            # Create unique session for this authentication attempt
             session_name = f'auth_{user_id}_{int(datetime.now().timestamp())}'
-            session_path = os.path.join(sessions_dir, session_name)
-            temp_client = TelegramClient(session_path, int(API_ID), API_HASH)
+            temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
 
             # Connect with timeout
             await asyncio.wait_for(temp_client.connect(), timeout=10)
@@ -7457,19 +7436,9 @@ class SimpleTelegramBot:
             auth_data = {
                 'phone': phone,
                 'phone_code_hash': sent_code.phone_code_hash,
-                'session_name': session_path
+                'session_name': session_name  # حفظ اسم الجلسة فقط وليس المسار الكامل
             }
-            auth_data_json = json.dumps(auth_data)
-            logger.info(f"حفظ بيانات المصادقة للمستخدم {user_id}: {list(auth_data.keys())}")
-            self.db.set_conversation_state(user_id, 'waiting_code', auth_data_json)
-            
-            # Verify data was saved correctly
-            verify_state = self.db.get_conversation_state(user_id)
-            if verify_state:
-                v_state, v_data = verify_state
-                logger.info(f"تحقق من حفظ البيانات: state={v_state}, has_data={bool(v_data)}")
-            else:
-                logger.error(f"فشل في حفظ حالة المصادقة للمستخدم {user_id}")
+            self.db.set_conversation_state(user_id, 'waiting_code', json.dumps(auth_data))
 
             buttons = [
                 [Button.inline("❌ إلغاء", b"cancel_auth")]
@@ -7578,42 +7547,16 @@ class SimpleTelegramBot:
             # data is already a dict from handle_auth_message
             auth_data = data
             
-            # Validate that required keys exist
-            if not isinstance(auth_data, dict):
-                logger.error(f"auth_data is not a dict: {type(auth_data)}, value: {auth_data}")
-                message_text = (
-                    "❌ حدث خطأ في بيانات المصادقة\n\n"
-                    "يرجى البدء من جديد بالضغط على /start"
-                )
-                await self.edit_or_send_message(event, message_text)
-                self.db.clear_conversation_state(user_id)
-                return
-            
-            if 'phone' not in auth_data or 'phone_code_hash' not in auth_data:
-                logger.error(f"Missing required keys in auth_data: {auth_data}")
-                logger.error(f"Keys present: {list(auth_data.keys())}")
-                message_text = (
-                    "❌ بيانات المصادقة غير مكتملة\n\n"
-                    "يرجى البدء من جديد بالضغط على /start"
-                )
-                await self.edit_or_send_message(event, message_text)
-                self.db.clear_conversation_state(user_id)
-                return
+            # إضافة سجل للتحقق من البيانات
+            logger.debug(f"Auth data type for user {user_id}: {type(auth_data)}")
+            if isinstance(auth_data, dict):
+                logger.debug(f"Auth data keys for user {user_id}: {list(auth_data.keys())}")
             
             phone = auth_data['phone']
             phone_code_hash = auth_data['phone_code_hash']
 
             # Create client and sign in
-            data_dir = os.getenv('DATA_DIR', '/app/data')
-            sessions_dir = os.getenv('SESSIONS_DIR', os.path.join(data_dir, 'sessions'))
-            try:
-                os.makedirs(sessions_dir, exist_ok=True)
-            except Exception:
-                pass
             session_name = auth_data.get('session_name', f'auth_{user_id}_{int(datetime.now().timestamp())}')
-            # If old auth_data stored a bare name, place it under sessions_dir
-            if not os.path.isabs(session_name):
-                session_name = os.path.join(sessions_dir, session_name)
             temp_client = TelegramClient(session_name, int(API_ID), API_HASH)
             await temp_client.connect()
 
@@ -7873,29 +7816,6 @@ class SimpleTelegramBot:
         try:
             # data is already a dict from handle_auth_message
             auth_data = data
-            
-            # Validate that required keys exist
-            if not isinstance(auth_data, dict):
-                logger.error(f"auth_data is not a dict: {type(auth_data)}, value: {auth_data}")
-                message_text = (
-                    "❌ حدث خطأ في بيانات المصادقة\n\n"
-                    "يرجى البدء من جديد بالضغط على /start"
-                )
-                await self.edit_or_send_message(event, message_text)
-                self.db.clear_conversation_state(user_id)
-                return
-            
-            if 'phone' not in auth_data or 'session_client' not in auth_data:
-                logger.error(f"Missing required keys in auth_data: {auth_data}")
-                logger.error(f"Keys present: {list(auth_data.keys())}")
-                message_text = (
-                    "❌ بيانات المصادقة غير مكتملة\n\n"
-                    "يرجى البدء من جديد بالضغط على /start"
-                )
-                await self.edit_or_send_message(event, message_text)
-                self.db.clear_conversation_state(user_id)
-                return
-            
             phone = auth_data['phone']
             session_string = auth_data['session_client'] # This is the session string from previous step
 
